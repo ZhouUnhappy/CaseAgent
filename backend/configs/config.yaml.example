@@ -1,0 +1,28 @@
+# config.yaml.example
+server:
+  port: 8080
+  mode: debug
+
+database:
+  host: localhost
+  port: 5432
+  user: your_username
+  password: your_password
+  dbname: your_database_name
+  sslmode: disable
+
+model:
+  chat:
+    provider: openai  # openai, ark, deepseek, gemini, qianfan, qwen, openrouter, tencentcloud
+    model: gpt-4
+    api_key: your_api_key
+    base_url: https://api.openai.com/v1
+  embedding:
+    provider: openai  # ark, dashscope, gemini, openai, qianfan, tencentcloud
+    model: text-embedding-3-small
+    api_key: your_api_key
+    base_url: https://api.openai.com/v1
+
+gws:
+  enabled: true
+  command: gws
