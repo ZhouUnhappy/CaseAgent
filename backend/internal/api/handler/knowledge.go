@@ -127,6 +127,21 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 		return
 	}
 
+	if req.Content != "" {
+		go func(kbID int, content string) {
+			ctx := context.Background()
+			kbService, err := knowledge.New(ctx, h.DB)
+			if err != nil {
+				fmt.Printf("Failed to initialize knowledge service: %v\n", err)
+				return
+			}
+			err = kbService.ProcessKnowledge(ctx, kbID, content)
+			if err != nil {
+				fmt.Printf("Failed to re-process knowledge: %v\n", err)
+			}
+		}(kb.ID, kb.Content)
+	}
+
 	c.JSON(http.StatusOK, kb)
 }
 

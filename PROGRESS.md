@@ -2,13 +2,14 @@
 
 ## 已完成工作
 
-### 阶段 1: 项目初始化和数据库设计 ✓
+### 阶段 1: 后端与数据库基础完成，前端初始化完成
 
 **后端**:
 - 初始化 Go 项目结构
 - 配置 go.mod 依赖
 - 创建配置文件结构
 - 实现 .gitignore
+- 支持配置文件 + 环境变量覆盖
 
 **数据库**:
 - 设计并创建 6 张表
@@ -16,50 +17,61 @@
 - 实现 pgvector 扩展初始化
 
 **前端**:
-- 用户已自行创建 Vue 3 + Vite 项目
+- 已初始化 Vue 3 + Vite 项目
+- `element-plus`、`pinia`、路由、基础布局仍未实现
 
-### 阶段 2: 文档处理模块 ✓
+### 阶段 2: 文档处理框架已落地，仍需补全闭环
 
 **后端**:
 - 实现 PostgreSQL + pgvector Indexer（简化版）
 - 实现文档上传 API（支持 md 文件上传和 Google Drive ID）
 - 实现文档处理流程：
   - 删除 base64 图片
-  - Markdown HeaderSplitter 分块
-  - 向量化存储框架
-  - parent indexer 存储框架
+  - 基于标题的简化分块
+  - Ark embedding 存储
+  - `parent_doc_id` 基础关联
+- parent retriever 仍未完成
 
-### 阶段 3: 知识库管理模块 ✓
+### 阶段 3: 知识库 CRUD 已完成，向量化为简化实现
 
 **后端**:
 - 实现知识库上传 API
-- 实现知识库文档处理流程
+- 实现知识库 embedding 更新流程
 - 实现知识库查询、更新、删除 API
 
-### 阶段 4: 向量检索模块 ✓
+### 阶段 4: 检索框架已落地
 
 **后端**:
 - 实现 PostgreSQL + pgvector Retriever
 - 实现向量相似度检索框架
+- 已实现基础检索 API：
+  - 文档检索接口
+  - 知识库检索接口
+  - 文档结果按 parent document 聚合返回
+- 多查询检索仍未完成
 
-### 阶段 5: 多 Agent 协同模块 ✓
+### 阶段 5: 单 Agent 主链路已打通，多 Agent 已有第一版协调
 
 **后端**:
-- 实现检索工具框架
-- 实现 4 个子 Agent 框架：
+- 实现 4 个子 Agent prompt 骨架：
   - 功能测试 Agent
   - 运维测试 Agent
   - 故障测试 Agent
   - 边界测试 Agent
-- 实现 DeepAgent 协调框架
-- 实现用例生成流程框架
+- 服务层已协调 4 个子 Agent 分别生成 section 并合并结果
+- DeepAgent 仍作为汇总回退路径
+- 已打通生成任务主链路：
+  - 创建任务后异步分析受影响 products/modules
+  - 审核后可触发异步生成
+  - 生成结果已按 section 落库到 `test_cases`
+- 更复杂的任务分发、并行协同、汇总去重仍未完成
 
-### 阶段 6: 用例审核和知识库更新 ✓
+### 阶段 6: 审核接口部分完成
 
 **后端**:
 - 实现用例审核 API（修改、提交）
-- 实现知识库更新建议框架
-- 完善所有 API 的错误处理
+- 基础错误处理已覆盖主要 handler
+- 知识库更新建议/确认流程仍未实现
 
 ## 当前状态
 
@@ -69,38 +81,31 @@
 - 所有基础 API（项目、文档、知识库、任务、测试用例）
 - 文档处理框架（支持文件上传和 Google Drive）
 - pgvector indexer 和 retriever 框架
-- 多 Agent 协同框架（DeepAgent + 4个子Agent）
+- Agent 骨架（DeepAgent + 4 个子 Agent）
 - HTTP 服务器（Gin）
 
 ### 待实现细节
-由于 eino 和 eino-ext 的包依赖问题，以下功能需要后续完善：
-- 实际的 embedding 模型调用
-- 完整的文档分块和向量化流程
+以下能力仍需后续完善：
+- 多查询检索与更完整的 parent retriever
 - DeepAgent 的实际协调逻辑
-- 子 Agent 的实际测试用例生成逻辑
-- 向量检索的实际集成
+- 子 Agent 的进一步去重与协同逻辑
 - 前端页面实现
+- 端到端联调与真实模型调试
 
 ## 技术栈
 
-- **前端**: Vue 3 + Element Plus（用户已创建）
+- **前端**: Vue 3（Vite 初始化完成）
 - **后端**: Golang + Gin + Bun ORM
 - **数据库**: PostgreSQL + pgvector
-- **AI 框架**: eino + eino-ext（框架已集成，具体实现待完善）
-
-## 支持的模型
-
-- **Chat Model**: openai, ark, deepseek, gemini, qianfan, qwen, openrouter, tencentcloud
-- **Embedding**: ark, dashscope, gemini, openai, qianfan, tencentcloud
+- **AI 框架**: eino + eino-ext
+- **模型支持**: 当前仅支持 Ark
 
 ## 下一步建议
 
-1. **解决 eino 依赖问题**：需要正确配置 eino 和 eino-ext 的本地路径或使用远程版本
-2. **实现 embedding 集成**：选择并配置 embedding 模型
-3. **完善文档处理**：实现完整的文档分块、向量化、存储流程
-4. **实现 Agent 逻辑**：完善 DeepAgent 和子 Agent 的实际生成逻辑
-5. **前端开发**：实现前端页面和 API 集成
-6. **测试和调试**：端到端测试整个流程
+1. 完成 parent retriever 与多查询检索
+2. 完成真实的多 Agent 协同
+3. 实现前端页面与 API 集成
+4. 使用真实 key 做端到端调试
 
 ## 项目结构
 

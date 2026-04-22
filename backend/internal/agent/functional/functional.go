@@ -28,7 +28,7 @@ func New(ctx context.Context, cfg *Config) (*Agent, error) {
 
 // GenerateFunctionalCases generates functional test cases
 func (a *Agent) GenerateFunctionalCases(ctx context.Context, requirements string, knowledge string) (string, error) {
-	prompt := fmt.Sprintf(`你是一个功能测试专家。根据以下需求和相关知识，生成功能测试用例。
+	prompt := fmt.Sprintf(`你是一个功能测试专家。根据以下需求和相关知识，只生成功能测试用例。
 
 需求:
 %s
@@ -36,13 +36,22 @@ func (a *Agent) GenerateFunctionalCases(ctx context.Context, requirements string
 相关知识:
 %s
 
-请生成 JSON 格式的测试用例，包含以下字段:
-- title: 测试用例标题
-- description: 测试用例描述
-- steps: 测试步骤数组
-- expected_result: 预期结果
-
-只返回 JSON，不要其他内容。`, requirements, knowledge)
+请只返回如下结构的 JSON 数组，不要解释文字，不要 Markdown 代码块：
+[
+  {
+    "section": "功能测试",
+    "cases": [
+      {
+        "title": "[模块] 用例标题",
+        "priority_id": 3,
+        "custom_preconds": "前置条件",
+        "custom_steps_separated": [
+          {"content": "步骤1", "expected": "预期1"}
+        ]
+      }
+    ]
+  }
+]`, requirements, knowledge)
 
 	messages := []*schema.Message{
 		schema.UserMessage(prompt),

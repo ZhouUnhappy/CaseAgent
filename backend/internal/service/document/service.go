@@ -11,7 +11,7 @@ import (
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
 
-	"github.com/cloudwego/eino-ext/components/embedding/openai"
+	arkembedding "github.com/cloudwego/eino-ext/components/embedding/ark"
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
 )
@@ -23,22 +23,18 @@ type Service struct {
 
 func New(ctx context.Context, db *bun.DB) (*Service, error) {
 	cfg := config.Get()
-
-	// Initialize embedding model based on provider
-	var embedder embedding.Embedder
-	var err error
-
-	switch cfg.Model.Embedding.Provider {
-	case "openai":
-		embedder, err = openai.NewEmbedder(ctx, &openai.EmbeddingConfig{
-			APIKey:  cfg.Model.Embedding.APIKey,
-			BaseURL: cfg.Model.Embedding.BaseURL,
-			Model:   cfg.Model.Embedding.Model,
-		})
-	default:
-		return nil, fmt.Errorf("unsupported embedding provider: %s", cfg.Model.Embedding.Provider)
+	if cfg.Model.Embedding.Provider != "ark" {
+		return nil, fmt.Errorf("only ark embedding provider is supported, got: %s", cfg.Model.Embedding.Provider)
 	}
 
+	embedder, err := arkembedding.NewEmbedder(ctx, &arkembedding.EmbeddingConfig{
+		APIKey:    cfg.Model.Embedding.APIKey,
+		AccessKey: cfg.Model.Embedding.AccessKey,
+		SecretKey: cfg.Model.Embedding.SecretKey,
+		BaseURL:   cfg.Model.Embedding.BaseURL,
+		Region:    cfg.Model.Embedding.Region,
+		Model:     cfg.Model.Embedding.Model,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding model: %w", err)
 	}
@@ -50,11 +46,18 @@ func New(ctx context.Context, db *bun.DB) (*Service, error) {
 }
 
 // ProcessDocument processes a document: removes base64 images, splits, and stores chunks
-func (s *Service) ProcessDocument(ctx context.Context, docID int, content string, gwsFileID string) error {
-	// Step 1: Remove base64 images
-	cleanedContent := removeBase64Images(content)
+func (s *Service) ProcessDocument(ctx context.Context, docID int, content string, gwsFileID string) (err error) {
+	status := "completed"
+	defer func() {
+		if err != nil {
+			status = "failed"
+		}
+		if updateErr := s.updateDocumentStatus(ctx, docID, status); updateErr != nil {
+			err = errorsJoin(err, fmt.Errorf("failed to update document status: %w", updateErr))
+		}
+	}()
 
-	// Step 2: If Google Drive ID is provided, fetch the content
+	cleanedContent := content
 	if gwsFileID != "" {
 		markdownContent, err := s.fetchFromGoogleDrive(ctx, gwsFileID)
 		if err != nil {
@@ -63,12 +66,13 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		cleanedContent = markdownContent
 	}
 
-	// Step 3: Split document by headers
+	cleanedContent = removeBase64Images(cleanedContent)
 	chunks := s.splitByHeaders(cleanedContent)
+	if len(chunks) == 0 {
+		return fmt.Errorf("no valid document chunks generated")
+	}
 
-	// Step 4: Generate embeddings for each chunk and store
 	for _, chunk := range chunks {
-		// Generate embedding
 		embResult, err := s.embedding.EmbedStrings(ctx, []string{chunk})
 		if err != nil {
 			return fmt.Errorf("failed to generate embedding: %w", err)
@@ -85,26 +89,17 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		}
 
 		docChunk := &models.DocumentChunk{
-			DocumentID: docID,
-			Content:    chunk,
-			Embedding:  embedding32,
-			CreatedAt:  time.Now(),
+			DocumentID:  docID,
+			ParentDocID: docID,
+			Content:     chunk,
+			Embedding:   embedding32,
+			CreatedAt:   time.Now(),
 		}
 
 		_, err = s.db.NewInsert().Model(docChunk).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to store document chunk: %w", err)
 		}
-	}
-
-	// Update document status
-	_, err := s.db.NewUpdate().Model(&models.Document{}).
-		Set("status = ?", "completed").
-		Set("updated_at = ?", time.Now()).
-		Where("id = ?", docID).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to update document status: %w", err)
 	}
 
 	return nil
@@ -144,13 +139,31 @@ func (s *Service) splitByHeaders(content string) []string {
 		chunks = append(chunks, strings.Join(currentChunk, "\n"))
 	}
 
-	return chunks
+	filtered := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		filtered = append(filtered, chunk)
+	}
+
+	return filtered
 }
 
 // fetchFromGoogleDrive fetches markdown content from Google Drive using gws command
 func (s *Service) fetchFromGoogleDrive(ctx context.Context, fileID string) (string, error) {
-	// Execute gws command to export file
-	cmd := exec.CommandContext(ctx, "gws", "drive", "files", "export", "--params", fmt.Sprintf(`{"fileId": "%s", "mimeType": "text/markdown"}`, fileID))
+	cfg := config.Get()
+	if !cfg.GWS.Enabled {
+		return "", fmt.Errorf("gws integration is disabled")
+	}
+
+	command := cfg.GWS.Command
+	if command == "" {
+		command = "gws"
+	}
+
+	cmd := exec.CommandContext(ctx, command, "drive", "files", "export", "--params", fmt.Sprintf(`{"fileId": "%s", "mimeType": "text/markdown"}`, fileID))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -158,4 +171,23 @@ func (s *Service) fetchFromGoogleDrive(ctx context.Context, fileID string) (stri
 	}
 
 	return string(output), nil
+}
+
+func (s *Service) updateDocumentStatus(ctx context.Context, docID int, status string) error {
+	_, err := s.db.NewUpdate().Model(&models.Document{}).
+		Set("status = ?", status).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", docID).
+		Exec(ctx)
+	return err
+}
+
+func errorsJoin(base error, next error) error {
+	if base == nil {
+		return next
+	}
+	if next == nil {
+		return base
+	}
+	return fmt.Errorf("%v; %w", base, next)
 }

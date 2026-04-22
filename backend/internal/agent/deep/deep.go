@@ -30,11 +30,11 @@ func New(ctx context.Context, cfg *Config) (*Agent, error) {
 	}, nil
 }
 
-// GenerateCases generates test cases by coordinating sub-agents
+// GenerateCases generates sectioned test cases by coordinating sub-agents.
 func (a *Agent) GenerateCases(ctx context.Context, requirements string, knowledge string) (string, error) {
-	// For now, use the chat model directly to generate comprehensive test cases
-	// TODO: Implement full coordination with sub-agents
-	prompt := fmt.Sprintf(`你是一个测试用例生成专家。根据以下需求和相关知识，生成全面的测试用例。
+	// For now, use the chat model directly to generate comprehensive test cases.
+	// TODO: Implement full coordination with sub-agents.
+	prompt := fmt.Sprintf(`你是一个测试用例生成专家。根据以下需求和相关知识，输出结构化测试用例。
 
 需求:
 %s
@@ -42,20 +42,32 @@ func (a *Agent) GenerateCases(ctx context.Context, requirements string, knowledg
 相关知识:
 %s
 
-请生成 JSON 格式的测试用例数组，包含以下类型的测试:
+请生成 JSON 数组，每个元素表示一个 section，结构必须严格如下：
+[
+  {
+    "section": "功能测试",
+    "cases": [
+      {
+        "title": "[模块] 用例标题",
+        "priority_id": 3,
+        "custom_preconds": "前置条件",
+        "custom_steps_separated": [
+          {"content": "步骤1", "expected": "预期1"},
+          {"content": "步骤2", "expected": "预期2"}
+        ]
+      }
+    ]
+  }
+]
+
+要求：
 1. 功能测试
 2. 运维测试
 3. 故障测试
 4. 边界测试
-
-每个测试用例包含:
-- type: 测试类型
-- title: 测试用例标题
-- description: 测试用例描述
-- steps: 测试步骤数组
-- expected_result: 预期结果
-
-只返回 JSON 数组，不要其他内容。`, requirements, knowledge)
+5. priority_id 取值 1-4，默认高优先级可用 3
+6. custom_steps_separated 中每一步都必须包含 content 和 expected
+7. 只返回合法 JSON，不要 Markdown 代码块，不要解释文字`, requirements, knowledge)
 
 	messages := []*schema.Message{
 		schema.UserMessage(prompt),

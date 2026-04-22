@@ -75,7 +75,7 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 		return
 	}
 
-	tc.Status = "submitted"
+	tc.Status = models.TestCaseStatusSubmitted
 	tc.UpdatedAt = time.Now()
 
 	_, err = h.DB.NewUpdate().Model(tc).Where("id = ?", id).Exec(c)

@@ -83,6 +83,11 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		docService, err := documentservice.New(ctx, h.DB)
 		if err != nil {
 			fmt.Printf("Failed to initialize document service: %v\n", err)
+			_, _ = h.DB.NewUpdate().Model(&models.Document{}).
+				Set("status = ?", "failed").
+				Set("updated_at = ?", time.Now()).
+				Where("id = ?", docID).
+				Exec(ctx)
 			return
 		}
 		err = docService.ProcessDocument(ctx, docID, content, gwsFileID)

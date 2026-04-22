@@ -13,15 +13,21 @@ database:
 
 model:
   chat:
-    provider: openai  # openai, ark, deepseek, gemini, qianfan, qwen, openrouter, tencentcloud
-    model: gpt-4
-    api_key: your_api_key
-    base_url: https://api.openai.com/v1
+    provider: ark
+    model: ep-your-chat-endpoint
+    api_key: your_ark_api_key
+    access_key: ""
+    secret_key: ""
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    region: cn-beijing
   embedding:
-    provider: openai  # ark, dashscope, gemini, openai, qianfan, tencentcloud
-    model: text-embedding-3-small
-    api_key: your_api_key
-    base_url: https://api.openai.com/v1
+    provider: ark
+    model: ep-your-embedding-endpoint
+    api_key: your_ark_api_key
+    access_key: ""
+    secret_key: ""
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    region: cn-beijing
 
 gws:
   enabled: true

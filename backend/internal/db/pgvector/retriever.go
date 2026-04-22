@@ -6,7 +6,7 @@ import (
 
 	"caseagent/internal/db/models"
 
-	"github.com/cloudwego/eino-ext/components/embedding/openai"
+	arkembedding "github.com/cloudwego/eino-ext/components/embedding/ark"
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
 )
@@ -17,10 +17,13 @@ type Retriever struct {
 }
 
 type RetrieverConfig struct {
-	DB      *bun.DB
-	APIKey  string
-	BaseURL string
-	Model   string
+	DB        *bun.DB
+	APIKey    string
+	AccessKey string
+	SecretKey string
+	BaseURL   string
+	Region    string
+	Model     string
 }
 
 func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error) {
@@ -28,11 +31,13 @@ func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error)
 		return nil, fmt.Errorf("database connection is required")
 	}
 
-	// Initialize embedding model
-	embedder, err := openai.NewEmbedder(ctx, &openai.EmbeddingConfig{
-		APIKey:  cfg.APIKey,
-		BaseURL: cfg.BaseURL,
-		Model:   cfg.Model,
+	embedder, err := arkembedding.NewEmbedder(ctx, &arkembedding.EmbeddingConfig{
+		APIKey:    cfg.APIKey,
+		AccessKey: cfg.AccessKey,
+		SecretKey: cfg.SecretKey,
+		BaseURL:   cfg.BaseURL,
+		Region:    cfg.Region,
+		Model:     cfg.Model,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding model: %w", err)
@@ -90,8 +95,8 @@ func (r *Retriever) RetrieveFromKnowledge(ctx context.Context, queryEmbedding []
 
 	err := r.db.NewSelect().
 		Model(&knowledge).
-		Where("embeddings IS NOT NULL").
-		OrderExpr("embeddings <=> ?", queryEmbedding).
+		Where("embedding IS NOT NULL").
+		OrderExpr("embedding <=> ?", queryEmbedding).
 		Limit(topK).
 		Scan(ctx)
 

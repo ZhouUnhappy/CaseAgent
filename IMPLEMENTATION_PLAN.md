@@ -4,9 +4,9 @@
 
 ## 技术栈确认
 
-### 支持的模型（基于 eino-ext）
-- **Chat Model**: openai, ark, deepseek, gemini, qianfan, qwen, openrouter, tencentcloud
-- **Embedding**: openai，ark, qwen, gemini, qianfan, tencentcloud
+### 当前支持的模型
+- **Chat Model**: ark
+- **Embedding**: ark
 - **Indexer**: eino-ext 未提供 pgvector indexer，需要自行实现基于 PostgreSQL + pgvector 的 indexer
 
 ### 配置方式
@@ -23,6 +23,21 @@
 ### Google Drive 集成
 - 后端直接调用本地 `gws drive files export` 命令
 - 无需 Docker 部署
+
+## 当前执行状态与顺序调整（2026-04-22）
+
+- 阶段 1：后端项目结构、数据库 schema、迁移脚本已完成；前端仅完成 Vue 3 + Vite 初始化，`element-plus`、`pinia`、路由和基础布局未开始。
+- 阶段 2：文档上传和异步处理框架已落地；文档清洗、分块、embedding 存储可继续完善，parent retriever 闭环尚未完成。
+- 阶段 3：知识库 CRUD 已完成；知识库向量化先按“整篇文档一个 embedding”落地，后续如需细粒度检索再扩展 chunk 级设计。
+- 阶段 4：pgvector 检索框架已落地；多查询检索、parent retriever、独立检索 API 仍待补齐。
+- 阶段 5：4 个子 Agent 与 DeepAgent 目前是骨架实现，真实的多 Agent 协同与任务分发未完成。
+- 阶段 6：测试用例审核 API 已有基础接口；知识库更新建议/确认流程仍待实现。
+
+## 后续执行顺序
+
+1. 先补后端闭环：统一 Ark 配置、修复字段/配置不一致、打通单 Agent 主链路。
+2. 再补检索增强：完成 parent retriever、多查询检索、知识库与需求拼装。
+3. 最后做多 Agent 协同和前端页面。
 
 ## 分阶段实施
 
@@ -210,15 +225,21 @@ database:
 
 model:
   chat:
-    provider: openai  # openai, ark, deepseek, gemini, qianfan, qwen, openrouter, tencentcloud
-    model: gpt-4
-    api_key: your_api_key
-    base_url: https://api.openai.com/v1
+    provider: ark
+    model: ep-your-chat-endpoint
+    api_key: your_ark_api_key
+    access_key: ""
+    secret_key: ""
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    region: cn-beijing
   embedding:
-    provider: openai  # ark, dashscope, gemini, openai, qianfan, tencentcloud
-    model: text-embedding-3-small
-    api_key: your_api_key
-    base_url: https://api.openai.com/v1
+    provider: ark
+    model: ep-your-embedding-endpoint
+    api_key: your_ark_api_key
+    access_key: ""
+    secret_key: ""
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    region: cn-beijing
 
 gws:
   enabled: true

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -33,17 +34,23 @@ type ModelConfig struct {
 }
 
 type ChatModelConfig struct {
-	Provider string `mapstructure:"provider"`
-	Model    string `mapstructure:"model"`
-	APIKey   string `mapstructure:"api_key"`
-	BaseURL  string `mapstructure:"base_url"`
+	Provider  string `mapstructure:"provider"`
+	Model     string `mapstructure:"model"`
+	APIKey    string `mapstructure:"api_key"`
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	BaseURL   string `mapstructure:"base_url"`
+	Region    string `mapstructure:"region"`
 }
 
 type EmbeddingModelConfig struct {
-	Provider string `mapstructure:"provider"`
-	Model    string `mapstructure:"model"`
-	APIKey   string `mapstructure:"api_key"`
-	BaseURL  string `mapstructure:"base_url"`
+	Provider  string `mapstructure:"provider"`
+	Model     string `mapstructure:"model"`
+	APIKey    string `mapstructure:"api_key"`
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	BaseURL   string `mapstructure:"base_url"`
+	Region    string `mapstructure:"region"`
 }
 
 type GWSConfig struct {
@@ -56,6 +63,8 @@ var cfg *Config
 func Load(configPath string) error {
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("yaml")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)

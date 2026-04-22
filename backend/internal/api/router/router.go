@@ -49,6 +49,13 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 			knowledge.DELETE("/:id", h.DeleteKnowledge)
 		}
 
+		// Retrieval
+		retrieval := v1.Group("/retrieval")
+		{
+			retrieval.POST("/documents", h.SearchDocuments)
+			retrieval.POST("/knowledge", h.SearchKnowledge)
+		}
+
 		// Test Cases
 		cases := v1.Group("/tasks/:id/cases")
 		{
