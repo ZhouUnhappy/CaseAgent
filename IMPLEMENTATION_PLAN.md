@@ -1,8 +1,14 @@
-# CaseAgent 测试用例生成系统实施计划
+# CaseAgent 测试用例生成系统实施计划与进度
 
 本计划将分 6 个阶段完整实现测试用例生成系统，包括前后端、数据库、多 Agent 协同等所有功能。
 
-## 技术栈确认
+## 技术栈
+
+- **前端**: Vue 3（Vite 初始化完成）
+- **后端**: Golang + Gin + Bun ORM
+- **数据库**: PostgreSQL + pgvector
+- **AI 框架**: eino + eino-ext
+- **模型支持**: chat 当前支持 Ark；embedding 当前支持 Ark / OpenAI-compatible
 
 ### 当前支持的模型
 - **Chat Model**: ark
@@ -24,25 +30,43 @@
 - 后端直接调用本地 `gws drive files export` 命令
 - 无需 Docker 部署
 
-## 当前执行状态与顺序调整（2026-04-23）
+## 当前状态（2026-04-23）
 
-- 阶段 1：后端项目结构、数据库 schema、迁移脚本已完成；前端仅完成 Vue 3 + Vite 初始化，`element-plus`、`pinia`、路由和基础布局未开始。
-- 阶段 2：文档上传和异步处理框架已落地；文档清洗、分块、embedding 存储可继续完善，parent retriever 闭环尚未完成。
-- 阶段 3：知识库 CRUD 已完成；知识库向量化先按“整篇文档一个 embedding”落地，后续如需细粒度检索再扩展 chunk 级设计。
-- 阶段 4：pgvector 检索框架与基础检索 API 已落地；多查询检索、parent retriever 深化能力仍待补齐。
-- 阶段 5：4 个子 Agent 与服务层第一版协调已落地；更复杂的多 Agent 协同与任务分发未完成。
-- 阶段 6：测试用例审核 API 已有基础接口；知识库更新建议/确认流程仍待实现。
+### 已实现功能
+- 完整的项目结构
+- 数据库 Schema 和迁移脚本
+- 所有基础 API（项目、文档、知识库、任务、测试用例）
+- 文档处理框架（支持文件上传和 Google Drive）
+- pgvector indexer 和 retriever 框架
+- Agent 骨架（DeepAgent + 4 个子 Agent）
+- HTTP 服务器（Gin）
 
-## 当前联调阻塞点（2026-04-23）
+### 各阶段完成情况
+- **阶段 1**：后端项目结构、数据库 schema、迁移脚本已完成；前端仅完成 Vue 3 + Vite 初始化，`element-plus`、`pinia`、路由和基础布局未开始。
+- **阶段 2**：文档上传和异步处理框架已落地；文档清洗、分块、embedding 存储可继续完善，parent retriever 闭环尚未完成。
+- **阶段 3**：知识库 CRUD 已完成；知识库向量化先按"整篇文档一个 embedding"落地，后续如需细粒度检索再扩展 chunk 级设计。
+- **阶段 4**：pgvector 检索框架与基础检索 API 已落地；多查询检索、parent retriever 深化能力仍待补齐。
+- **阶段 5**：4 个子 Agent 与服务层第一版协调已落地；更复杂的多 Agent 协同与任务分发未完成。
+- **阶段 6**：测试用例审核 API 已有基础接口；知识库更新建议/确认流程仍待实现。
 
+### 当前联调阻塞点
 - mixed provider 已恢复：`chat=ark`、`embedding=openai-compatible` 可以编译运行。
 - 真实接口联调已暴露两个待修问题：
   1. `KnowledgeBase` 模型的表名映射与 migration 不一致，当前会访问 `knowledge_bases`，而数据库实际表名是 `knowledge_base`。
   2. pgvector 列当前直接写 `[]float32` 失败，文档 chunk 向量落库时报 `bufio: buffer full`，需要补正确的 vector 类型或编码方式。
 
+### 待实现细节
+以下能力仍需后续完善：
+- 多查询检索与更完整的 parent retriever
+- DeepAgent 的实际协调逻辑
+- 子 Agent 的进一步去重与协同逻辑
+- 前端页面实现
+- 当前两处运行时阻塞修复
+- 完整端到端联调与真实模型调试
+
 ## 后续执行顺序
 
-1. 先修复当前联调阻塞点，打通“文档上传 + 知识库上传 + 检索”真实链路。
+1. 先修复当前联调阻塞点，打通"文档上传 + 知识库上传 + 检索"真实链路。
 2. 再补检索增强：完成 parent retriever、多查询检索、知识库与需求拼装。
 3. 最后继续做多 Agent 协同和前端页面。
 
@@ -336,6 +360,41 @@ CREATE TABLE case_generation_tasks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+## API 端点
+
+- `POST /api/v1/projects` - 创建项目
+- `GET /api/v1/projects` - 列出项目
+- `GET /api/v1/projects/:id` - 获取项目详情
+- `PUT /api/v1/projects/:id` - 更新项目
+- `DELETE /api/v1/projects/:id` - 删除项目
+- `POST /api/v1/projects/:id/documents` - 上传文档
+- `GET /api/v1/projects/:id/documents` - 列出文档
+- `GET /api/v1/documents/:id` - 获取文档详情
+- `DELETE /api/v1/documents/:id` - 删除文档
+- `POST /api/v1/knowledge` - 上传知识库
+- `GET /api/v1/knowledge` - 列出知识库
+- `GET /api/v1/knowledge/:id` - 获取知识库详情
+- `PUT /api/v1/knowledge/:id` - 更新知识库
+- `DELETE /api/v1/knowledge/:id` - 删除知识库
+- `POST /api/v1/projects/:id/tasks` - 创建生成任务
+- `GET /api/v1/projects/:id/tasks` - 列出任务
+- `GET /api/v1/tasks/:id` - 获取任务详情
+- `PUT /api/v1/tasks/:id/review` - 审核受影响产品/模块
+- `PUT /api/v1/tasks/:id/generate` - 生成测试用例
+- `GET /api/v1/tasks/:id/cases` - 获取测试用例
+- `PUT /api/v1/tasks/:id/cases/:case_id` - 更新测试用例
+- `PUT /api/v1/tasks/:id/cases/:case_id/submit` - 提交测试用例
+
+## 配置说明
+
+配置文件位于 `backend/configs/config.yaml`，包含：
+- 服务器配置（端口、模式）
+- 数据库配置（PostgreSQL + pgvector）
+- 模型配置（Chat Model 和 Embedding）
+- Google Drive 配置（gws 命令）
+
+**注意**: `config.yaml` 包含敏感信息，已加入 .gitignore。使用前请复制 `config.yaml.example` 并填写实际配置。
 
 ## 注意事项
 
