@@ -7,25 +7,28 @@ import (
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
+	dbvector "caseagent/internal/db/vector"
 
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
 )
 
 type Retriever struct {
-	db        *bun.DB
-	embedding embedding.Embedder
+	db         *bun.DB
+	embedding  embedding.Embedder
+	dimensions int
 }
 
 type RetrieverConfig struct {
-	Provider  string
-	DB        *bun.DB
-	APIKey    string
-	AccessKey string
-	SecretKey string
-	BaseURL   string
-	Region    string
-	Model     string
+	Provider   string
+	DB         *bun.DB
+	Dimensions int
+	APIKey     string
+	AccessKey  string
+	SecretKey  string
+	BaseURL    string
+	Region     string
+	Model      string
 }
 
 func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error) {
@@ -34,21 +37,23 @@ func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error)
 	}
 
 	embedder, err := ai.NewEmbedder(ctx, config.EmbeddingModelConfig{
-		Provider:  cfg.Provider,
-		Model:     cfg.Model,
-		APIKey:    cfg.APIKey,
-		AccessKey: cfg.AccessKey,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		Region:    cfg.Region,
+		Provider:   cfg.Provider,
+		Model:      cfg.Model,
+		Dimensions: cfg.Dimensions,
+		APIKey:     cfg.APIKey,
+		AccessKey:  cfg.AccessKey,
+		SecretKey:  cfg.SecretKey,
+		BaseURL:    cfg.BaseURL,
+		Region:     cfg.Region,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding model: %w", err)
 	}
 
 	return &Retriever{
-		db:        cfg.DB,
-		embedding: embedder,
+		db:         cfg.DB,
+		embedding:  embedder,
+		dimensions: cfg.Dimensions,
 	}, nil
 }
 
@@ -60,7 +65,13 @@ func (r *Retriever) Retrieve(ctx context.Context, queryEmbedding []float32, topK
 	err := r.db.NewSelect().
 		Model(&chunks).
 		Where("embedding IS NOT NULL").
-		OrderExpr("embedding <=> ?", queryEmbedding).
+		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			if r.dimensions > 0 {
+				return q.Where("vector_dims(embedding) = ?", r.dimensions)
+			}
+			return q
+		}).
+		OrderExpr("embedding <=> ?", dbvector.New(queryEmbedding)).
 		Limit(topK).
 		Scan(ctx)
 
@@ -99,7 +110,13 @@ func (r *Retriever) RetrieveFromKnowledge(ctx context.Context, queryEmbedding []
 	err := r.db.NewSelect().
 		Model(&knowledge).
 		Where("embedding IS NOT NULL").
-		OrderExpr("embedding <=> ?", queryEmbedding).
+		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			if r.dimensions > 0 {
+				return q.Where("vector_dims(embedding) = ?", r.dimensions)
+			}
+			return q
+		}).
+		OrderExpr("embedding <=> ?", dbvector.New(queryEmbedding)).
 		Limit(topK).
 		Scan(ctx)
 

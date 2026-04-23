@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1536), -- 根据模型维度调整
+    embedding vector(2000), -- 启动时会按 model.embedding.dimensions 自动校正
     parent_doc_id INTEGER, -- 用于 parent retriever
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     type VARCHAR(50) NOT NULL, -- 'product', 'module'
     name VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(1536),
+    embedding vector(2000),
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

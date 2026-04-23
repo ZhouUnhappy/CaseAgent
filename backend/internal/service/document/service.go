@@ -11,6 +11,7 @@ import (
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
+	dbvector "caseagent/internal/db/vector"
 
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
@@ -81,7 +82,7 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 			DocumentID:  docID,
 			ParentDocID: docID,
 			Content:     chunk,
-			Embedding:   embedding32,
+			Embedding:   dbvector.New(embedding32),
 			CreatedAt:   time.Now(),
 		}
 

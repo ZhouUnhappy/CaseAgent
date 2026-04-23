@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"caseagent/internal/db/models"
+	dbvector "caseagent/internal/db/vector"
 
 	"github.com/uptrace/bun"
 )
@@ -36,7 +37,7 @@ func (i *Indexer) Store(ctx context.Context, documentID int, chunks []string, em
 		docChunk := &models.DocumentChunk{
 			DocumentID: documentID,
 			Content:    chunk,
-			Embedding:  embedding,
+			Embedding:  dbvector.New(embedding),
 			CreatedAt:  time.Now(),
 		}
 

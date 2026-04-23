@@ -8,6 +8,7 @@ import (
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
+	dbvector "caseagent/internal/db/vector"
 
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
@@ -49,7 +50,7 @@ func (s *Service) ProcessKnowledge(ctx context.Context, kbID int, content string
 
 	_, err = s.db.NewUpdate().Model(&models.KnowledgeBase{}).
 		Set("content = ?", content).
-		Set("embedding = ?", embedding32).
+		Set("embedding = ?", dbvector.New(embedding32)).
 		Set("updated_at = ?", time.Now()).
 		Where("id = ?", kbID).
 		Exec(ctx)

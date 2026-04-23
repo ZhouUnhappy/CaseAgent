@@ -50,7 +50,15 @@ func Init(ctx context.Context) error {
 		DB.RegisterModel(model)
 	}
 
-	return DB.PingContext(ctx)
+	if err := DB.PingContext(ctx); err != nil {
+		return err
+	}
+
+	if err := ensureVectorDimensions(ctx, DB, config.Get().Model.Embedding.Dimensions); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func Close() error {

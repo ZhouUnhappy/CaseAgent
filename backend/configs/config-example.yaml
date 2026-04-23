@@ -23,6 +23,7 @@ model:
   embedding:
     provider: ark
     model: ep-your-embedding-endpoint
+    dimensions: 2000
     api_key: your_ark_api_key
     access_key: ""
     secret_key: ""
