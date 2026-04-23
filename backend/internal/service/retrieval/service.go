@@ -159,6 +159,7 @@ func (s *Service) SearchKnowledge(ctx context.Context, query string, topK int, k
 func (s *Service) newRetriever(ctx context.Context) (*pgvector.Retriever, error) {
 	cfg := config.Get()
 	return pgvector.NewRetriever(ctx, &pgvector.RetrieverConfig{
+		Provider:  cfg.Model.Embedding.Provider,
 		DB:        s.db,
 		APIKey:    cfg.Model.Embedding.APIKey,
 		AccessKey: cfg.Model.Embedding.AccessKey,

@@ -28,7 +28,7 @@
 - 实现文档处理流程：
   - 删除 base64 图片
   - 基于标题的简化分块
-  - Ark embedding 存储
+  - 按 provider 初始化 embedding 存储（当前支持 Ark / OpenAI-compatible）
   - `parent_doc_id` 基础关联
 - parent retriever 仍未完成
 
@@ -84,13 +84,22 @@
 - Agent 骨架（DeepAgent + 4 个子 Agent）
 - HTTP 服务器（Gin）
 
+### 当前联调状态
+- `chat=ark`、`embedding=ark/openai-compatible` 的 mixed provider 代码路径已恢复。
+- 后端静态验证通过：`go test ./...` 通过。
+- 真实接口联调已确认服务、数据库、真实 key 可用。
+- 当前仍有两个运行时阻塞：
+  - `knowledge_base` 表名映射错误，知识库接口会访问 `knowledge_bases`
+  - pgvector 写入方式不正确，文档 chunk embedding 落库失败并报 `bufio: buffer full`
+
 ### 待实现细节
 以下能力仍需后续完善：
 - 多查询检索与更完整的 parent retriever
 - DeepAgent 的实际协调逻辑
 - 子 Agent 的进一步去重与协同逻辑
 - 前端页面实现
-- 端到端联调与真实模型调试
+- 当前两处运行时阻塞修复
+- 完整端到端联调与真实模型调试
 
 ## 技术栈
 
@@ -98,14 +107,14 @@
 - **后端**: Golang + Gin + Bun ORM
 - **数据库**: PostgreSQL + pgvector
 - **AI 框架**: eino + eino-ext
-- **模型支持**: 当前仅支持 Ark
+- **模型支持**: chat 当前支持 Ark；embedding 当前支持 Ark / OpenAI-compatible
 
 ## 下一步建议
 
 1. 完成 parent retriever 与多查询检索
-2. 完成真实的多 Agent 协同
-3. 实现前端页面与 API 集成
-4. 使用真实 key 做端到端调试
+2. 修复知识库表名映射与 pgvector 写入问题
+3. 完成真实的多 Agent 协同
+4. 实现前端页面与 API 集成
 
 ## 项目结构
 

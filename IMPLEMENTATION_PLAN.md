@@ -6,7 +6,7 @@
 
 ### 当前支持的模型
 - **Chat Model**: ark
-- **Embedding**: ark
+- **Embedding**: ark / openai-compatible
 - **Indexer**: eino-ext 未提供 pgvector indexer，需要自行实现基于 PostgreSQL + pgvector 的 indexer
 
 ### 配置方式
@@ -24,20 +24,27 @@
 - 后端直接调用本地 `gws drive files export` 命令
 - 无需 Docker 部署
 
-## 当前执行状态与顺序调整（2026-04-22）
+## 当前执行状态与顺序调整（2026-04-23）
 
 - 阶段 1：后端项目结构、数据库 schema、迁移脚本已完成；前端仅完成 Vue 3 + Vite 初始化，`element-plus`、`pinia`、路由和基础布局未开始。
 - 阶段 2：文档上传和异步处理框架已落地；文档清洗、分块、embedding 存储可继续完善，parent retriever 闭环尚未完成。
 - 阶段 3：知识库 CRUD 已完成；知识库向量化先按“整篇文档一个 embedding”落地，后续如需细粒度检索再扩展 chunk 级设计。
-- 阶段 4：pgvector 检索框架已落地；多查询检索、parent retriever、独立检索 API 仍待补齐。
-- 阶段 5：4 个子 Agent 与 DeepAgent 目前是骨架实现，真实的多 Agent 协同与任务分发未完成。
+- 阶段 4：pgvector 检索框架与基础检索 API 已落地；多查询检索、parent retriever 深化能力仍待补齐。
+- 阶段 5：4 个子 Agent 与服务层第一版协调已落地；更复杂的多 Agent 协同与任务分发未完成。
 - 阶段 6：测试用例审核 API 已有基础接口；知识库更新建议/确认流程仍待实现。
+
+## 当前联调阻塞点（2026-04-23）
+
+- mixed provider 已恢复：`chat=ark`、`embedding=openai-compatible` 可以编译运行。
+- 真实接口联调已暴露两个待修问题：
+  1. `KnowledgeBase` 模型的表名映射与 migration 不一致，当前会访问 `knowledge_bases`，而数据库实际表名是 `knowledge_base`。
+  2. pgvector 列当前直接写 `[]float32` 失败，文档 chunk 向量落库时报 `bufio: buffer full`，需要补正确的 vector 类型或编码方式。
 
 ## 后续执行顺序
 
-1. 先补后端闭环：统一 Ark 配置、修复字段/配置不一致、打通单 Agent 主链路。
+1. 先修复当前联调阻塞点，打通“文档上传 + 知识库上传 + 检索”真实链路。
 2. 再补检索增强：完成 parent retriever、多查询检索、知识库与需求拼装。
-3. 最后做多 Agent 协同和前端页面。
+3. 最后继续做多 Agent 协同和前端页面。
 
 ## 分阶段实施
 

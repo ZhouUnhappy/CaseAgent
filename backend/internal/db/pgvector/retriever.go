@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"caseagent/internal/ai"
+	"caseagent/internal/config"
 	"caseagent/internal/db/models"
 
-	arkembedding "github.com/cloudwego/eino-ext/components/embedding/ark"
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
 )
@@ -17,6 +18,7 @@ type Retriever struct {
 }
 
 type RetrieverConfig struct {
+	Provider  string
 	DB        *bun.DB
 	APIKey    string
 	AccessKey string
@@ -31,13 +33,14 @@ func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error)
 		return nil, fmt.Errorf("database connection is required")
 	}
 
-	embedder, err := arkembedding.NewEmbedder(ctx, &arkembedding.EmbeddingConfig{
+	embedder, err := ai.NewEmbedder(ctx, config.EmbeddingModelConfig{
+		Provider:  cfg.Provider,
+		Model:     cfg.Model,
 		APIKey:    cfg.APIKey,
 		AccessKey: cfg.AccessKey,
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
 		Region:    cfg.Region,
-		Model:     cfg.Model,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding model: %w", err)

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
 
-	arkembedding "github.com/cloudwego/eino-ext/components/embedding/ark"
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
 )
@@ -20,18 +20,7 @@ type Service struct {
 
 func New(ctx context.Context, db *bun.DB) (*Service, error) {
 	cfg := config.Get()
-	if cfg.Model.Embedding.Provider != "ark" {
-		return nil, fmt.Errorf("only ark embedding provider is supported, got: %s", cfg.Model.Embedding.Provider)
-	}
-
-	embedder, err := arkembedding.NewEmbedder(ctx, &arkembedding.EmbeddingConfig{
-		APIKey:    cfg.Model.Embedding.APIKey,
-		AccessKey: cfg.Model.Embedding.AccessKey,
-		SecretKey: cfg.Model.Embedding.SecretKey,
-		BaseURL:   cfg.Model.Embedding.BaseURL,
-		Region:    cfg.Model.Embedding.Region,
-		Model:     cfg.Model.Embedding.Model,
-	})
+	embedder, err := ai.NewEmbedder(ctx, cfg.Model.Embedding)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding model: %w", err)
 	}
