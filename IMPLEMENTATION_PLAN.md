@@ -10,11 +10,6 @@
 - **AI 框架**: eino + eino-ext
 - **模型支持**: chat 当前支持 Ark；embedding 当前支持 Ark / OpenAI-compatible
 
-### 当前支持的模型
-- **Chat Model**: ark
-- **Embedding**: ark / openai-compatible
-- **Indexer**: eino-ext 未提供 pgvector indexer，需要自行实现基于 PostgreSQL + pgvector 的 indexer
-
 ### 配置方式
 - 所有模型配置通过配置文件管理
 - 配置文件加入 .gitignore
@@ -94,13 +89,7 @@
 - 实现 .gitignore
 
 **数据库**：
-- 设计并创建 6 张表：
-  - `projects`: 项目信息（id, name, description, created_at, updated_at）
-  - `documents`: 文档信息（id, project_id, name, type, source, file_id, status, created_at, updated_at）
-  - `document_chunks`: 文档分块（id, document_id, content, embedding vector, parent_doc_id, metadata, created_at）
-  - `knowledge_base`: 知识库（id, type [product/module], name, content, embedding vector, metadata, created_at, updated_at）
-  - `test_cases`: 测试用例（id, task_id, section, cases json, status, created_at, updated_at）
-  - `case_generation_tasks`: 生成任务（id, project_id, document_ids, affected_products, affected_modules, status, created_at, updated_at）
+- 设计并创建 6 张表：projects, documents, document_chunks, knowledge_base, test_cases, case_generation_tasks
 - 创建 SQL migration 脚本
 - 实现 pgvector 扩展初始化
 
@@ -250,47 +239,11 @@ CaseAgent/
 └── README.md
 ```
 
-## 配置文件结构
+## 配置文件
 
-```yaml
-# config.yaml.example
-server:
-  port: 8080
-  mode: debug
+配置文件示例：`backend/configs/config-example.yaml`
 
-database:
-  host: localhost
-  port: 5432
-  user: zhouxi
-  password: your_password
-  dbname: eino_rag
-  sslmode: disable
-
-model:
-  chat:
-    provider: ark
-    model: ep-your-chat-endpoint
-    api_key: your_ark_api_key
-    access_key: ""
-    secret_key: ""
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    region: cn-beijing
-  embedding:
-    provider: ark
-    model: ep-your-embedding-endpoint
-    dimensions: 2000
-    api_key: your_ark_api_key
-    access_key: ""
-    secret_key: ""
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    region: cn-beijing
-
-gws:
-  enabled: true
-  command: gws
-```
-
-## 数据库 Schema 详细设计
+## 数据库 Schema
 
 ### projects
 ```sql
@@ -398,16 +351,6 @@ CREATE TABLE case_generation_tasks (
 - `GET /api/v1/tasks/:id/cases` - 获取测试用例
 - `PUT /api/v1/tasks/:id/cases/:case_id` - 更新测试用例
 - `PUT /api/v1/tasks/:id/cases/:case_id/submit` - 提交测试用例
-
-## 配置说明
-
-配置文件位于 `backend/configs/config.yaml`，包含：
-- 服务器配置（端口、模式）
-- 数据库配置（PostgreSQL + pgvector）
-- 模型配置（Chat Model 和 Embedding）
-- Google Drive 配置（gws 命令）
-
-**注意**: `config.yaml` 包含敏感信息，已加入 .gitignore。使用前请复制 `config.yaml.example` 并填写实际配置。
 
 ## 注意事项
 
