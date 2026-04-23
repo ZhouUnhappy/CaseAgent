@@ -19,6 +19,7 @@
 - 所有模型配置通过配置文件管理
 - 配置文件加入 .gitignore
 - 支持环境变量覆盖
+- embedding 支持显式配置输出维度（`model.embedding.dimensions`）
 
 ### 数据库
 - PostgreSQL + pgvector
@@ -40,20 +41,30 @@
 - pgvector indexer 和 retriever 框架
 - Agent 骨架（DeepAgent + 4 个子 Agent）
 - HTTP 服务器（Gin）
+- pgvector 自定义向量编码/解码，已能正确落库和查询
+- embedding 维度可配置，启动时会自动校正 `document_chunks` / `knowledge_base` 的向量列维度
+- 本地前后端启动脚本 `dev.sh`
 
 ### 各阶段完成情况
 - **阶段 1**：后端项目结构、数据库 schema、迁移脚本已完成；前端仅完成 Vue 3 + Vite 初始化，`element-plus`、`pinia`、路由和基础布局未开始。
-- **阶段 2**：文档上传和异步处理框架已落地；文档清洗、分块、embedding 存储可继续完善，parent retriever 闭环尚未完成。
-- **阶段 3**：知识库 CRUD 已完成；知识库向量化先按"整篇文档一个 embedding"落地，后续如需细粒度检索再扩展 chunk 级设计。
-- **阶段 4**：pgvector 检索框架与基础检索 API 已落地；多查询检索、parent retriever 深化能力仍待补齐。
+- **阶段 2**：文档上传和异步处理框架已落地；文档清洗、分块、embedding 存储链路已完成基础实现，parent retriever 闭环尚未完成。
+- **阶段 3**：知识库 CRUD 已完成；知识库向量化按"整篇文档一个 embedding"落地，知识库上传/读取/检索真实链路已打通。
+- **阶段 4**：pgvector 检索框架与基础检索 API 已落地；当前已支持按配置维度检索并过滤历史异维度向量，多查询检索、parent retriever 深化能力仍待补齐。
 - **阶段 5**：4 个子 Agent 与服务层第一版协调已落地；更复杂的多 Agent 协同与任务分发未完成。
 - **阶段 6**：测试用例审核 API 已有基础接口；知识库更新建议/确认流程仍待实现。
 
-### 当前联调阻塞点
+### 当前联调结果
 - mixed provider 已恢复：`chat=ark`、`embedding=openai-compatible` 可以编译运行。
-- 真实接口联调已暴露两个待修问题：
-  1. `KnowledgeBase` 模型的表名映射与 migration 不一致，当前会访问 `knowledge_bases`，而数据库实际表名是 `knowledge_base`。
-  2. pgvector 列当前直接写 `[]float32` 失败，文档 chunk 向量落库时报 `bufio: buffer full`，需要补正确的 vector 类型或编码方式。
+- `KnowledgeBase` 表名映射问题已修复，当前正确访问 `knowledge_base`。
+- pgvector 列直接写 `[]float32` 的问题已修复，当前通过自定义 vector 类型编码写入。
+- `Qwen3-Embedding-8B` 通过 openai-compatible 网关接入时，工程上已确定显式使用 `2000` 维输出：
+  1. `4096` 维虽然是模型原生维度，但当前 `pgvector + ivfflat` 方案无法对 `4096` 维建立近似索引。
+  2. `2000` 维是当前技术栈下可继续使用 `vector + ivfflat` 的上限内方案，已完成真实接口验证。
+- 知识库真实联调已验证通过：
+  1. `POST /api/v1/knowledge` 可创建记录。
+  2. 异步 embedding 可成功更新为 `2000` 维向量。
+  3. `POST /api/v1/retrieval/knowledge` 可成功召回新写入的知识库。
+- 当前数据库中如果混有历史 `1024` 维旧向量，检索层会自动按当前配置维度过滤，避免新旧向量混查时报错；后续仍建议补一次历史向量清理或重建。
 
 ### 待实现细节
 以下能力仍需后续完善：
@@ -61,14 +72,15 @@
 - DeepAgent 的实际协调逻辑
 - 子 Agent 的进一步去重与协同逻辑
 - 前端页面实现
-- 当前两处运行时阻塞修复
+- 文档上传链路的完整真实联调（在知识库链路已打通后继续补）
+- 历史异维度向量的清理或重建
 - 完整端到端联调与真实模型调试
 
 ## 后续执行顺序
 
-1. 先修复当前联调阻塞点，打通"文档上传 + 知识库上传 + 检索"真实链路。
-2. 再补检索增强：完成 parent retriever、多查询检索、知识库与需求拼装。
-3. 最后继续做多 Agent 协同和前端页面。
+1. 继续补齐"文档上传 + 分块 + 检索"真实链路，并清理或重建历史异维度向量数据。
+2. 补检索增强：完成 parent retriever、多查询检索、知识库与需求拼装。
+3. 再继续做多 Agent 协同和前端页面。
 
 ## 分阶段实施
 
@@ -266,6 +278,7 @@ model:
   embedding:
     provider: ark
     model: ep-your-embedding-endpoint
+    dimensions: 2000
     api_key: your_ark_api_key
     access_key: ""
     secret_key: ""
@@ -311,7 +324,7 @@ CREATE TABLE document_chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1536), -- 根据模型维度调整
+    embedding vector(2000), -- 启动时会按 model.embedding.dimensions 自动校正
     parent_doc_id INTEGER, -- 用于 parent retriever
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -326,7 +339,7 @@ CREATE TABLE knowledge_base (
     type VARCHAR(50) NOT NULL, -- 'product', 'module'
     name VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(1536),
+    embedding vector(2000),
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -400,6 +413,8 @@ CREATE TABLE case_generation_tasks (
 
 1. **pgvector Indexer 实现**：需要参考 eino-ext 的 indexer 接口，自行实现基于 PostgreSQL + pgvector 的 indexer
 2. **模型配置灵活性**：支持通过配置文件切换不同模型提供商
-3. **错误处理**：所有 API 需要完善的错误处理和日志
-4. **安全性**：配置文件包含敏感信息，必须加入 .gitignore
-5. **测试**：每个阶段完成后需要进行集成测试
+3. **embedding 维度**：当前 openai-compatible 的 `Qwen3-Embedding-8B` 工程上固定为 `2000` 维，并通过 `model.embedding.dimensions` 显式传参，避免服务端默认维度不确定
+4. **pgvector 限制**：当前使用 `vector + ivfflat`，高于 `2000` 维会触发索引限制；如后续需要更高维方案，需要重新评估类型与索引策略
+5. **错误处理**：所有 API 需要完善的错误处理和日志
+6. **安全性**：配置文件包含敏感信息，必须加入 .gitignore
+7. **测试**：每个阶段完成后需要进行集成测试
