@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS case_generation_tasks (
     document_ids INTEGER[] NOT NULL,
     affected_products JSONB, -- ['product1', 'product2']
     affected_modules JSONB, -- ['module1', 'module2']
-    status VARCHAR(50) DEFAULT 'analyzing', -- 'analyzing', 'awaiting_review', 'generating', 'completed', 'failed'
+    status VARCHAR(50) DEFAULT 'analyzing', -- 'analyzing', 'awaiting_review', 'ready_to_generate', 'generating', 'completed', 'failed'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
