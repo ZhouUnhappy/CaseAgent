@@ -65,6 +65,7 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		Name:      req.Name,
 		Type:      req.Type,
 		Source:    req.Source,
+		Content:   content,
 		FileID:    req.FileID,
 		Status:    "processing",
 		CreatedAt: time.Now(),
@@ -140,4 +141,41 @@ func (h *Handler) DeleteDocument(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *Handler) ReprocessDocument(c *gin.Context) {
+	id := c.Param("id")
+	document := &models.Document{}
+
+	if err := h.DB.NewSelect().Model(document).Where("id = ?", id).Scan(c); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+		return
+	}
+
+	document.Status = "processing"
+	document.UpdatedAt = time.Now()
+
+	if _, err := h.DB.NewUpdate().Model(document).Where("id = ?", id).Exec(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	go func(docID int) {
+		ctx := context.Background()
+		docService, err := documentservice.New(ctx, h.DB)
+		if err != nil {
+			fmt.Printf("Failed to initialize document service: %v\n", err)
+			_, _ = h.DB.NewUpdate().Model(&models.Document{}).
+				Set("status = ?", "failed").
+				Set("updated_at = ?", time.Now()).
+				Where("id = ?", docID).
+				Exec(ctx)
+			return
+		}
+		if err := docService.ReprocessDocument(ctx, docID); err != nil {
+			fmt.Printf("Failed to reprocess document %d: %v\n", docID, err)
+		}
+	}(document.ID)
+
+	c.JSON(http.StatusAccepted, document)
 }

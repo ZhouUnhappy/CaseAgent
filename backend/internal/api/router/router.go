@@ -32,6 +32,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 
 		// Documents (standalone)
 		v1.GET("/documents/:id", h.GetDocument)
+		v1.POST("/documents/:id/reprocess", h.ReprocessDocument)
 		v1.DELETE("/documents/:id", h.DeleteDocument)
 
 		// Tasks (standalone)

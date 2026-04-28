@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS documents (
     name VARCHAR(255) NOT NULL,
     type VARCHAR(50) NOT NULL, -- 'markdown', 'gdrive'
     source VARCHAR(50) NOT NULL, -- 'upload', 'gdrive'
+    content TEXT NOT NULL DEFAULT '', -- 原始 markdown 内容，供检索与重处理使用
     file_id VARCHAR(255), -- Google Drive file ID
     status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'processing', 'completed', 'failed'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

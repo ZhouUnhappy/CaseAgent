@@ -106,7 +106,7 @@ func (s *Service) SearchDocuments(ctx context.Context, query string, topK int, d
 			ParentDocID:   parentID,
 			Name:          document.Name,
 			MatchedChunks: matchedChunks[parentID],
-			Content:       contents[parentID],
+			Content:       preferredDocumentContent(document.Content, contents[parentID]),
 		})
 	}
 
@@ -231,4 +231,12 @@ func retrievalPoolSize(topK int) int {
 		return defaultTopK * 3
 	}
 	return topK * 3
+}
+
+func preferredDocumentContent(stored string, fallback string) string {
+	stored = strings.TrimSpace(stored)
+	if stored != "" {
+		return stored
+	}
+	return fallback
 }

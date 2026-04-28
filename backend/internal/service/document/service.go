@@ -53,6 +53,9 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		if err != nil {
 			return fmt.Errorf("failed to fetch from Google Drive: %w", err)
 		}
+		if err := s.updateDocumentContent(ctx, docID, markdownContent); err != nil {
+			return fmt.Errorf("failed to persist Google Drive content: %w", err)
+		}
 		cleanedContent = markdownContent
 	}
 
@@ -93,6 +96,46 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 	}
 
 	return nil
+}
+
+func (s *Service) ReprocessDocument(ctx context.Context, docID int) (err error) {
+	defer func() {
+		if err != nil {
+			if updateErr := s.updateDocumentStatus(ctx, docID, "failed"); updateErr != nil {
+				err = errorsJoin(err, fmt.Errorf("failed to update document status: %w", updateErr))
+			}
+		}
+	}()
+
+	document := &models.Document{}
+	if err = s.db.NewSelect().Model(document).Where("id = ?", docID).Scan(ctx); err != nil {
+		return fmt.Errorf("failed to load document: %w", err)
+	}
+
+	content := document.Content
+	if document.Source == "gdrive" {
+		if strings.TrimSpace(document.FileID) == "" {
+			return fmt.Errorf("document %d is missing Google Drive file ID", docID)
+		}
+		fetchedContent, fetchErr := s.fetchFromGoogleDrive(ctx, document.FileID)
+		if fetchErr != nil {
+			return fmt.Errorf("failed to fetch latest Google Drive content: %w", fetchErr)
+		}
+		content = fetchedContent
+		if err = s.updateDocumentContent(ctx, docID, content); err != nil {
+			return fmt.Errorf("failed to persist Google Drive content: %w", err)
+		}
+	}
+
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("document %d has no stored content to reprocess", docID)
+	}
+
+	if err = s.clearDocumentChunks(ctx, docID); err != nil {
+		return err
+	}
+
+	return s.ProcessDocument(ctx, docID, content, "")
 }
 
 // removeBase64Images removes base64 encoded images from markdown content
@@ -170,6 +213,22 @@ func (s *Service) updateDocumentStatus(ctx context.Context, docID int, status st
 		Where("id = ?", docID).
 		Exec(ctx)
 	return err
+}
+
+func (s *Service) updateDocumentContent(ctx context.Context, docID int, content string) error {
+	_, err := s.db.NewUpdate().Model(&models.Document{}).
+		Set("content = ?", content).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", docID).
+		Exec(ctx)
+	return err
+}
+
+func (s *Service) clearDocumentChunks(ctx context.Context, docID int) error {
+	if _, err := s.db.NewDelete().Model((*models.DocumentChunk)(nil)).Where("document_id = ?", docID).Exec(ctx); err != nil {
+		return fmt.Errorf("failed to clear document chunks: %w", err)
+	}
+	return nil
 }
 
 func errorsJoin(base error, next error) error {
