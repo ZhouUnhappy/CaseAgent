@@ -186,7 +186,7 @@ func validateTaskDocuments(ctx context.Context, db *bun.DB, projectID int, docum
 	}
 
 	for _, document := range documents {
-		if document.Status != "completed" {
+		if document.Status != models.DocumentStatusCompleted {
 			return fmt.Errorf("document %d is not ready, current status: %s", document.ID, document.Status)
 		}
 	}

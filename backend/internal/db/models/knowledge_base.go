@@ -8,6 +8,13 @@ import (
 	"github.com/uptrace/bun"
 )
 
+const (
+	KnowledgeStatusPending    = "pending"
+	KnowledgeStatusProcessing = "processing"
+	KnowledgeStatusCompleted  = "completed"
+	KnowledgeStatusFailed     = "failed"
+)
+
 type KnowledgeBase struct {
 	bun.BaseModel `bun:"table:knowledge_base"`
 
@@ -17,6 +24,7 @@ type KnowledgeBase struct {
 	Content   string          `bun:"content,notnull" json:"content"`
 	Embedding dbvector.Vector `bun:"embedding" json:"embedding"`
 	Metadata  map[string]any  `bun:"metadata,type:jsonb" json:"metadata"`
+	Status    string          `bun:"status,nullzero,default:'pending'" json:"status"` // pending, processing, completed, failed
 	CreatedAt time.Time       `bun:"created_at,nullzero,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time       `bun:"updated_at,nullzero,default:current_timestamp" json:"updated_at"`
 }

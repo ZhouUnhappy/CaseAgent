@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     content TEXT NOT NULL,
     embedding vector(2000),
     metadata JSONB,
+    status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'processing', 'completed', 'failed'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

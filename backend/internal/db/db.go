@@ -54,6 +54,10 @@ func Init(ctx context.Context) error {
 		return err
 	}
 
+	if err := applySchema(ctx, DB); err != nil {
+		return err
+	}
+
 	if err := ensureVectorDimensions(ctx, DB, config.Get().Model.Embedding.Dimensions); err != nil {
 		return err
 	}

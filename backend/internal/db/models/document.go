@@ -2,6 +2,13 @@ package models
 
 import "time"
 
+const (
+	DocumentStatusPending    = "pending"
+	DocumentStatusProcessing = "processing"
+	DocumentStatusCompleted  = "completed"
+	DocumentStatusFailed     = "failed"
+)
+
 type Document struct {
 	ID        int       `bun:"id,pk,autoincrement" json:"id"`
 	ProjectID int       `bun:"project_id,notnull" json:"project_id"`

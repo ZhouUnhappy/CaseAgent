@@ -3,6 +3,7 @@ package pgvector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
@@ -61,19 +62,22 @@ func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error)
 func (r *Retriever) Retrieve(ctx context.Context, queryEmbedding []float32, topK int) ([]*models.DocumentChunk, error) {
 	var chunks []*models.DocumentChunk
 
-	// Use pgvector cosine similarity search
-	err := r.db.NewSelect().
-		Model(&chunks).
-		Where("embedding IS NOT NULL").
-		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
-			if r.dimensions > 0 {
-				return q.Where("vector_dims(embedding) = ?", r.dimensions)
-			}
-			return q
-		}).
-		OrderExpr("embedding <=> ?", dbvector.New(queryEmbedding)).
-		Limit(topK).
-		Scan(ctx)
+	args := []any{models.DocumentStatusCompleted}
+	query := strings.TrimSpace(`
+		SELECT dc.*
+		FROM document_chunks AS dc
+		JOIN documents AS d ON d.id = dc.document_id
+		WHERE dc.embedding IS NOT NULL
+		  AND d.status = ?
+	`)
+	if r.dimensions > 0 {
+		query += "\n  AND vector_dims(dc.embedding) = ?"
+		args = append(args, r.dimensions)
+	}
+	query += "\nORDER BY dc.embedding <=> ?\nLIMIT ?"
+	args = append(args, dbvector.New(queryEmbedding), topK)
+
+	err := r.db.NewRaw(query, args...).Scan(ctx, &chunks)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve chunks: %w", err)
@@ -107,18 +111,21 @@ func (r *Retriever) RetrieveWithQuery(ctx context.Context, query string, topK in
 func (r *Retriever) RetrieveFromKnowledge(ctx context.Context, queryEmbedding []float32, topK int) ([]*models.KnowledgeBase, error) {
 	var knowledge []*models.KnowledgeBase
 
-	err := r.db.NewSelect().
-		Model(&knowledge).
-		Where("embedding IS NOT NULL").
-		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
-			if r.dimensions > 0 {
-				return q.Where("vector_dims(embedding) = ?", r.dimensions)
-			}
-			return q
-		}).
-		OrderExpr("embedding <=> ?", dbvector.New(queryEmbedding)).
-		Limit(topK).
-		Scan(ctx)
+	args := []any{models.KnowledgeStatusCompleted}
+	query := strings.TrimSpace(`
+		SELECT kb.*
+		FROM knowledge_base AS kb
+		WHERE kb.embedding IS NOT NULL
+		  AND kb.status = ?
+	`)
+	if r.dimensions > 0 {
+		query += "\n  AND vector_dims(kb.embedding) = ?"
+		args = append(args, r.dimensions)
+	}
+	query += "\nORDER BY kb.embedding <=> ?\nLIMIT ?"
+	args = append(args, dbvector.New(queryEmbedding), topK)
+
+	err := r.db.NewRaw(query, args...).Scan(ctx, &knowledge)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve knowledge: %w", err)

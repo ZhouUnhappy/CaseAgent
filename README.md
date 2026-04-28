@@ -36,6 +36,8 @@ go mod tidy
 go run cmd/server/main.go
 ```
 
+启动时会自动应用 `backend/migrations/001_init.sql` 中的当前 schema，测试库无需先手工建表。
+
 ### 前端
 
 ```bash
@@ -51,10 +53,14 @@ npm run dev
 - `GET /api/v1/projects/:id` - 获取项目详情
 - `POST /api/v1/projects/:id/documents` - 上传文档
 - `GET /api/v1/projects/:id/documents` - 列出文档
+- `POST /api/v1/documents/:id/reprocess` - 重处理文档
 - `POST /api/v1/knowledge` - 上传知识库
 - `GET /api/v1/knowledge` - 列出知识库
+- `POST /api/v1/knowledge/:id/reprocess` - 重处理知识库
 - `POST /api/v1/projects/:id/tasks` - 创建生成任务
 - `GET /api/v1/tasks/:id/cases` - 获取测试用例
+- `GET /api/v1/maintenance/vector-health` - 查看向量健康状态
+- `POST /api/v1/maintenance/reindex` - 批量重建异常向量
 
 ## License
 

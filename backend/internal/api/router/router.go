@@ -46,6 +46,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 			knowledge.POST("", h.UploadKnowledge)
 			knowledge.GET("", h.ListKnowledge)
 			knowledge.GET("/:id", h.GetKnowledge)
+			knowledge.POST("/:id/reprocess", h.ReprocessKnowledge)
 			knowledge.PUT("/:id", h.UpdateKnowledge)
 			knowledge.DELETE("/:id", h.DeleteKnowledge)
 		}
@@ -55,6 +56,12 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		{
 			retrieval.POST("/documents", h.SearchDocuments)
 			retrieval.POST("/knowledge", h.SearchKnowledge)
+		}
+
+		maintenance := v1.Group("/maintenance")
+		{
+			maintenance.GET("/vector-health", h.GetVectorHealth)
+			maintenance.POST("/reindex", h.ReindexVectors)
 		}
 
 		// Test Cases

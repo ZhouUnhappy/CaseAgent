@@ -92,6 +92,10 @@ func (s *Service) SearchDocuments(ctx context.Context, query string, topK int, d
 	if err != nil {
 		return nil, err
 	}
+	parentIDs = filterSearchableDocumentIDs(parentIDs, documents)
+	if len(parentIDs) == 0 {
+		return []DocumentResult{}, nil
+	}
 
 	contents, err := s.loadDocumentContents(ctx, parentIDs)
 	if err != nil {
@@ -132,6 +136,9 @@ func (s *Service) SearchKnowledge(ctx context.Context, query string, topK int, k
 	seen := make(map[int]struct{}, len(rawEntries))
 	for _, entry := range rawEntries {
 		if entry == nil {
+			continue
+		}
+		if !isKnowledgeSearchable(entry) {
 			continue
 		}
 		if kbType != "" && entry.Type != kbType {
@@ -239,4 +246,24 @@ func preferredDocumentContent(stored string, fallback string) string {
 		return stored
 	}
 	return fallback
+}
+
+func filterSearchableDocumentIDs(documentIDs []int, documents map[int]models.Document) []int {
+	filtered := make([]int, 0, len(documentIDs))
+	for _, id := range documentIDs {
+		document, ok := documents[id]
+		if !ok || !isDocumentSearchable(document) {
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	return filtered
+}
+
+func isDocumentSearchable(document models.Document) bool {
+	return document.Status == models.DocumentStatusCompleted
+}
+
+func isKnowledgeSearchable(entry *models.KnowledgeBase) bool {
+	return entry != nil && entry.Status == models.KnowledgeStatusCompleted
 }

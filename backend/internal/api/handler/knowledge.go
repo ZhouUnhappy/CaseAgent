@@ -37,6 +37,7 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		Name:      req.Name,
 		Content:   req.Content,
 		Metadata:  req.Metadata,
+		Status:    models.KnowledgeStatusProcessing,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -47,19 +48,7 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Process knowledge base asynchronously
-	go func(kbID int, content string) {
-		ctx := context.Background()
-		kbService, err := knowledge.New(ctx, h.DB)
-		if err != nil {
-			fmt.Printf("Failed to initialize knowledge service: %v\n", err)
-			return
-		}
-		err = kbService.ProcessKnowledge(ctx, kbID, content)
-		if err != nil {
-			fmt.Printf("Failed to process knowledge: %v\n", err)
-		}
-	}(kb.ID, req.Content)
+	h.processKnowledgeAsync(kb.ID, req.Content)
 
 	c.JSON(http.StatusCreated, kb)
 }
@@ -113,36 +102,77 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 	if req.Name != "" {
 		kb.Name = req.Name
 	}
-	if req.Content != "" {
-		kb.Content = req.Content
-	}
 	if req.Metadata != nil {
 		kb.Metadata = req.Metadata
 	}
+	needsReprocess := applyKnowledgeUpdate(kb, req)
 	kb.UpdatedAt = time.Now()
 
-	_, err = h.DB.NewUpdate().Model(kb).Where("id = ?", id).Exec(c)
+	update := h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
+		Set("name = ?", kb.Name).
+		Set("content = ?", kb.Content).
+		Set("metadata = ?", kb.Metadata).
+		Set("status = ?", kb.Status).
+		Set("updated_at = ?", kb.UpdatedAt).
+		Where("id = ?", id)
+	if needsReprocess {
+		update = update.Set("embedding = ?", nil)
+	}
+
+	_, err = update.Exec(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if req.Content != "" {
-		go func(kbID int, content string) {
-			ctx := context.Background()
-			kbService, err := knowledge.New(ctx, h.DB)
-			if err != nil {
-				fmt.Printf("Failed to initialize knowledge service: %v\n", err)
-				return
-			}
-			err = kbService.ProcessKnowledge(ctx, kbID, content)
-			if err != nil {
-				fmt.Printf("Failed to re-process knowledge: %v\n", err)
-			}
-		}(kb.ID, kb.Content)
+	if needsReprocess {
+		h.processKnowledgeAsync(kb.ID, kb.Content)
 	}
 
 	c.JSON(http.StatusOK, kb)
+}
+
+func (h *Handler) ReprocessKnowledge(c *gin.Context) {
+	id := c.Param("id")
+	kb := &models.KnowledgeBase{}
+
+	if err := h.DB.NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
+		return
+	}
+
+	kb.Embedding = nil
+	kb.Status = models.KnowledgeStatusProcessing
+	kb.UpdatedAt = time.Now()
+
+	if _, err := h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
+		Set("embedding = ?", nil).
+		Set("status = ?", kb.Status).
+		Set("updated_at = ?", kb.UpdatedAt).
+		Where("id = ?", id).
+		Exec(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	go func(kbID int) {
+		ctx := context.Background()
+		kbService, err := knowledge.New(ctx, h.DB)
+		if err != nil {
+			fmt.Printf("Failed to initialize knowledge service: %v\n", err)
+			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
+				Set("status = ?", models.KnowledgeStatusFailed).
+				Set("updated_at = ?", time.Now()).
+				Where("id = ?", kbID).
+				Exec(ctx)
+			return
+		}
+		if err := kbService.ReprocessKnowledge(ctx, kbID); err != nil {
+			fmt.Printf("Failed to reprocess knowledge %d: %v\n", kbID, err)
+		}
+	}(kb.ID)
+
+	c.JSON(http.StatusAccepted, kb)
 }
 
 func (h *Handler) DeleteKnowledge(c *gin.Context) {
@@ -155,4 +185,34 @@ func (h *Handler) DeleteKnowledge(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *Handler) processKnowledgeAsync(kbID int, content string) {
+	go func() {
+		ctx := context.Background()
+		kbService, err := knowledge.New(ctx, h.DB)
+		if err != nil {
+			fmt.Printf("Failed to initialize knowledge service: %v\n", err)
+			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
+				Set("status = ?", models.KnowledgeStatusFailed).
+				Set("updated_at = ?", time.Now()).
+				Where("id = ?", kbID).
+				Exec(ctx)
+			return
+		}
+		if err := kbService.ProcessKnowledge(ctx, kbID, content); err != nil {
+			fmt.Printf("Failed to process knowledge %d: %v\n", kbID, err)
+		}
+	}()
+}
+
+func applyKnowledgeUpdate(kb *models.KnowledgeBase, req UpdateKnowledgeRequest) bool {
+	if req.Content == "" {
+		return false
+	}
+
+	kb.Content = req.Content
+	kb.Embedding = nil
+	kb.Status = models.KnowledgeStatusProcessing
+	return true
 }
