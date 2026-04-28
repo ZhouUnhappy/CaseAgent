@@ -22,7 +22,7 @@
 CaseAgent/
 ├── backend/          # Go 后端
 ├── frontend/         # Vue 前端
-├── docs/            # 文档
+├── docs/             # 规格说明等文档
 └── IMPLEMENTATION_PLAN.md  # 实施计划
 ```
 
