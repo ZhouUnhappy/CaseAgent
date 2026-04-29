@@ -118,6 +118,12 @@ func (h *Handler) ReviewAffected(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
+	if !canReviewAffected(task.Status) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("task status %q does not allow affected-scope review", task.Status),
+		})
+		return
+	}
 
 	task.AffectedProducts = req.AffectedProducts
 	task.AffectedModules = req.AffectedModules
@@ -142,13 +148,27 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
+	if !canStartGeneration(task.Status) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("task status %q does not allow generation", task.Status),
+		})
+		return
+	}
 
 	task.Status = models.TaskStatusGenerating
 	task.UpdatedAt = time.Now()
 
-	_, err = h.DB.NewUpdate().Model(task).Where("id = ?", id).Exec(c)
+	updateResult, err := h.DB.NewUpdate().
+		Model(task).
+		Where("id = ?", id).
+		Where("status = ?", models.TaskStatusReadyToGenerate).
+		Exec(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if affected, _ := updateResult.RowsAffected(); affected == 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "task status has changed, please retry"})
 		return
 	}
 
@@ -205,4 +225,17 @@ func dedupeInts(values []int) []int {
 		result = append(result, value)
 	}
 	return result
+}
+
+func canReviewAffected(status string) bool {
+	switch status {
+	case models.TaskStatusAwaitingReview, models.TaskStatusReadyToGenerate:
+		return true
+	default:
+		return false
+	}
+}
+
+func canStartGeneration(status string) bool {
+	return status == models.TaskStatusReadyToGenerate
 }
