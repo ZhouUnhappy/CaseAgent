@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -113,25 +114,39 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 		{name: "boundary", run: s.boundaryAgent.GenerateBoundaryCases},
 	}
 
-	sections := make([]string, 0, len(generators))
+	sections := make([]generatedSection, 0, len(generators))
 	for _, generator := range generators {
 		output, err := generator.run(ctx, requirements, knowledge)
 		if err != nil {
-			return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
-		}
-
-		payload := extractJSONArrayPayload(output)
-		if payload == "" {
 			continue
 		}
-		sections = append(sections, payload)
+
+		parsed, parseErr := parseGeneratedSections(output)
+		if parseErr != nil || len(parsed) == 0 {
+			continue
+		}
+		sections = append(sections, parsed...)
 	}
 
 	if len(sections) == 0 {
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
-	return "[" + strings.Join(sections, ",") + "]", nil
+	normalized := dedupeGeneratedSections(sections)
+	if len(normalized) == 0 {
+		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+	}
+
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+	}
+	return string(payload), nil
+}
+
+type generatedSection struct {
+	Section string           `json:"section"`
+	Cases   []map[string]any `json:"cases"`
 }
 
 func extractJSONArrayPayload(raw string) string {
@@ -156,4 +171,161 @@ func extractJSONArrayPayload(raw string) string {
 
 	payload := strings.TrimSpace(trimmed[start+1 : end])
 	return payload
+}
+
+func parseGeneratedSections(raw string) ([]generatedSection, error) {
+	cleaned := extractJSONPayload(raw)
+	if cleaned == "" {
+		return nil, fmt.Errorf("empty model response")
+	}
+
+	var sections []generatedSection
+	if err := json.Unmarshal([]byte(cleaned), &sections); err == nil && len(sections) > 0 {
+		return sections, nil
+	}
+
+	var single generatedSection
+	if err := json.Unmarshal([]byte(cleaned), &single); err == nil && (single.Section != "" || len(single.Cases) > 0) {
+		return []generatedSection{single}, nil
+	}
+
+	return nil, fmt.Errorf("invalid section payload")
+}
+
+func extractJSONPayload(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "```") {
+		lines := strings.Split(trimmed, "\n")
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+			lines = lines[1:]
+		}
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "```" {
+			lines = lines[:len(lines)-1]
+		}
+		trimmed = strings.Join(lines, "\n")
+	}
+
+	trimmed = strings.TrimSpace(trimmed)
+	startArray := strings.Index(trimmed, "[")
+	startObject := strings.Index(trimmed, "{")
+	start := firstPositiveIndex(startArray, startObject)
+	if start == -1 {
+		return trimmed
+	}
+
+	endArray := strings.LastIndex(trimmed, "]")
+	endObject := strings.LastIndex(trimmed, "}")
+	end := max(endArray, endObject)
+	if end <= start {
+		return trimmed[start:]
+	}
+
+	return strings.TrimSpace(trimmed[start : end+1])
+}
+
+func dedupeGeneratedSections(sections []generatedSection) []generatedSection {
+	normalized := make([]generatedSection, 0, len(sections))
+	seenCases := make(map[string]struct{})
+
+	for _, section := range sections {
+		name := strings.TrimSpace(section.Section)
+		if name == "" {
+			name = "未分类"
+		}
+
+		filtered := make([]map[string]any, 0, len(section.Cases))
+		for _, item := range section.Cases {
+			signature := caseSignature(item)
+			if signature == "" {
+				continue
+			}
+			if _, ok := seenCases[signature]; ok {
+				continue
+			}
+			seenCases[signature] = struct{}{}
+			filtered = append(filtered, item)
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+
+		normalized = append(normalized, generatedSection{
+			Section: name,
+			Cases:   filtered,
+		})
+	}
+
+	return normalized
+}
+
+func caseSignature(item map[string]any) string {
+	title := normalizeMatchText(stringValue(item["title"]))
+	preconds := normalizeMatchText(stringValue(item["custom_preconds"]))
+	steps := normalizeStepSignatures(item["custom_steps_separated"])
+
+	if title == "" && len(steps) == 0 {
+		return ""
+	}
+	return title + "|" + preconds + "|" + strings.Join(steps, "||")
+}
+
+func normalizeStepSignatures(value any) []string {
+	signatures := make([]string, 0)
+	switch typed := value.(type) {
+	case []map[string]any:
+		for _, step := range typed {
+			content := normalizeMatchText(firstNonEmptyString(step["content"], step["step"]))
+			expected := normalizeMatchText(firstNonEmptyString(step["expected"], step["result"]))
+			signatures = append(signatures, content+"=>"+expected)
+		}
+	case []any:
+		for _, raw := range typed {
+			step, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			content := normalizeMatchText(firstNonEmptyString(step["content"], step["step"]))
+			expected := normalizeMatchText(firstNonEmptyString(step["expected"], step["result"]))
+			signatures = append(signatures, content+"=>"+expected)
+		}
+	}
+	return signatures
+}
+
+func normalizeMatchText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), ""))
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func firstNonEmptyString(values ...any) string {
+	for _, value := range values {
+		if text := stringValue(value); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func firstPositiveIndex(values ...int) int {
+	best := -1
+	for _, value := range values {
+		if value < 0 {
+			continue
+		}
+		if best == -1 || value < best {
+			best = value
+		}
+	}
+	return best
+}
+
+func max(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
