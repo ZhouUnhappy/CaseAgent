@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"caseagent/internal/config"
@@ -163,6 +164,28 @@ func (s *Service) SearchKnowledge(ctx context.Context, query string, topK int, k
 	return results, nil
 }
 
+func (s *Service) SearchKnowledgeMultiQuery(ctx context.Context, queries []string, topK int, kbType string) ([]KnowledgeResult, error) {
+	normalizedQueries := normalizeQueries(queries)
+	if len(normalizedQueries) == 0 {
+		return []KnowledgeResult{}, nil
+	}
+
+	if topK <= 0 {
+		topK = defaultTopK
+	}
+
+	resultSets := make([][]KnowledgeResult, 0, len(normalizedQueries))
+	for _, query := range normalizedQueries {
+		results, err := s.SearchKnowledge(ctx, query, topK, kbType)
+		if err != nil {
+			return nil, fmt.Errorf("search knowledge with query %q: %w", query, err)
+		}
+		resultSets = append(resultSets, results)
+	}
+
+	return mergeKnowledgeResultSets(resultSets, topK), nil
+}
+
 func (s *Service) newRetriever(ctx context.Context) (*pgvector.Retriever, error) {
 	cfg := config.Get()
 	return pgvector.NewRetriever(ctx, &pgvector.RetrieverConfig{
@@ -266,4 +289,88 @@ func isDocumentSearchable(document models.Document) bool {
 
 func isKnowledgeSearchable(entry *models.KnowledgeBase) bool {
 	return entry != nil && entry.Status == models.KnowledgeStatusCompleted
+}
+
+func normalizeQueries(queries []string) []string {
+	normalized := make([]string, 0, len(queries))
+	seen := make(map[string]struct{}, len(queries))
+	for _, query := range queries {
+		trimmed := strings.TrimSpace(query)
+		if trimmed == "" {
+			continue
+		}
+
+		key := strings.ToLower(strings.Join(strings.Fields(trimmed), " "))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func mergeKnowledgeResultSets(resultSets [][]KnowledgeResult, topK int) []KnowledgeResult {
+	if topK <= 0 {
+		topK = defaultTopK
+	}
+
+	type scoredResult struct {
+		result   KnowledgeResult
+		score    float64
+		bestRank int
+		firstSet int
+	}
+
+	scoredByID := make(map[int]*scoredResult)
+	for setIdx, set := range resultSets {
+		for rank, item := range set {
+			score := 1.0 / float64(rank+1)
+			entry, ok := scoredByID[item.ID]
+			if !ok {
+				scoredByID[item.ID] = &scoredResult{
+					result:   item,
+					score:    score,
+					bestRank: rank,
+					firstSet: setIdx,
+				}
+				continue
+			}
+
+			entry.score += score
+			if rank < entry.bestRank {
+				entry.bestRank = rank
+				entry.result = item
+			}
+		}
+	}
+
+	scored := make([]scoredResult, 0, len(scoredByID))
+	for _, item := range scoredByID {
+		scored = append(scored, *item)
+	}
+
+	sort.SliceStable(scored, func(i int, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		if scored[i].bestRank != scored[j].bestRank {
+			return scored[i].bestRank < scored[j].bestRank
+		}
+		if scored[i].firstSet != scored[j].firstSet {
+			return scored[i].firstSet < scored[j].firstSet
+		}
+		return scored[i].result.ID < scored[j].result.ID
+	})
+
+	if len(scored) > topK {
+		scored = scored[:topK]
+	}
+
+	results := make([]KnowledgeResult, 0, len(scored))
+	for _, item := range scored {
+		results = append(results, item.result)
+	}
+
+	return results
 }

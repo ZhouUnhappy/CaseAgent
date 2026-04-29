@@ -84,9 +84,8 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	if err != nil {
 		return err
 	}
-	if len(knowledgeEntries) == 0 {
-		knowledgeEntries = retrieveKnowledgeFallback(ctx, s.db, requirements)
-	}
+	retrievedEntries := retrieveKnowledgeFallback(ctx, s.db, requirements, task.AffectedProducts, task.AffectedModules)
+	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, retrievedEntries)
 
 	agentSvc, err := agentservice.New(ctx, &agentservice.Config{})
 	if err != nil {
@@ -102,6 +101,7 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to parse generated cases: %w", err)
 	}
+	sections = dedupeGeneratedSections(sections)
 
 	if len(sections) == 0 {
 		return fmt.Errorf("no test cases generated")
@@ -310,7 +310,8 @@ func inferAffectedKnowledge(requirements string, knowledgeEntries []models.Knowl
 }
 
 func inferAffectedKnowledgeWithRetrieval(ctx context.Context, db *bun.DB, requirements string) ([]string, []string) {
-	results, err := retrievalservice.New(db).SearchKnowledge(ctx, requirements, 6, "")
+	queries := buildKnowledgeQueries(requirements, nil, nil)
+	results, err := retrievalservice.New(db).SearchKnowledgeMultiQuery(ctx, queries, 6, "")
 	if err != nil {
 		return nil, nil
 	}
@@ -377,8 +378,9 @@ func formatKnowledgeContext(entries []models.KnowledgeBase) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements string) []models.KnowledgeBase {
-	results, err := retrievalservice.New(db).SearchKnowledge(ctx, requirements, 6, "")
+func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements string, products []string, modules []string) []models.KnowledgeBase {
+	queries := buildKnowledgeQueries(requirements, products, modules)
+	results, err := retrievalservice.New(db).SearchKnowledgeMultiQuery(ctx, queries, 6, "")
 	if err != nil {
 		return nil
 	}
@@ -395,6 +397,99 @@ func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements str
 	}
 
 	return entries
+}
+
+func buildKnowledgeQueries(requirements string, products []string, modules []string) []string {
+	queries := make([]string, 0, 1+len(products)+len(modules))
+	if trimmed := strings.TrimSpace(requirements); trimmed != "" {
+		queries = append(queries, trimmed)
+	}
+	queries = append(queries, splitRequirementFragments(requirements, 3)...)
+	queries = append(queries, products...)
+	queries = append(queries, modules...)
+	if len(products) > 0 || len(modules) > 0 {
+		queries = append(queries, strings.Join(append(append([]string{}, products...), modules...), " "))
+	}
+	return dedupeNonEmptyStrings(queries)
+}
+
+func splitRequirementFragments(requirements string, maxFragments int) []string {
+	replacer := strings.NewReplacer(
+		"\r", "\n",
+		"。", "\n",
+		"！", "\n",
+		"？", "\n",
+		";", "\n",
+		"；", "\n",
+		".", "\n",
+		"!", "\n",
+		"?", "\n",
+	)
+
+	segments := strings.Split(replacer.Replace(requirements), "\n")
+	fragments := make([]string, 0, maxFragments)
+	for _, segment := range segments {
+		trimmed := strings.TrimSpace(segment)
+		if len([]rune(trimmed)) < 8 {
+			continue
+		}
+		fragments = append(fragments, trimmed)
+		if len(fragments) >= maxFragments {
+			break
+		}
+	}
+	return fragments
+}
+
+func dedupeNonEmptyStrings(values []string) []string {
+	deduped := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := normalizeMatchText(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, trimmed)
+	}
+	return deduped
+}
+
+func mergeKnowledgeEntries(primary []models.KnowledgeBase, secondary []models.KnowledgeBase) []models.KnowledgeBase {
+	if len(primary) == 0 && len(secondary) == 0 {
+		return nil
+	}
+
+	merged := make([]models.KnowledgeBase, 0, len(primary)+len(secondary))
+	seen := make(map[int]struct{}, len(primary)+len(secondary))
+
+	for _, entry := range primary {
+		if entry.ID <= 0 {
+			continue
+		}
+		if _, ok := seen[entry.ID]; ok {
+			continue
+		}
+		seen[entry.ID] = struct{}{}
+		merged = append(merged, entry)
+	}
+
+	for _, entry := range secondary {
+		if entry.ID <= 0 {
+			continue
+		}
+		if _, ok := seen[entry.ID]; ok {
+			continue
+		}
+		seen[entry.ID] = struct{}{}
+		merged = append(merged, entry)
+	}
+
+	return merged
 }
 
 func parseGeneratedSections(raw string) ([]generatedSection, error) {
@@ -479,6 +574,76 @@ func groupFlatCases(flatCases []map[string]any) []generatedSection {
 	}
 
 	return sections
+}
+
+func dedupeGeneratedSections(sections []generatedSection) []generatedSection {
+	seen := make(map[string]struct{})
+	deduped := make([]generatedSection, 0, len(sections))
+
+	for _, section := range sections {
+		filteredCases := make([]map[string]any, 0, len(section.Cases))
+		for _, caseItem := range section.Cases {
+			signature := caseSignature(caseItem)
+			if signature == "" {
+				continue
+			}
+			if _, ok := seen[signature]; ok {
+				continue
+			}
+			seen[signature] = struct{}{}
+			filteredCases = append(filteredCases, caseItem)
+		}
+
+		if len(filteredCases) == 0 {
+			continue
+		}
+
+		deduped = append(deduped, generatedSection{
+			Section: section.Section,
+			Cases:   filteredCases,
+		})
+	}
+
+	return deduped
+}
+
+func caseSignature(item map[string]any) string {
+	title := normalizeMatchText(stringValue(item["title"]))
+	preconds := normalizeMatchText(stringValue(item["custom_preconds"]))
+	steps := normalizeStepSignatures(item["custom_steps_separated"])
+
+	if title == "" && len(steps) == 0 {
+		return ""
+	}
+
+	return title + "|" + preconds + "|" + strings.Join(steps, "||")
+}
+
+func normalizeStepSignatures(value any) []string {
+	normalize := func(step map[string]any) string {
+		content := normalizeMatchText(firstNonEmptyString(step["content"], step["step"]))
+		expected := normalizeMatchText(firstNonEmptyString(step["expected"], step["result"]))
+		return content + "=>" + expected
+	}
+
+	signatures := make([]string, 0)
+
+	switch typed := value.(type) {
+	case []map[string]any:
+		for _, step := range typed {
+			signatures = append(signatures, normalize(step))
+		}
+	case []any:
+		for _, raw := range typed {
+			stepMap, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			signatures = append(signatures, normalize(stepMap))
+		}
+	}
+
+	return signatures
 }
 
 func normalizeCase(item map[string]any, fallbackSection string) map[string]any {

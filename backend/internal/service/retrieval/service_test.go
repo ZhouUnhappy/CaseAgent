@@ -47,3 +47,46 @@ func TestIsKnowledgeSearchable(t *testing.T) {
 		t.Fatal("nil knowledge entry should not be searchable")
 	}
 }
+
+func TestNormalizeQueries(t *testing.T) {
+	queries := []string{
+		"  product A upgrade  ",
+		"Product  A   Upgrade",
+		"",
+		"module-b",
+		" module-b ",
+	}
+
+	normalized := normalizeQueries(queries)
+	if len(normalized) != 2 {
+		t.Fatalf("expected 2 unique queries, got %#v", normalized)
+	}
+
+	if normalized[0] != "product A upgrade" {
+		t.Fatalf("unexpected first query: %q", normalized[0])
+	}
+	if normalized[1] != "module-b" {
+		t.Fatalf("unexpected second query: %q", normalized[1])
+	}
+}
+
+func TestMergeKnowledgeResultSets(t *testing.T) {
+	set1 := []KnowledgeResult{
+		{ID: 1, Name: "Product-A"},
+		{ID: 2, Name: "Module-B"},
+	}
+	set2 := []KnowledgeResult{
+		{ID: 2, Name: "Module-B"},
+		{ID: 3, Name: "Module-C"},
+	}
+
+	merged := mergeKnowledgeResultSets([][]KnowledgeResult{set1, set2}, 3)
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 merged results, got %d", len(merged))
+	}
+
+	// ID=2 appears in both result sets and should rank first after score aggregation.
+	if merged[0].ID != 2 {
+		t.Fatalf("expected first result ID=2, got %d", merged[0].ID)
+	}
+}

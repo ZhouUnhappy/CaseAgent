@@ -92,3 +92,53 @@ func TestInferAffectedKnowledge(t *testing.T) {
 		t.Fatalf("unexpected modules: %#v", modules)
 	}
 }
+
+func TestBuildKnowledgeQueries(t *testing.T) {
+	requirements := "升级 Product-A。需要覆盖 Module-B 的故障恢复；并验证回滚流程。"
+	queries := buildKnowledgeQueries(requirements, []string{"Product-A"}, []string{"Module-B"})
+
+	if len(queries) < 3 {
+		t.Fatalf("expected multiple knowledge queries, got %#v", queries)
+	}
+
+	if queries[0] != requirements {
+		t.Fatalf("expected full requirements as first query, got %q", queries[0])
+	}
+}
+
+func TestDedupeGeneratedSections(t *testing.T) {
+	sections := []generatedSection{
+		{
+			Section: "功能测试",
+			Cases: []map[string]any{
+				{
+					"title":           "验证创建成功",
+					"custom_preconds": "服务已启动",
+					"custom_steps_separated": []map[string]any{
+						{"content": "提交请求", "expected": "成功"},
+					},
+				},
+			},
+		},
+		{
+			Section: "边界测试",
+			Cases: []map[string]any{
+				{
+					"title":           "验证创建成功",
+					"custom_preconds": "服务已启动",
+					"custom_steps_separated": []map[string]any{
+						{"content": "提交请求", "expected": "成功"},
+					},
+				},
+			},
+		},
+	}
+
+	deduped := dedupeGeneratedSections(sections)
+	if len(deduped) != 1 {
+		t.Fatalf("expected 1 section after dedupe, got %d", len(deduped))
+	}
+	if len(deduped[0].Cases) != 1 {
+		t.Fatalf("expected 1 case after dedupe, got %d", len(deduped[0].Cases))
+	}
+}
