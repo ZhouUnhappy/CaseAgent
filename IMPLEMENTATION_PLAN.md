@@ -30,7 +30,6 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 - chat 当前支持 Ark；embedding 当前支持 Ark / OpenAI-compatible。
 - embedding 维度通过 `model.embedding.dimensions` 显式配置。
 - 当前工程对 `Qwen3-Embedding-8B` 使用 `2000` 维输出，以兼容 `pgvector + ivfflat` 索引约束。
-- 若需高于 `2000` 维向量，必须先重评向量类型与索引策略。
 - Google Drive 集成通过本地 `gws drive files export` 命令调用，无 Docker 依赖。
 
 ## 迭代总览（截至 2026-04-29）
@@ -90,7 +89,6 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 ## 风险与约束
 
 - 知识库当前仍采用“整篇文档一个 embedding”，召回粒度弱于文档分块。
-- `vector + ivfflat` 高维约束已影响 embedding 模型选择。
 - 历史异维度向量虽可治理，但重建速度、失败恢复与结果稳定性仍需观察。
 - 多 Agent 协同当前更接近“骨架可跑”，距离稳定生产用例仍有差距。
 
