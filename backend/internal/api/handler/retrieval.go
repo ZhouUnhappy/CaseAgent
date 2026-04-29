@@ -9,9 +9,10 @@ import (
 )
 
 type SearchDocumentsRequest struct {
-	Query       string `json:"query" binding:"required"`
-	TopK        int    `json:"top_k"`
-	DocumentIDs []int  `json:"document_ids"`
+	Query       string   `json:"query"`
+	Queries     []string `json:"queries"`
+	TopK        int      `json:"top_k"`
+	DocumentIDs []int    `json:"document_ids"`
 }
 
 type SearchKnowledgeRequest struct {
@@ -28,7 +29,24 @@ func (h *Handler) SearchDocuments(c *gin.Context) {
 	}
 
 	svc := retrievalservice.New(h.DB)
-	results, err := svc.SearchDocuments(c, req.Query, req.TopK, req.DocumentIDs)
+	queries := append([]string{}, req.Queries...)
+	if req.Query != "" {
+		queries = append([]string{req.Query}, queries...)
+	}
+	if len(queries) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "query or queries is required"})
+		return
+	}
+
+	var (
+		results []retrievalservice.DocumentResult
+		err     error
+	)
+	if len(queries) == 1 {
+		results, err = svc.SearchDocuments(c, queries[0], req.TopK, req.DocumentIDs)
+	} else {
+		results, err = svc.SearchDocumentsMultiQuery(c, queries, req.TopK, req.DocumentIDs)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

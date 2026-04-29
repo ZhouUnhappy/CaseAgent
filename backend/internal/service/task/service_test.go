@@ -142,3 +142,15 @@ func TestDedupeGeneratedSections(t *testing.T) {
 		t.Fatalf("expected 1 case after dedupe, got %d", len(deduped[0].Cases))
 	}
 }
+
+func TestBuildDocumentQueries(t *testing.T) {
+	requirements := "升级 Product-A。需要覆盖 Module-B 的故障恢复；并验证回滚流程。"
+	queries := buildDocumentQueries(requirements, []string{"Product-A"}, []string{"Module-B"})
+
+	if len(queries) < 3 {
+		t.Fatalf("expected multiple document queries, got %#v", queries)
+	}
+	if queries[0] != requirements {
+		t.Fatalf("expected full requirements as first query, got %q", queries[0])
+	}
+}

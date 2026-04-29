@@ -118,6 +118,28 @@ func (s *Service) SearchDocuments(ctx context.Context, query string, topK int, d
 	return results, nil
 }
 
+func (s *Service) SearchDocumentsMultiQuery(ctx context.Context, queries []string, topK int, documentIDs []int) ([]DocumentResult, error) {
+	normalizedQueries := normalizeQueries(queries)
+	if len(normalizedQueries) == 0 {
+		return []DocumentResult{}, nil
+	}
+
+	if topK <= 0 {
+		topK = defaultTopK
+	}
+
+	resultSets := make([][]DocumentResult, 0, len(normalizedQueries))
+	for _, query := range normalizedQueries {
+		results, err := s.SearchDocuments(ctx, query, topK, documentIDs)
+		if err != nil {
+			return nil, fmt.Errorf("search documents with query %q: %w", query, err)
+		}
+		resultSets = append(resultSets, results)
+	}
+
+	return mergeDocumentResultSets(resultSets, topK), nil
+}
+
 func (s *Service) SearchKnowledge(ctx context.Context, query string, topK int, kbType string) ([]KnowledgeResult, error) {
 	retriever, err := s.newRetriever(ctx)
 	if err != nil {
@@ -373,4 +395,91 @@ func mergeKnowledgeResultSets(resultSets [][]KnowledgeResult, topK int) []Knowle
 	}
 
 	return results
+}
+
+func mergeDocumentResultSets(resultSets [][]DocumentResult, topK int) []DocumentResult {
+	if topK <= 0 {
+		topK = defaultTopK
+	}
+
+	type scoredResult struct {
+		result   DocumentResult
+		score    float64
+		bestRank int
+		firstSet int
+	}
+
+	scoredByID := make(map[int]*scoredResult)
+	for setIdx, set := range resultSets {
+		for rank, item := range set {
+			score := 1.0 / float64(rank+1)
+			entry, ok := scoredByID[item.DocumentID]
+			if !ok {
+				normalized := item
+				normalized.MatchedChunks = dedupeChunks(item.MatchedChunks)
+				scoredByID[item.DocumentID] = &scoredResult{
+					result:   normalized,
+					score:    score,
+					bestRank: rank,
+					firstSet: setIdx,
+				}
+				continue
+			}
+
+			entry.score += score
+			entry.result.MatchedChunks = dedupeChunks(append(entry.result.MatchedChunks, item.MatchedChunks...))
+			if rank < entry.bestRank {
+				entry.bestRank = rank
+				entry.result.ParentDocID = item.ParentDocID
+				entry.result.Name = item.Name
+				entry.result.Content = item.Content
+			}
+		}
+	}
+
+	scored := make([]scoredResult, 0, len(scoredByID))
+	for _, item := range scoredByID {
+		scored = append(scored, *item)
+	}
+
+	sort.SliceStable(scored, func(i int, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		if scored[i].bestRank != scored[j].bestRank {
+			return scored[i].bestRank < scored[j].bestRank
+		}
+		if scored[i].firstSet != scored[j].firstSet {
+			return scored[i].firstSet < scored[j].firstSet
+		}
+		return scored[i].result.DocumentID < scored[j].result.DocumentID
+	})
+
+	if len(scored) > topK {
+		scored = scored[:topK]
+	}
+
+	results := make([]DocumentResult, 0, len(scored))
+	for _, item := range scored {
+		results = append(results, item.result)
+	}
+	return results
+}
+
+func dedupeChunks(chunks []string) []string {
+	deduped := make([]string, 0, len(chunks))
+	seen := make(map[string]struct{}, len(chunks))
+	for _, chunk := range chunks {
+		trimmed := strings.TrimSpace(chunk)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(strings.Join(strings.Fields(trimmed), " "))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, trimmed)
+	}
+	return deduped
 }

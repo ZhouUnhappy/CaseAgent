@@ -86,13 +86,14 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	}
 	retrievedEntries := retrieveKnowledgeFallback(ctx, s.db, requirements, task.AffectedProducts, task.AffectedModules)
 	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, retrievedEntries)
+	requirementsContext := buildRequirementsContext(ctx, s.db, requirements, task.DocumentIDs, task.AffectedProducts, task.AffectedModules)
 
 	agentSvc, err := agentservice.New(ctx, &agentservice.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to initialize agent service: %w", err)
 	}
 
-	rawCases, err := agentSvc.GenerateCases(ctx, requirements, formatKnowledgeContext(knowledgeEntries))
+	rawCases, err := agentSvc.GenerateCases(ctx, requirementsContext, formatKnowledgeContext(knowledgeEntries))
 	if err != nil {
 		return fmt.Errorf("failed to generate cases: %w", err)
 	}
@@ -490,6 +491,60 @@ func mergeKnowledgeEntries(primary []models.KnowledgeBase, secondary []models.Kn
 	}
 
 	return merged
+}
+
+func buildRequirementsContext(ctx context.Context, db *bun.DB, requirements string, documentIDs []int, products []string, modules []string) string {
+	queries := buildDocumentQueries(requirements, products, modules)
+	if len(queries) == 0 || len(documentIDs) == 0 {
+		return requirements
+	}
+
+	results, err := retrievalservice.New(db).SearchDocumentsMultiQuery(ctx, queries, 4, documentIDs)
+	if err != nil || len(results) == 0 {
+		return requirements
+	}
+
+	var builder strings.Builder
+	builder.WriteString("## 需求命中上下文（基于文档检索）\n\n")
+	for _, result := range results {
+		builder.WriteString("### 文档：")
+		builder.WriteString(result.Name)
+		builder.WriteString("\n\n")
+
+		chunks := dedupeNonEmptyStrings(result.MatchedChunks)
+		maxChunks := 3
+		if len(chunks) < maxChunks {
+			maxChunks = len(chunks)
+		}
+		for idx := 0; idx < maxChunks; idx++ {
+			builder.WriteString("- ")
+			builder.WriteString(chunks[idx])
+			builder.WriteString("\n")
+		}
+		builder.WriteString("\n")
+	}
+
+	context := strings.TrimSpace(builder.String())
+	if context == "" {
+		return requirements
+	}
+
+	// If retrieval context is too short, append original requirements as fallback context.
+	if len([]rune(context)) < 400 {
+		return context + "\n\n## 完整需求文档\n\n" + requirements
+	}
+	return context
+}
+
+func buildDocumentQueries(requirements string, products []string, modules []string) []string {
+	queries := make([]string, 0, 1+len(products)+len(modules))
+	if trimmed := strings.TrimSpace(requirements); trimmed != "" {
+		queries = append(queries, trimmed)
+	}
+	queries = append(queries, splitRequirementFragments(requirements, 4)...)
+	queries = append(queries, products...)
+	queries = append(queries, modules...)
+	return dedupeNonEmptyStrings(queries)
 }
 
 func parseGeneratedSections(raw string) ([]generatedSection, error) {

@@ -90,3 +90,41 @@ func TestMergeKnowledgeResultSets(t *testing.T) {
 		t.Fatalf("expected first result ID=2, got %d", merged[0].ID)
 	}
 }
+
+func TestMergeDocumentResultSets(t *testing.T) {
+	set1 := []DocumentResult{
+		{DocumentID: 1, Name: "Doc-1", MatchedChunks: []string{"step A", "step B"}},
+		{DocumentID: 2, Name: "Doc-2", MatchedChunks: []string{"step C"}},
+	}
+	set2 := []DocumentResult{
+		{DocumentID: 2, Name: "Doc-2", MatchedChunks: []string{"step C", "step D"}},
+		{DocumentID: 3, Name: "Doc-3", MatchedChunks: []string{"step E"}},
+	}
+
+	merged := mergeDocumentResultSets([][]DocumentResult{set1, set2}, 3)
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 merged results, got %d", len(merged))
+	}
+	if merged[0].DocumentID != 2 {
+		t.Fatalf("expected first document to be ID=2, got %d", merged[0].DocumentID)
+	}
+	if len(merged[0].MatchedChunks) != 2 {
+		t.Fatalf("expected deduped matched chunks, got %#v", merged[0].MatchedChunks)
+	}
+}
+
+func TestDedupeChunks(t *testing.T) {
+	chunks := []string{
+		"  first chunk ",
+		"first   chunk",
+		"",
+		"second chunk",
+	}
+	got := dedupeChunks(chunks)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 deduped chunks, got %#v", got)
+	}
+	if got[0] != "first chunk" || got[1] != "second chunk" {
+		t.Fatalf("unexpected dedupe order: %#v", got)
+	}
+}
