@@ -32,13 +32,20 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 - 当前工程对 `Qwen3-Embedding-8B` 使用 `2000` 维输出，以兼容 `pgvector + ivfflat` 索引约束。
 - Google Drive 集成通过本地 `gws drive files export` 命令调用，无 Docker 依赖。
 
-## 迭代总览（截至 2026-04-29）
+## 迭代总览
 
 | 迭代 | 主题 | 状态 |
 | --- | --- | --- |
 | Iteration 1 | 数据闭环（文档/知识库 -> 向量化 -> 检索） | In Progress |
 | Iteration 2 | 生成闭环（需求 -> 检索增强 -> Agent -> 用例落库） | In Progress |
 | Iteration 3 | 产品化闭环（前端工作台 + 审核体验） | Todo |
+
+## 执行约束
+
+- 默认按迭代顺序执行：`Iteration 1 -> Iteration 2 -> Iteration 3`。
+- 每个迭代必须先满足本迭代 DoD 并补充可复现验证证据，再进入下一迭代。
+- 当前出现多个迭代 `In Progress` 属于历史原因（早期先实现、后补迭代规划），不是后续目标节奏。
+- 从本计划版本起，按分阶段验收推进，避免最终集中返工。
 
 ## Iteration 1：数据闭环（最高优先级）
 
