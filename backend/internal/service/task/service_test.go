@@ -154,3 +154,34 @@ func TestBuildDocumentQueries(t *testing.T) {
 		t.Fatalf("expected full requirements as first query, got %q", queries[0])
 	}
 }
+
+func TestAttachCaseContext(t *testing.T) {
+	sections := []generatedSection{
+		{
+			Section: "功能测试",
+			Cases: []map[string]any{
+				{
+					"title": "验证创建成功",
+				},
+			},
+		},
+	}
+
+	enriched := attachCaseContext(sections, []string{"Product-A"}, []string{"Module-B"})
+	if len(enriched) != 1 || len(enriched[0].Cases) != 1 {
+		t.Fatalf("unexpected enriched result: %#v", enriched)
+	}
+
+	caseItem := enriched[0].Cases[0]
+	products, ok := caseItem["affected_products"].([]string)
+	if !ok || len(products) != 1 || products[0] != "Product-A" {
+		t.Fatalf("unexpected affected_products: %#v", caseItem["affected_products"])
+	}
+	modules, ok := caseItem["affected_modules"].([]string)
+	if !ok || len(modules) != 1 || modules[0] != "Module-B" {
+		t.Fatalf("unexpected affected_modules: %#v", caseItem["affected_modules"])
+	}
+	if caseItem["section"] != "功能测试" {
+		t.Fatalf("unexpected section field: %#v", caseItem["section"])
+	}
+}

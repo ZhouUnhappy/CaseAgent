@@ -1,6 +1,9 @@
 package document
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRemoveBase64Images(t *testing.T) {
 	input := "before\n![diagram](data:image/png;base64,AAAA)\nafter"
@@ -31,5 +34,21 @@ func TestSplitByHeaders(t *testing.T) {
 	}
 	if chunks[len(chunks)-1] != "## Second\nline 4" {
 		t.Fatalf("unexpected final chunk: %q", chunks[len(chunks)-1])
+	}
+}
+
+func TestSplitLargeChunk(t *testing.T) {
+	longParagraph := strings.Repeat("a", 1400)
+	chunk := "## Header\n\n" + longParagraph + "\n\n" + strings.Repeat("b", 500)
+
+	parts := splitLargeChunk(chunk, 600)
+	if len(parts) < 3 {
+		t.Fatalf("expected long chunk to be split into multiple parts, got %d", len(parts))
+	}
+
+	for idx, part := range parts {
+		if len([]rune(part)) > 600 {
+			t.Fatalf("part %d exceeds limit: %d", idx, len([]rune(part)))
+		}
 	}
 }

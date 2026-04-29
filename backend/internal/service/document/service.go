@@ -22,6 +22,8 @@ type Service struct {
 	embedding embedding.Embedder
 }
 
+const maxChunkRunes = 1200
+
 func New(ctx context.Context, db *bun.DB) (*Service, error) {
 	cfg := config.Get()
 	embedder, err := ai.NewEmbedder(ctx, cfg.Model.Embedding)
@@ -178,7 +180,7 @@ func (s *Service) splitByHeaders(content string) []string {
 		if chunk == "" {
 			continue
 		}
-		filtered = append(filtered, chunk)
+		filtered = append(filtered, splitLargeChunk(chunk, maxChunkRunes)...)
 	}
 
 	return filtered
@@ -239,4 +241,75 @@ func errorsJoin(base error, next error) error {
 		return base
 	}
 	return fmt.Errorf("%v; %w", base, next)
+}
+
+func splitLargeChunk(chunk string, maxRunes int) []string {
+	if maxRunes <= 0 || len([]rune(chunk)) <= maxRunes {
+		return []string{chunk}
+	}
+
+	parts := strings.Split(chunk, "\n\n")
+	results := make([]string, 0, len(parts))
+	var builder strings.Builder
+
+	flush := func() {
+		trimmed := strings.TrimSpace(builder.String())
+		if trimmed == "" {
+			return
+		}
+		results = append(results, trimmed)
+		builder.Reset()
+	}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		if len([]rune(part)) > maxRunes {
+			flush()
+			results = append(results, hardSplitByRunes(part, maxRunes)...)
+			continue
+		}
+
+		candidate := part
+		if builder.Len() > 0 {
+			candidate = builder.String() + "\n\n" + part
+		}
+		if len([]rune(candidate)) > maxRunes {
+			flush()
+			builder.WriteString(part)
+			continue
+		}
+
+		if builder.Len() > 0 {
+			builder.WriteString("\n\n")
+		}
+		builder.WriteString(part)
+	}
+
+	flush()
+	return results
+}
+
+func hardSplitByRunes(content string, maxRunes int) []string {
+	if maxRunes <= 0 || len([]rune(content)) <= maxRunes {
+		return []string{strings.TrimSpace(content)}
+	}
+
+	runes := []rune(content)
+	segments := make([]string, 0, len(runes)/maxRunes+1)
+	for start := 0; start < len(runes); start += maxRunes {
+		end := start + maxRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		segment := strings.TrimSpace(string(runes[start:end]))
+		if segment == "" {
+			continue
+		}
+		segments = append(segments, segment)
+	}
+	return segments
 }

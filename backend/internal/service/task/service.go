@@ -103,6 +103,7 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 		return fmt.Errorf("failed to parse generated cases: %w", err)
 	}
 	sections = dedupeGeneratedSections(sections)
+	sections = attachCaseContext(sections, task.AffectedProducts, task.AffectedModules)
 
 	if len(sections) == 0 {
 		return fmt.Errorf("no test cases generated")
@@ -672,6 +673,49 @@ func caseSignature(item map[string]any) string {
 	}
 
 	return title + "|" + preconds + "|" + strings.Join(steps, "||")
+}
+
+func attachCaseContext(sections []generatedSection, products []string, modules []string) []generatedSection {
+	if len(sections) == 0 {
+		return sections
+	}
+
+	normalizedProducts := append([]string{}, products...)
+	normalizedModules := append([]string{}, modules...)
+
+	result := make([]generatedSection, 0, len(sections))
+	for _, section := range sections {
+		cases := make([]map[string]any, 0, len(section.Cases))
+		for _, item := range section.Cases {
+			if item == nil {
+				continue
+			}
+
+			cloned := make(map[string]any, len(item)+3)
+			for key, value := range item {
+				cloned[key] = value
+			}
+
+			if _, ok := cloned["affected_products"]; !ok {
+				cloned["affected_products"] = normalizedProducts
+			}
+			if _, ok := cloned["affected_modules"]; !ok {
+				cloned["affected_modules"] = normalizedModules
+			}
+			if _, ok := cloned["section"]; !ok {
+				cloned["section"] = section.Section
+			}
+
+			cases = append(cases, cloned)
+		}
+
+		result = append(result, generatedSection{
+			Section: section.Section,
+			Cases:   cases,
+		})
+	}
+
+	return result
 }
 
 func normalizeStepSignatures(value any) []string {

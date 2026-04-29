@@ -16,9 +16,10 @@ type SearchDocumentsRequest struct {
 }
 
 type SearchKnowledgeRequest struct {
-	Query string `json:"query" binding:"required"`
-	TopK  int    `json:"top_k"`
-	Type  string `json:"type"`
+	Query   string   `json:"query"`
+	Queries []string `json:"queries"`
+	TopK    int      `json:"top_k"`
+	Type    string   `json:"type"`
 }
 
 func (h *Handler) SearchDocuments(c *gin.Context) {
@@ -65,7 +66,24 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 
 	svc := retrievalservice.New(h.DB)
-	results, err := svc.SearchKnowledge(c, req.Query, req.TopK, req.Type)
+	queries := append([]string{}, req.Queries...)
+	if req.Query != "" {
+		queries = append([]string{req.Query}, queries...)
+	}
+	if len(queries) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "query or queries is required"})
+		return
+	}
+
+	var (
+		results []retrievalservice.KnowledgeResult
+		err     error
+	)
+	if len(queries) == 1 {
+		results, err = svc.SearchKnowledge(c, queries[0], req.TopK, req.Type)
+	} else {
+		results, err = svc.SearchKnowledgeMultiQuery(c, queries, req.TopK, req.Type)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
