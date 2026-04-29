@@ -141,7 +141,12 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 	if err != nil {
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
-	return string(payload), nil
+
+	refined, err := s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
+	if err != nil || strings.TrimSpace(refined) == "" {
+		return string(payload), nil
+	}
+	return refined, nil
 }
 
 type generatedSection struct {
