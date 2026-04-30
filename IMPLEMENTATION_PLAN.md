@@ -53,9 +53,9 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 
 | ID | 任务项 | 状态 | DoD（完成定义） | 验证证据 |
 | --- | --- | --- | --- | --- |
-| I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且文档检索稳定命中。 | 待补：创建项目、上传固定 fixture、等待文档 `completed`、确认 `document_chunks` 行数大于 0、调用 `POST /api/v1/retrieval/documents` 返回目标文档与命中片段。 |
-| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且知识库检索稳定命中。 | 待补：创建固定 product/module 知识库、等待状态 `completed`、确认 embedding 已写入、调用 `POST /api/v1/retrieval/knowledge` 返回目标知识条目。 |
-| I1-T3 | 检索回归样例沉淀 | Todo | 至少 2 条可复现回归样例（文档/知识库各 1 条），包含输入 fixture、查询词、期望命中对象、执行命令与实际结果摘要。 | 待补充。 |
+| I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | Blocked | 可重复执行一套联调步骤，且文档检索稳定命中。 | 已补 `testdata/i1/requirement.md` 与 `scripts/i1_retrieval_smoke.sh`；`2026-04-30` 后端启动会补齐老库 `documents.content`，smoke 已验证上传、分块、embedding、文档状态 `completed`，但完整检索校验因本轮 Agent 本机 HTTP 提权被拒未完成。下一步执行 `bash scripts/i1_retrieval_smoke.sh` 补充结果。 |
+| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | Blocked | 可重复执行一套联调步骤，且知识库检索稳定命中。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 `scripts/i1_retrieval_smoke.sh`；`2026-04-30` 修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列，完整知识库 smoke 因本轮 Agent 本机 HTTP 提权被拒未完成。下一步执行 `bash scripts/i1_retrieval_smoke.sh` 补充结果。 |
+| I1-T3 | 检索回归样例沉淀 | In Progress | 至少 2 条可复现回归样例（文档/知识库各 1 条），包含输入 fixture、查询词、期望命中对象、执行命令与实际结果摘要。 | 已补固定 fixture 与 smoke 脚本作为回归样例载体；待执行后补充实际结果摘要。 |
 | I1-T4 | 知识库分块检索评估与改造 | Todo | 使用长知识库 fixture 验证整篇 embedding 的召回效果；若召回不稳定，则实现知识库分块向量化、按父知识条目聚合返回，并补充回归样例；若召回稳定，则记录验证证据后关闭任务。 | 待补：长知识库 fixture、查询词、期望命中条目、现有整篇 embedding 召回结果；如需改造，补充分块后召回对比结果。 |
 
 ### 当前已完成能力（支撑 I1）
