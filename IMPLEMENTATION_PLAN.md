@@ -2,13 +2,13 @@
 
 ## 文档用途
 
-这份文档用于指导 AI 与研发执行实现工作，按迭代维护：
+按迭代维护以下三件事：
 
 - 要做什么：任务项（Task）。
 - 什么算完成：完成定义（DoD, Definition of Done）。
-- 当前做到哪：状态与验证证据。
+- 当前做到哪：状态与已发生的进展。
 
-不再额外维护独立的“进度快照”文档。
+不维护额外的进度快照文档。
 
 ## 项目终态
 
@@ -40,24 +40,24 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 | Iteration 2 | 生成闭环（需求 -> 检索增强 -> Agent -> 用例落库） | Todo |
 | Iteration 3 | 产品化闭环（前端工作台 + 审核体验） | Todo |
 
+迭代级 DoD = 本迭代所有任务 DoD 全部满足、进展列已落档为可复现证据。
+
 ## 执行约束
 
 - 默认按迭代顺序执行：`Iteration 1 -> Iteration 2 -> Iteration 3`。
-- 每个迭代必须先满足本迭代 DoD 并补充可复现验证证据，再进入下一迭代。
-- 同一时间只允许一个迭代保持 `In Progress`；后续迭代保持 `Todo`，已有代码能力记录在对应迭代的“当前已完成能力”中。
-- 从本计划版本起，按分阶段验收推进，避免最终集中返工。
+- 同一时间只允许一个迭代保持 `In Progress`，后续迭代保持 `Todo`，已有代码能力记录在对应迭代的“当前已完成能力”中。
+- 进入下一迭代前，本迭代所有任务必须为 `Done` 且进展列已落档为可复现证据。
 
 ## Iteration 1：数据闭环（最高优先级）
 
 ### 任务看板
 
-| ID | 任务项 | 状态 | DoD（完成定义） | 验证证据 |
+| ID | 任务项 | 状态 | DoD（完成定义） | 进展 |
 | --- | --- | --- | --- | --- |
-| I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且文档检索稳定命中本轮上传文档；脚本重复执行时不受历史数据影响。 | 已补 `testdata/i1/requirement.md` 与 `scripts/i1_retrieval_smoke.sh`；后端启动会补齐老库 `documents.content`。下一步在具备后端、PostgreSQL、pgvector、embedding 配置的环境执行 `bash scripts/i1_retrieval_smoke.sh`，补充完整上传、分块、embedding、状态与检索命中结果。 |
-| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且知识库检索稳定命中本轮创建知识条目；脚本重复执行时不受历史数据影响。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 `scripts/i1_retrieval_smoke.sh`；已修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列。下一步执行 smoke 并补充创建、embedding、状态与检索命中结果。 |
-| I1-T3 | 检索回归样例沉淀 | In Progress | 至少 2 条可复现回归样例（文档/知识库各 1 条），包含输入 fixture、查询词、期望命中对象、执行命令、前置环境与实际结果摘要。 | 已补固定 fixture 与 smoke 脚本作为回归样例载体；待执行后补充实际结果摘要。 |
-| I1-T4 | 知识库分块检索评估与改造 | Todo | 使用长知识库 fixture 验证整篇 embedding 的召回效果：fixture 需包含至少 3 个相互独立主题，每个主题有唯一查询词；每个查询在 `top_k=5` 内命中对应知识条目则记录为稳定，否则实现知识库分块向量化、按父知识条目聚合返回，并补充分块前后召回对比。 | 待补：长知识库 fixture、查询词、期望命中条目、现有整篇 embedding 召回结果；如需改造，补充 `knowledge_chunks`/父条目聚合/API 返回兼容性说明与对比结果。 |
-| I1-T5 | 联调脚本重复执行隔离 | Todo | smoke 每次运行使用唯一 run token 或清理策略，文档与知识库断言均校验本轮创建对象，避免旧数据、同名 fixture 或相似 embedding 影响结果。 | 当前文档检索已按 `document_ids` 限定；知识库检索仍需补充本轮 ID/metadata 校验或运行前清理策略。 |
+| I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | In Progress | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮 `document_ids` 与历史数据隔离；（b）文档状态最终为 `completed`、分块与 embedding 数量 > 0；（c）`top_k=5` 检索结果中本轮上传文档排名第一。 | 已补 `testdata/i1/requirement.md` 与 `scripts/i1_retrieval_smoke.sh`；文档检索已按 `document_ids` 限定；后端启动会补齐老库 `documents.content`。 |
+| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮创建对象 ID/metadata 与历史数据隔离；（b）知识条目状态最终为 `active`、embedding 已写入；（c）`top_k=5` 检索结果中本轮创建知识条目排名第一。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 smoke 脚本；已修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列；知识库检索断言尚未加入本轮 ID/metadata 校验。 |
+| I1-T3 | 检索回归样例沉淀 | In Progress | 在仓库内（建议 `docs/regression/i1_retrieval.md`）提交至少 2 条回归样例（文档/知识库各 1 条），每条包含：fixture 路径、查询词、期望命中对象、执行命令、前置环境、最近一次实际结果摘要；T1/T2 每次稳定通过后更新摘要。 | 已可复用：固定 fixture (`testdata/i1/`) 与 smoke 脚本作为回归样例载体；回归文档尚未提交。 |
+| I1-T4 | 知识库分块检索评估与改造 | Todo | 长知识库 fixture 包含至少 3 个相互独立主题，每个主题有唯一查询词。若每个查询在 `top_k=5` 内命中对应条目则视为整篇 embedding 稳定，记录证据后关闭；否则实现知识库分块向量化、按父知识条目聚合返回，并在 T3 回归样例中补充分块前后召回对比。 | 待补：长知识库 fixture、查询词、期望命中条目、现有整篇 embedding 召回结果；如需改造，补充 `knowledge_chunks`/父条目聚合/API 兼容性说明。 |
 
 ### 当前已完成能力（支撑 I1）
 
@@ -72,12 +72,12 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 
 ### 任务看板
 
-| ID | 任务项 | 状态 | DoD（完成定义） | 验证证据 |
+| ID | 任务项 | 状态 | DoD（完成定义） | 进展 |
 | --- | --- | --- | --- | --- |
-| I2-T1 | parent retriever 细化与上下文拼装增强 | Todo | 在现有需求检索上下文基础上，生成前上下文需包含父文档 ID/名称、命中片段、检索 query 与排序信息；同一 fixture 连续执行 3 次命中对象一致。 | 已有需求文档检索上下文拼装基础，但当前上下文主要是文本片段，追溯字段与稳定性证据不足。 |
-| I2-T2 | DeepAgent 协调逻辑完善 | Todo | 在现有 4 个子 Agent 顺序调用基线上，明确 DeepAgent/Agent Service 的职责边界；支持任务拆分、子 Agent 汇总、失败恢复，且任一子 Agent 失败不会阻塞其他结果入库。 | 当前为 Agent Service 顺序调用 4 个子 Agent，子 Agent 失败会跳过，结果汇总去重后交给 DeepAgent refine；DeepAgent 原生子 Agent 协调仍待完善。 |
-| I2-T3 | 生成质量控制（去重/结构化/追溯） | Todo | 生成结果结构满足 `docs/spec.md` 的 JSON 契约和数据库存储约束；重复用例可被去重；每个用例至少保留受影响产品/模块，并能追溯到生成使用的需求/知识上下文摘要。 | 已支持解析 section/flat JSON、默认字段归一、跨 section 去重、附带受影响产品/模块字段并落库；仍缺少来源上下文追溯证据。 |
-| I2-T4 | 生成闭环联调样例沉淀 | Todo | 完成“选定需求 -> 分析影响范围 -> 审核影响范围 -> 生成 -> 入库 -> 查询 -> 修改/提交”的可复现样例，并记录请求样例、关键响应、数据库结果和失败重试方式。 | 待补充。 |
+| I2-T1 | parent retriever 细化与上下文拼装增强 | Todo | 生成前的检索上下文包含：父文档 ID、父文档名称、命中片段文本、检索 query、片段排序与得分；同一 fixture 连续执行 3 次返回的命中对象与排序一致。 | 已有需求文档检索上下文拼装基础，但当前以文本片段为主，追溯字段与稳定性证据不足。 |
+| I2-T2 | DeepAgent 协调逻辑完善 | Todo | DeepAgent 与 Agent Service 的职责边界以代码注释或 `docs/` 内说明落档；任一子 Agent 失败可重试至少 1 次，重试后仍失败的子 Agent 不阻塞其他结果入库；选定需求 fixture 端到端跑通并落库 ≥1 条用例。 | 当前为 Agent Service 顺序调用 4 个子 Agent，子 Agent 失败会跳过，结果汇总去重后交给 DeepAgent refine；DeepAgent 原生子 Agent 协调仍待完善。 |
+| I2-T3 | 生成质量控制（去重/结构化/追溯） | Todo | 生成结果结构满足 `docs/spec.md` 的 JSON 契约和数据库存储约束；同 fixture 重复用例可被去重；每条用例至少保留受影响产品/模块字段，并能追溯到生成使用的需求/知识上下文（来源 ID 列表 + 关键片段）。 | 已支持解析 section/flat JSON、默认字段归一、跨 section 去重、附带受影响产品/模块字段并落库；仍缺少来源上下文追溯字段。 |
+| I2-T4 | 生成闭环联调样例沉淀 | Todo | 在仓库内提交端到端样例文档，覆盖“选定需求 -> 分析影响范围 -> 审核影响范围 -> 生成 -> 入库 -> 查询 -> 修改/提交”全流程，记录请求样例、关键响应、数据库结果、失败重试方式。 | 待补充。 |
 
 ### 当前已完成能力（支撑 I2）
 
@@ -89,11 +89,11 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 
 ### 任务看板
 
-| ID | 任务项 | 状态 | DoD（完成定义） | 验证证据 |
+| ID | 任务项 | 状态 | DoD（完成定义） | 进展 |
 | --- | --- | --- | --- | --- |
-| I3-T1 | 前端基础设施（`element-plus`、`pinia`、路由、布局） | Todo | 可承载业务页面开发，具备统一状态管理、路由框架、API client、统一错误处理入口；`npm run build` 通过。 | 当前仅有 Vue 3 + Vite 脚手架；`README.md` 描述了 Element Plus 目标，但 `frontend/package.json` 尚未接入。 |
-| I3-T2 | 业务页面（文档、知识库、任务、结果、审核） | Todo | 不依赖手工 API 调用即可走完“项目创建/选择 -> 文档上传 -> 知识库维护 -> 任务创建 -> 影响范围审核 -> 用例生成 -> 用例修改/提交”主流程，页面状态与后端状态一致。 | 待开始。 |
-| I3-T3 | 错误提示与运维可观测性 | Todo | 主要失败场景有用户可见提示，后端日志包含可定位的 task/document/knowledge ID；前端能展示 processing/completed/failed 状态并支持重试入口。 | 待开始。 |
+| I3-T1 | 前端基础设施（`element-plus`、`pinia`、路由、布局） | Todo | `frontend/package.json` 接入 `element-plus`、`pinia`、`vue-router`；提供布局壳（顶栏/侧栏/内容区）、统一 API client、统一错误处理入口；至少 1 个示例业务页面跑通；`npm run build` 通过。 | 当前仅有 Vue 3 + Vite 脚手架；`README.md` 描述了 Element Plus 目标，但 `frontend/package.json` 尚未接入。 |
+| I3-T2 | 业务页面（文档、知识库、任务、结果、审核） | Todo | 不依赖手工 API 调用即可走完“项目创建/选择 -> 文档上传 -> 知识库维护 -> 任务创建 -> 影响范围审核 -> 用例生成 -> 用例修改/提交”主流程；页面展示的状态字段（`processing`/`completed`/`failed`/`active` 等）直接来自后端响应，前端不本地推断。 | 待开始。 |
+| I3-T3 | 错误提示与运维可观测性 | Todo | 主要失败场景（上传失败、embedding 失败、生成失败）有用户可见提示并区分可重试 / 不可重试；后端日志在每条主要请求中包含 task / document / knowledge ID；前端能展示 `processing`/`completed`/`failed` 状态并提供重试入口。 | 待开始。 |
 
 ## 参考文件
 
@@ -105,7 +105,8 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 
 ## 维护约定
 
-- 所有迭代只维护“任务项 + 状态 + DoD + 验证证据”。
+- 所有迭代只维护“任务项 + 状态 + DoD + 进展”。
 - 状态只用：`Todo`、`In Progress`、`Blocked`、`Done`。
+- 进展列只填已发生的事实（已提交的文件、已跑通的脚本、已落库的数据），不写“下一步”；下一步由 DoD 与当前进展之差隐含。
 - 任务完成后必须补充可复现证据（接口样例、脚本、日志要点）。
 - 新任务先写 DoD，再进入 `In Progress`。
