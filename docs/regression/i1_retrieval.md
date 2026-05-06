@@ -52,11 +52,17 @@
 ## 复现执行流程
 
 1. 准备前置环境（见上）。
-2. 执行 `bash scripts/i1_retrieval_smoke.sh`，连续运行 3 次。每次结束前末尾会输出 `run_token=...`。
-3. 任一次失败，按错误信息处理：
+2. （推荐）启用旧数据自动清理，避免上一轮 smoke 留下的同 alias 知识条目影响 rank-1 断言：
+   ```
+   export CASEAGENT_PSQL_DSN='postgres://...'
+   export CASEAGENT_I1_CLEANUP_LEGACY=1
+   ```
+   也可以单独跑 `bash scripts/i1_retrieval_cleanup.sh --dry-run` 看候选。
+3. 执行 `bash scripts/i1_retrieval_smoke.sh`，连续运行 3 次。每次结束前末尾会输出 `run_token=...`。
+4. 任一次失败，按错误信息处理：
    - `document retrieval expected document <id> at rank 1` → 检查文档分块/embedding 是否成功；可启用 `CASEAGENT_PSQL_DSN` 让脚本同时校验数据库行。
-   - `knowledge retrieval expected module knowledge <id> at rank 1` → 多由历史 smoke 数据干扰：可清理 `knowledge_base` 中带 `metadata.aliases ? 'I1 smoke fixture'` 的旧行后重试。
-4. 3 次都通过后，把最新一次的 `run_token`、`document_id`、`module_knowledge_id` 与 `assert_*` 输出回填到本文件「最近一次实际结果摘要」段落。
+   - `knowledge retrieval expected module knowledge <id> at rank 1` → 多由历史 smoke 数据干扰：`bash scripts/i1_retrieval_cleanup.sh` 清掉带 `metadata.aliases ⊇ ["I1 smoke fixture"]` 的旧行后重试。
+5. 3 次都通过后，把最新一次的 `run_token`、`document_id`、`module_knowledge_id` 与 `assert_*` 输出回填到本文件「最近一次实际结果摘要」段落。
 
 ## 历史失败与处置（可选）
 

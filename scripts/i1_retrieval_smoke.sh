@@ -270,6 +270,16 @@ main() {
 
     log "base url: $BASE_URL"
     log "run token: $RUN_TOKEN"
+
+    if [ "${CASEAGENT_I1_CLEANUP_LEGACY:-0}" = "1" ]; then
+        if [ -z "${CASEAGENT_PSQL_DSN:-}" ]; then
+            echo "CASEAGENT_I1_CLEANUP_LEGACY=1 requires CASEAGENT_PSQL_DSN" >&2
+            exit 1
+        fi
+        log "running legacy cleanup before smoke"
+        bash "$ROOT_DIR/scripts/i1_retrieval_cleanup.sh"
+    fi
+
     create_project
     upload_document
     upload_knowledge "product" "I1 CaseAgent Cloud" "$PRODUCT_KNOWLEDGE_FIXTURE" PRODUCT_KNOWLEDGE_ID
