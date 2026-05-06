@@ -23,12 +23,13 @@
 
 ### 最近一次实际结果摘要
 
-- run_token：TBD（待首次成功执行后回填）
-- project_id / document_id：TBD
-- rank-1 document_id：TBD
-- matched_chunks 数量：TBD
-- document_chunks 行数（启用 PSQL 时）：TBD
-- 全部 chunk embedding 非空：TBD
+最近一轮：本地连续 3 次执行全部通过（CASEAGENT_I1_CLEANUP_LEGACY=1）。
+
+- run 1：run_token=`i1-20260506180250-15437`，project_id=6，document_id=4，rank-1 document_id=4，document_chunks 行数=4 且 embedding 全非空。
+- run 2：run_token=`i1-20260506180439-27429`，project_id=7，document_id=5，rank-1 document_id=5，document_chunks 行数=4 且 embedding 全非空（清理上一轮 2 行知识）。
+- run 3：run_token=`i1-20260506180629-13861`，project_id=8，document_id=6，rank-1 document_id=6，document_chunks 行数=4 且 embedding 全非空（清理上一轮 2 行知识）。
+
+最近一次完整日志：`/tmp/i1_smoke_run3.log`（脚本同时输出到 stdout）。
 
 ## 样例 2：知识库检索（I1-T2）
 
@@ -43,11 +44,13 @@
 
 ### 最近一次实际结果摘要
 
-- run_token：TBD
-- product_knowledge_id / module_knowledge_id：TBD
-- rank-1 knowledge id：TBD
-- rank-1 metadata.run_token：TBD
-- 知识库 embedding 非空（启用 PSQL 时）：TBD
+最近一轮：本地连续 3 次执行全部通过（CASEAGENT_I1_CLEANUP_LEGACY=1）。
+
+- run 1：run_token=`i1-20260506180250-15437`，product_knowledge_id=3，module_knowledge_id=4，rank-1 knowledge id=4，rank-1 metadata.run_token 与 RUN_TOKEN 一致；knowledge_base embeddings 非空 for {3,4}。
+- run 2：run_token=`i1-20260506180439-27429`，product_knowledge_id=5，module_knowledge_id=6，rank-1 knowledge id=6，rank-1 metadata.run_token 一致；embeddings 非空 for {5,6}。
+- run 3：run_token=`i1-20260506180629-13861`，product_knowledge_id=7，module_knowledge_id=8，rank-1 knowledge id=8，rank-1 metadata.run_token 一致；embeddings 非空 for {7,8}。
+
+cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行（按 metadata.aliases ⊇ ["I1 smoke fixture"]）。
 
 ## 复现执行流程
 
