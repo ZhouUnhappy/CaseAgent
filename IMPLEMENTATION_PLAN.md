@@ -53,8 +53,8 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 
 | ID | 任务项 | 状态 | DoD（完成定义） | 验证证据 |
 | --- | --- | --- | --- | --- |
-| I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且文档检索稳定命中本轮上传文档；脚本重复执行时不受历史数据影响。 | 已补 `testdata/i1/requirement.md` 与 `scripts/i1_retrieval_smoke.sh`；`2026-04-30` 后端启动会补齐老库 `documents.content`。下一步在具备后端、PostgreSQL、pgvector、embedding 配置的环境执行 `bash scripts/i1_retrieval_smoke.sh`，补充完整上传、分块、embedding、状态与检索命中结果。 |
-| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且知识库检索稳定命中本轮创建知识条目；脚本重复执行时不受历史数据影响。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 `scripts/i1_retrieval_smoke.sh`；`2026-04-30` 修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列。下一步执行 smoke 并补充创建、embedding、状态与检索命中结果。 |
+| I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且文档检索稳定命中本轮上传文档；脚本重复执行时不受历史数据影响。 | 已补 `testdata/i1/requirement.md` 与 `scripts/i1_retrieval_smoke.sh`；后端启动会补齐老库 `documents.content`。下一步在具备后端、PostgreSQL、pgvector、embedding 配置的环境执行 `bash scripts/i1_retrieval_smoke.sh`，补充完整上传、分块、embedding、状态与检索命中结果。 |
+| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 可重复执行一套联调步骤，且知识库检索稳定命中本轮创建知识条目；脚本重复执行时不受历史数据影响。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 `scripts/i1_retrieval_smoke.sh`；已修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列。下一步执行 smoke 并补充创建、embedding、状态与检索命中结果。 |
 | I1-T3 | 检索回归样例沉淀 | In Progress | 至少 2 条可复现回归样例（文档/知识库各 1 条），包含输入 fixture、查询词、期望命中对象、执行命令、前置环境与实际结果摘要。 | 已补固定 fixture 与 smoke 脚本作为回归样例载体；待执行后补充实际结果摘要。 |
 | I1-T4 | 知识库分块检索评估与改造 | Todo | 使用长知识库 fixture 验证整篇 embedding 的召回效果：fixture 需包含至少 3 个相互独立主题，每个主题有唯一查询词；每个查询在 `top_k=5` 内命中对应知识条目则记录为稳定，否则实现知识库分块向量化、按父知识条目聚合返回，并补充分块前后召回对比。 | 待补：长知识库 fixture、查询词、期望命中条目、现有整篇 embedding 召回结果；如需改造，补充 `knowledge_chunks`/父条目聚合/API 返回兼容性说明与对比结果。 |
 | I1-T5 | 联调脚本重复执行隔离 | Todo | smoke 每次运行使用唯一 run token 或清理策略，文档与知识库断言均校验本轮创建对象，避免旧数据、同名 fixture 或相似 embedding 影响结果。 | 当前文档检索已按 `document_ids` 限定；知识库检索仍需补充本轮 ID/metadata 校验或运行前清理策略。 |
@@ -66,7 +66,7 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 - 启动时会按 `model.embedding.dimensions` 校验并对齐向量列维度；若已有非空向量且维度不一致则启动报错。
 - 文档处理支持：Google Drive 导入、base64 图片清洗、Markdown 分块与二次切分、原文持久化、单文档重处理。
 - 检索支持：`query` / `queries` 双形态调用，multi-query 合并去重。
-- `2026-04-28` 已验证后端可连接本地 PostgreSQL，自动应用 `backend/migrations/001_init.sql` 并监听启动。
+- 已验证后端可连接本地 PostgreSQL，自动应用 `backend/migrations/001_init.sql` 并监听启动。
 
 ## Iteration 2：生成闭环
 
