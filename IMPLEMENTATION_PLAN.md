@@ -55,7 +55,7 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 | ID | 任务项 | 状态 | DoD（完成定义） | 进展 |
 | --- | --- | --- | --- | --- |
 | I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | In Progress | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮 `document_ids` 与历史数据隔离；（b）文档状态最终为 `completed`、分块与 embedding 数量 > 0；（c）`top_k=5` 检索结果中本轮上传文档排名第一。 | 已补 `testdata/i1/requirement.md` 与 `scripts/i1_retrieval_smoke.sh`；文档检索已按 `document_ids` 限定；后端启动会补齐老库 `documents.content`。 |
-| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮创建对象 ID/metadata 与历史数据隔离；（b）知识条目状态最终为 `active`、embedding 已写入；（c）`top_k=5` 检索结果中本轮创建知识条目排名第一。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 smoke 脚本；已修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列；知识库检索断言尚未加入本轮 ID/metadata 校验。 |
+| I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | In Progress | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮创建对象 ID/metadata 与历史数据隔离；（b）知识条目状态最终为 `completed`、embedding 已写入；（c）`top_k=5` 检索结果中本轮创建知识条目排名第一。 | 已补 `testdata/i1/product_knowledge.md`、`testdata/i1/module_knowledge.md` 与 smoke 脚本；已修复老库 `knowledge_base.status/metadata/created_at/updated_at` 补列；知识库检索断言尚未加入本轮 ID/metadata 校验。 |
 | I1-T3 | 检索回归样例沉淀 | In Progress | 在仓库内（建议 `docs/regression/i1_retrieval.md`）提交至少 2 条回归样例（文档/知识库各 1 条），每条包含：fixture 路径、查询词、期望命中对象、执行命令、前置环境、最近一次实际结果摘要；T1/T2 每次稳定通过后更新摘要。 | 已可复用：固定 fixture (`testdata/i1/`) 与 smoke 脚本作为回归样例载体；回归文档尚未提交。 |
 | I1-T4 | 知识库分块检索评估与改造 | Todo | 长知识库 fixture 包含至少 3 个相互独立主题，每个主题有唯一查询词。若每个查询在 `top_k=5` 内命中对应条目则视为整篇 embedding 稳定，记录证据后关闭；否则实现知识库分块向量化、按父知识条目聚合返回，并在 T3 回归样例中补充分块前后召回对比。 | 待补：长知识库 fixture、查询词、期望命中条目、现有整篇 embedding 召回结果；如需改造，补充 `knowledge_chunks`/父条目聚合/API 兼容性说明。 |
 
@@ -92,7 +92,7 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 | ID | 任务项 | 状态 | DoD（完成定义） | 进展 |
 | --- | --- | --- | --- | --- |
 | I3-T1 | 前端基础设施（`element-plus`、`pinia`、路由、布局） | Todo | `frontend/package.json` 接入 `element-plus`、`pinia`、`vue-router`；提供布局壳（顶栏/侧栏/内容区）、统一 API client、统一错误处理入口；至少 1 个示例业务页面跑通；`npm run build` 通过。 | 当前仅有 Vue 3 + Vite 脚手架；`README.md` 描述了 Element Plus 目标，但 `frontend/package.json` 尚未接入。 |
-| I3-T2 | 业务页面（文档、知识库、任务、结果、审核） | Todo | 不依赖手工 API 调用即可走完“项目创建/选择 -> 文档上传 -> 知识库维护 -> 任务创建 -> 影响范围审核 -> 用例生成 -> 用例修改/提交”主流程；页面展示的状态字段（`processing`/`completed`/`failed`/`active` 等）直接来自后端响应，前端不本地推断。 | 待开始。 |
+| I3-T2 | 业务页面（文档、知识库、任务、结果、审核） | Todo | 不依赖手工 API 调用即可走完“项目创建/选择 -> 文档上传 -> 知识库维护 -> 任务创建 -> 影响范围审核 -> 用例生成 -> 用例修改/提交”主流程；页面展示的状态字段（`pending`/`processing`/`completed`/`failed` 等）直接来自后端响应，前端不本地推断。 | 待开始。 |
 | I3-T3 | 错误提示与运维可观测性 | Todo | 主要失败场景（上传失败、embedding 失败、生成失败）有用户可见提示并区分可重试 / 不可重试；后端日志在每条主要请求中包含 task / document / knowledge ID；前端能展示 `processing`/`completed`/`failed` 状态并提供重试入口。 | 待开始。 |
 
 ## 参考文件

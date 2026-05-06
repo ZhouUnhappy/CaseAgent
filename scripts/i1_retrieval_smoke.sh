@@ -13,6 +13,8 @@ MODULE_KNOWLEDGE_FIXTURE="${CASEAGENT_I1_MODULE_KNOWLEDGE_FIXTURE:-$ROOT_DIR/tes
 
 DOCUMENT_QUERY="${CASEAGENT_I1_DOCUMENT_QUERY:-probe-gate-7781 rollback completed}"
 KNOWLEDGE_QUERY="${CASEAGENT_I1_KNOWLEDGE_QUERY:-control-plane-probe 18080 probe-gate-7781}"
+TOP_K="${CASEAGENT_I1_TOP_K:-5}"
+RUN_TOKEN="${CASEAGENT_I1_RUN_TOKEN:-i1-$(date +%Y%m%d%H%M%S)-$RANDOM}"
 
 PROJECT_ID=""
 DOCUMENT_ID=""
@@ -84,8 +86,8 @@ poll_status() {
 create_project() {
     local payload
     payload="$(jq -n \
-        --arg name "I1 retrieval smoke $(date +%Y%m%d%H%M%S)" \
-        --arg description "Created by scripts/i1_retrieval_smoke.sh" \
+        --arg name "I1 retrieval smoke $RUN_TOKEN" \
+        --arg description "Created by scripts/i1_retrieval_smoke.sh (run_token=$RUN_TOKEN)" \
         '{name: $name, description: $description}')"
 
     local response
@@ -130,9 +132,18 @@ upload_knowledge() {
     payload="$(jq -n \
         --arg type "$knowledge_type" \
         --arg name "$knowledge_name" \
+        --arg run_token "$RUN_TOKEN" \
         --rawfile content "$fixture" \
-        --argjson metadata '{"aliases":["I1 smoke fixture"],"keywords":["probe-gate-7781","control-plane-probe","18080"]}' \
-        '{type: $type, name: $name, content: $content, metadata: $metadata}')"
+        '{
+            type: $type,
+            name: $name,
+            content: $content,
+            metadata: {
+                aliases: ["I1 smoke fixture"],
+                keywords: ["probe-gate-7781", "control-plane-probe", "18080"],
+                run_token: $run_token
+            }
+        }')"
 
     local response
     response="$(post_json '/knowledge' "$payload")"
@@ -152,46 +163,65 @@ assert_document_retrieval() {
     local payload
     payload="$(jq -n \
         --arg query "$DOCUMENT_QUERY" \
+        --argjson top_k "$TOP_K" \
         --argjson document_ids "[$DOCUMENT_ID]" \
-        '{query: $query, top_k: 3, document_ids: $document_ids}')"
+        '{query: $query, top_k: $top_k, document_ids: $document_ids}')"
 
     local response
     response="$(post_json '/retrieval/documents' "$payload")"
 
-    local matched_count
-    matched_count="$(jq --argjson id "$DOCUMENT_ID" '[.items[] | select(.document_id == $id and (.matched_chunks | length > 0))] | length' <<<"$response")"
-    if [ "$matched_count" -lt 1 ]; then
-        echo "document retrieval did not return expected document $DOCUMENT_ID" >&2
+    local first_id
+    first_id="$(jq -r '.items[0].document_id // empty' <<<"$response")"
+    if [ "$first_id" != "$DOCUMENT_ID" ]; then
+        echo "document retrieval expected document $DOCUMENT_ID at rank 1, got '$first_id'" >&2
         echo "$response" >&2
         exit 1
     fi
 
-    log "document retrieval matched document $DOCUMENT_ID with query: $DOCUMENT_QUERY"
+    local first_chunk_count
+    first_chunk_count="$(jq '(.items[0].matched_chunks // []) | length' <<<"$response")"
+    if [ "$first_chunk_count" -lt 1 ]; then
+        echo "document retrieval rank-1 entry has no matched_chunks" >&2
+        echo "$response" >&2
+        exit 1
+    fi
+
+    log "document retrieval: document $DOCUMENT_ID ranked 1st (top_k=$TOP_K) for query: $DOCUMENT_QUERY"
 }
 
 assert_knowledge_retrieval() {
     local payload
     payload="$(jq -n \
         --arg query "$KNOWLEDGE_QUERY" \
-        '{query: $query, top_k: 5}')"
+        --argjson top_k "$TOP_K" \
+        '{query: $query, top_k: $top_k}')"
 
     local response
     response="$(post_json '/retrieval/knowledge' "$payload")"
 
-    local matched_count
-    matched_count="$(jq --argjson id "$MODULE_KNOWLEDGE_ID" '[.items[] | select(.id == $id)] | length' <<<"$response")"
-    if [ "$matched_count" -lt 1 ]; then
-        echo "knowledge retrieval did not return expected module knowledge $MODULE_KNOWLEDGE_ID" >&2
+    local first_id
+    first_id="$(jq -r '.items[0].id // empty' <<<"$response")"
+    if [ "$first_id" != "$MODULE_KNOWLEDGE_ID" ]; then
+        echo "knowledge retrieval expected module knowledge $MODULE_KNOWLEDGE_ID at rank 1, got '$first_id'" >&2
+        echo "(run_token=$RUN_TOKEN; if old data is winning the rank, drop legacy knowledge_base rows or filter by metadata.run_token)" >&2
         echo "$response" >&2
         exit 1
     fi
 
-    log "knowledge retrieval matched module knowledge $MODULE_KNOWLEDGE_ID with query: $KNOWLEDGE_QUERY"
+    local first_run_token
+    first_run_token="$(jq -r '.items[0].metadata.run_token // empty' <<<"$response")"
+    if [ "$first_run_token" != "$RUN_TOKEN" ]; then
+        echo "knowledge retrieval rank-1 metadata.run_token mismatch: expected $RUN_TOKEN, got '$first_run_token'" >&2
+        echo "$response" >&2
+        exit 1
+    fi
+
+    log "knowledge retrieval: module knowledge $MODULE_KNOWLEDGE_ID ranked 1st (top_k=$TOP_K, run_token=$RUN_TOKEN)"
 }
 
 assert_document_chunk_count() {
     if [ -z "${CASEAGENT_PSQL_DSN:-}" ]; then
-        log "skipping document_chunks row-count check; set CASEAGENT_PSQL_DSN to enable it"
+        log "skipping document_chunks/embedding row checks; set CASEAGENT_PSQL_DSN to enable"
         return 0
     fi
 
@@ -204,7 +234,31 @@ assert_document_chunk_count() {
         exit 1
     fi
 
-    log "document_chunks row count for document $DOCUMENT_ID: $count"
+    local missing
+    missing="$(psql "$CASEAGENT_PSQL_DSN" -Atc "SELECT count(*) FROM document_chunks WHERE document_id = $DOCUMENT_ID AND embedding IS NULL")"
+    if [ "$missing" -gt 0 ]; then
+        echo "document $DOCUMENT_ID has $missing chunks with NULL embedding" >&2
+        exit 1
+    fi
+
+    log "document_chunks for document $DOCUMENT_ID: count=$count, all embeddings non-null"
+}
+
+assert_knowledge_embedding() {
+    if [ -z "${CASEAGENT_PSQL_DSN:-}" ]; then
+        return 0
+    fi
+
+    require_command psql
+
+    local missing
+    missing="$(psql "$CASEAGENT_PSQL_DSN" -Atc "SELECT count(*) FROM knowledge_base WHERE id IN ($PRODUCT_KNOWLEDGE_ID, $MODULE_KNOWLEDGE_ID) AND embedding IS NULL")"
+    if [ "$missing" -gt 0 ]; then
+        echo "$missing knowledge entries (of {$PRODUCT_KNOWLEDGE_ID, $MODULE_KNOWLEDGE_ID}) have NULL embedding" >&2
+        exit 1
+    fi
+
+    log "knowledge_base embeddings non-null for {$PRODUCT_KNOWLEDGE_ID, $MODULE_KNOWLEDGE_ID}"
 }
 
 main() {
@@ -215,16 +269,18 @@ main() {
     require_file "$MODULE_KNOWLEDGE_FIXTURE"
 
     log "base url: $BASE_URL"
+    log "run token: $RUN_TOKEN"
     create_project
     upload_document
     upload_knowledge "product" "I1 CaseAgent Cloud" "$PRODUCT_KNOWLEDGE_FIXTURE" PRODUCT_KNOWLEDGE_ID
     upload_knowledge "module" "I1 Control Plane" "$MODULE_KNOWLEDGE_FIXTURE" MODULE_KNOWLEDGE_ID
     assert_document_chunk_count
+    assert_knowledge_embedding
     assert_document_retrieval
     assert_knowledge_retrieval
 
     log "I1 retrieval smoke passed"
-    log "project_id=$PROJECT_ID document_id=$DOCUMENT_ID product_knowledge_id=$PRODUCT_KNOWLEDGE_ID module_knowledge_id=$MODULE_KNOWLEDGE_ID"
+    log "run_token=$RUN_TOKEN project_id=$PROJECT_ID document_id=$DOCUMENT_ID product_knowledge_id=$PRODUCT_KNOWLEDGE_ID module_knowledge_id=$MODULE_KNOWLEDGE_ID"
 }
 
 main "$@"
