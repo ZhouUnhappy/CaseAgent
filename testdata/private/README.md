@@ -1,8 +1,8 @@
-# Private Test Data
+# 私有测试数据
 
-This directory is for local-only private regression data. The repository ignores all files here except this README, `.gitkeep`, and `*.example` files.
+此目录用于本地私有回归数据。仓库仅跟踪此目录下的 README、`.gitkeep` 和 `*.example` 文件，其他文件均被忽略。
 
-Recommended usage:
+使用方式：
 
 ```bash
 export CASEAGENT_I1_PRIVATE_ARCH_DIR=/absolute/path/to/architectures
@@ -11,4 +11,4 @@ export CASEAGENT_PSQL_DSN='postgres://...'
 bash scripts/i1_private_corpus_eval.sh
 ```
 
-Do not commit private data. Keep only sanitized summaries in tracked docs.
+不提交私有数据，仅在受版本管理的文档中保留清洗后的总结。
