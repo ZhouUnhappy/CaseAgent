@@ -3,12 +3,14 @@ package knowledge
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
 	dbvector "caseagent/internal/db/vector"
+	markdowncleaner "caseagent/internal/markdown"
 
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
@@ -42,7 +44,12 @@ func (s *Service) ProcessKnowledge(ctx context.Context, kbID int, content string
 		}
 	}()
 
-	embResult, err := s.embedding.EmbedStrings(ctx, []string{content})
+	cleanedContent := markdowncleaner.StripBase64Images(content)
+	if strings.TrimSpace(cleanedContent) == "" {
+		return fmt.Errorf("knowledge base %d has no content after cleaning", kbID)
+	}
+
+	embResult, err := s.embedding.EmbedStrings(ctx, []string{cleanedContent})
 	if err != nil {
 		return fmt.Errorf("failed to generate embedding: %w", err)
 	}
@@ -57,7 +64,7 @@ func (s *Service) ProcessKnowledge(ctx context.Context, kbID int, content string
 	}
 
 	_, err = s.db.NewUpdate().Model(&models.KnowledgeBase{}).
-		Set("content = ?", content).
+		Set("content = ?", cleanedContent).
 		Set("embedding = ?", dbvector.New(embedding32)).
 		Set("status = ?", models.KnowledgeStatusCompleted).
 		Set("updated_at = ?", time.Now()).

@@ -5,15 +5,6 @@ import (
 	"testing"
 )
 
-func TestRemoveBase64Images(t *testing.T) {
-	input := "before\n![diagram](data:image/png;base64,AAAA)\nafter"
-	got := removeBase64Images(input)
-
-	if got != "before\n\nafter" {
-		t.Fatalf("unexpected cleaned content: %q", got)
-	}
-}
-
 func TestSplitByHeaders(t *testing.T) {
 	service := &Service{}
 	content := "# Title\n\nintro\n## First\nline 1\n### Child\nline 2\n#### Not Split\nline 3\n## Second\nline 4"

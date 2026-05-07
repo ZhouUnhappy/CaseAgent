@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
 	dbvector "caseagent/internal/db/vector"
+	markdowncleaner "caseagent/internal/markdown"
 
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/uptrace/bun"
@@ -55,13 +55,13 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		if err != nil {
 			return fmt.Errorf("failed to fetch from Google Drive: %w", err)
 		}
-		if err := s.updateDocumentContent(ctx, docID, markdownContent); err != nil {
-			return fmt.Errorf("failed to persist Google Drive content: %w", err)
-		}
 		cleanedContent = markdownContent
 	}
 
-	cleanedContent = removeBase64Images(cleanedContent)
+	cleanedContent = markdowncleaner.StripBase64Images(cleanedContent)
+	if err := s.updateDocumentContent(ctx, docID, cleanedContent); err != nil {
+		return fmt.Errorf("failed to persist cleaned document content: %w", err)
+	}
 	chunks := s.splitByHeaders(cleanedContent)
 	if len(chunks) == 0 {
 		return fmt.Errorf("no valid document chunks generated")
@@ -138,13 +138,6 @@ func (s *Service) ReprocessDocument(ctx context.Context, docID int) (err error) 
 	}
 
 	return s.ProcessDocument(ctx, docID, content, "")
-}
-
-// removeBase64Images removes base64 encoded images from markdown content
-func removeBase64Images(content string) string {
-	// Pattern to match base64 images: ![alt](data:image/...;base64,...)
-	pattern := regexp.MustCompile(`!\[.*?\]\(data:image/[^;]+;base64,[^)]+\)`)
-	return pattern.ReplaceAllString(content, "")
 }
 
 // splitByHeaders splits markdown content by ## and ### headers

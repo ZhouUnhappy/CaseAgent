@@ -52,6 +52,28 @@
 
 cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行（按 metadata.aliases ⊇ ["I1 smoke fixture"]）。
 
+## 样例 3：长知识库整篇 embedding 召回评估（I1-T4）
+
+| 项 | 内容 |
+| --- | --- |
+| Fixture | `testdata/i1/long_knowledge.md` |
+| 查询词 A | `ingest-relay-3209 19090 数据集成` |
+| 查询词 B | `notify-center-9921 21100 通知` |
+| 查询词 C | `billing-pulse-4477 23330 计费` |
+| 期望命中对象 | 本轮创建的长知识库条目在每个查询的 `top_k=5` 内命中 |
+| 执行命令 | `bash scripts/i1_long_knowledge_eval.sh` |
+| 启用数据库校验 | `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i1_long_knowledge_eval.sh` |
+
+### 最近一次实际结果摘要
+
+最近一轮：本地执行 `bash scripts/i1_long_knowledge_eval.sh` 通过。
+
+- run_token=`i1-long-20260507161825-10193`，long_knowledge_id=9，知识条目状态最终为 `completed`。
+- 查询 A：`ingest-relay-3209 19090 数据集成`，rank-1 knowledge id=9。
+- 查询 B：`notify-center-9921 21100 通知`，rank-1 knowledge id=9。
+- 查询 C：`billing-pulse-4477 23330 计费`，rank-1 knowledge id=9。
+- 本轮未设置 `CASEAGENT_PSQL_DSN`，脚本跳过数据库 embedding 非空直接校验；检索成功已验证 embedding 可用于召回。
+
 ## 复现执行流程
 
 1. 准备前置环境（见上）。
@@ -66,6 +88,7 @@ cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行�
    - `document retrieval expected document <id> at rank 1` → 检查文档分块/embedding 是否成功；可启用 `CASEAGENT_PSQL_DSN` 让脚本同时校验数据库行。
    - `knowledge retrieval expected module knowledge <id> at rank 1` → 多由历史 smoke 数据干扰：`bash scripts/i1_retrieval_cleanup.sh` 清掉带 `metadata.aliases ⊇ ["I1 smoke fixture"]` 的旧行后重试。
 5. 3 次都通过后，把最新一次的 `run_token`、`document_id`、`module_knowledge_id` 与 `assert_*` 输出回填到本文件「最近一次实际结果摘要」段落。
+6. 执行 `bash scripts/i1_long_knowledge_eval.sh` 评估长知识库整篇 embedding；如历史长知识库 fixture 过多，可配合 `CASEAGENT_I1_CLEANUP_LEGACY=1` 与 `CASEAGENT_PSQL_DSN` 清理 `metadata.aliases ⊇ ["I1 long knowledge fixture"]` 的旧行后重试。
 
 ## 历史失败与处置（可选）
 

@@ -57,7 +57,9 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 | I1-T1 | 文档链路真实联调（上传 -> 分块 -> embedding -> 检索） | Done | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮 `document_ids` 与历史数据隔离；（b）文档状态最终为 `completed`、分块与 embedding 数量 > 0；（c）`top_k=5` 检索结果中本轮上传文档排名第一。 | 本地连续 3 次通过：document_id ∈ {4, 5, 6} 各为本轮 rank-1，document_chunks 行数=4 且 embedding 全非空；详见 `docs/regression/i1_retrieval.md` 样例 1。 |
 | I1-T2 | 知识库链路真实联调（创建 -> embedding -> 检索） | Done | 在具备后端、PostgreSQL、pgvector、embedding 配置的环境下，`bash scripts/i1_retrieval_smoke.sh` 连续 3 次执行均：（a）通过 run token 或本轮创建对象 ID/metadata 与历史数据隔离；（b）知识条目状态最终为 `completed`、embedding 已写入；（c）`top_k=5` 检索结果中本轮创建知识条目排名第一。 | 本地连续 3 次通过：module_knowledge_id ∈ {4, 6, 8} 各为本轮 rank-1，rank-1 `metadata.run_token` 与本轮 `RUN_TOKEN` 一致；`knowledge_base` embedding 全非空；详见 `docs/regression/i1_retrieval.md` 样例 2。 |
 | I1-T3 | 检索回归样例沉淀 | Done | 在仓库内（建议 `docs/regression/i1_retrieval.md`）提交至少 2 条回归样例（文档/知识库各 1 条），每条包含：fixture 路径、查询词、期望命中对象、执行命令、前置环境、实际结果摘要；T1/T2 每次稳定通过后更新摘要。 | `docs/regression/i1_retrieval.md` 已包含 2 条样例 + 复现执行流程；已把连续 3 次通过的 run_token / 命中 ID / chunk 计数回填到摘要段。 |
-| I1-T4 | 知识库分块检索评估与改造 | In Progress | 长知识库 fixture 包含至少 3 个相互独立主题，每个主题有唯一查询词。若每个查询在 `top_k=5` 内命中对应条目则视为整篇 embedding 稳定，记录证据后关闭；否则实现知识库分块向量化、按父知识条目聚合返回，并在 T3 回归样例中补充分块前后召回对比。 | 已补 `testdata/i1/long_knowledge.md`（3 个相互独立主题，唯一查询词列在 fixture 末尾的评估查询样例表）；待执行评估，并补充整篇 embedding 召回结果或分块前后对比。 |
+| I1-T4 | 知识库分块检索评估与改造 | Done | 长知识库 fixture 包含至少 3 个相互独立主题，每个主题有唯一查询词。若每个查询在 `top_k=5` 内命中对应条目则视为整篇 embedding 稳定，记录证据后关闭；否则实现知识库分块向量化、按父知识条目聚合返回，并在 T3 回归样例中补充分块前后召回对比。 | 已补 `testdata/i1/long_knowledge.md`（3 个相互独立主题，唯一查询词列在 fixture 末尾的评估查询样例表）与 `scripts/i1_long_knowledge_eval.sh`；本地执行通过：run_token=`i1-long-20260507161825-10193`，long_knowledge_id=9，A/B/C 三个唯一查询均 rank-1 命中本条目，详见 `docs/regression/i1_retrieval.md` 样例 3。 |
+| I1-T5 | 真实 Markdown base64 图片清洗 | Done | 文档与知识库处理链路在持久化、分块、embedding 前忽略 Markdown 中的 inline base64 图片与 reference-style base64 图片定义/引用；清洗逻辑有单元测试覆盖，且后端测试通过。 | 新增 `backend/internal/markdown` 清洗包并接入 `document` / `knowledge` 服务；覆盖 `![...](data:image...)`、`![][image1]` + `[image1]: <data:image...>`；执行 `GOCACHE=/private/tmp/caseagent-go-cache go test ./...` 通过。 |
+| I1-T6 | 私有真实语料回归测试 | In Progress | 私有测试数据目录加入 `.gitignore`，不提交私有数据；脚本可通过环境变量读取真实架构知识目录与需求/设计输入目录，并记录文件数、字节数、清洗后字节数、chunk 数、embedding 成功数、典型查询 `top_k=5` 命中情况；在本地真实语料上至少跑通 1 次后回填证据。 | 已确认真实语料候选：`docs/architectures` 约 8 个 md / 563 行，`features/mcast/inputs` 约 5 个 md / 1777 行，其中存在大体量 reference-style base64 图片；待创建 gitignored private 测试入口并执行回归。 |
 
 ### 当前已完成能力（支撑 I1）
 
@@ -65,6 +67,7 @@ CaseAgent 围绕“需求文档 + 架构知识”形成可审核测试用例闭�
 - pgvector 自定义向量编码/解码已完成。
 - 启动时会按 `model.embedding.dimensions` 校验并对齐向量列维度；若已有非空向量且维度不一致则启动报错。
 - 文档处理支持：Google Drive 导入、base64 图片清洗、Markdown 分块与二次切分、原文持久化、单文档重处理。
+- Markdown 清洗支持 inline / reference-style base64 图片移除，并会把清洗后的文档/知识库内容写回数据库，避免图片数据进入后续检索与生成上下文。
 - 检索支持：`query` / `queries` 双形态调用，multi-query 合并去重。
 - 已验证后端可连接本地 PostgreSQL，自动应用 `backend/migrations/001_init.sql` 并监听启动。
 
