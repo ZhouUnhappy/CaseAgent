@@ -41,3 +41,7 @@ testdata/private/*
 !testdata/private/.gitkeep
 !testdata/private/README.md
 !testdata/private/*.example
+
+# Public corpus eval runs (per-run reports, not committed)
+testdata/i1/public_corpus/runs/*
+!testdata/i1/public_corpus/runs/.gitkeep
