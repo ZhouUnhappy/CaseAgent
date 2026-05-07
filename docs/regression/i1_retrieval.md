@@ -74,6 +74,27 @@ cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行�
 - 查询 C：`billing-pulse-4477 23330 计费`，rank-1 knowledge id=9。
 - 本轮未设置 `CASEAGENT_PSQL_DSN`，脚本跳过数据库 embedding 非空直接校验；检索成功已验证 embedding 可用于召回。
 
+## 样例 4：私有真实语料回归（I1-T6）
+
+| 项 | 内容 |
+| --- | --- |
+| 数据来源 | 本地私有架构知识目录 + 本地私有需求/设计输入目录 |
+| 执行命令 | `CASEAGENT_I1_PRIVATE_ARCH_DIR=... CASEAGENT_I1_PRIVATE_INPUT_DIR=... CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i1_private_corpus_eval.sh` |
+| 隐私约束 | 私有数据目录与详细报告均位于 gitignored `testdata/private/`，仓库只记录脱敏统计摘要 |
+| 期望结果 | 文档与知识库均完成处理；chunk 与 embedding 数量 > 0；典型文档/知识查询在 `top_k=5` 内命中本轮对象 |
+
+### 最近一次实际结果摘要
+
+最近一轮：本地执行 `scripts/i1_private_corpus_eval.sh` 通过。
+
+- run_token=`i1-private-20260507170014-5662`，project_id=12。
+- 架构知识：8 个 md，raw bytes=18,780，cleaned knowledge bytes=18,788，knowledge_embeddings=8。
+- 需求/设计输入：5 个 md，raw bytes=4,204,164，cleaned document bytes=85,943。
+- 文档处理：document_chunks=101，document_embeddings=101。
+- 文档检索：`VDS IGMP Snooping 组播`、`mcast-agent query 报文`、`全局默认拒绝 组播` 均 rank-1 命中本轮上传文档。
+- 知识检索：`VDS IGMP MLD Snooping`、`OVS Bridge OpenFlow`、`Everoute 分布式防火墙` 均 rank-1 命中本轮知识条目。
+- 详细本地报告：`testdata/private/runs/i1-private-20260507170014-5662.md`（已被 `.gitignore` 忽略，不提交）。
+
 ## 复现执行流程
 
 1. 准备前置环境（见上）。
@@ -89,6 +110,7 @@ cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行�
    - `knowledge retrieval expected module knowledge <id> at rank 1` → 多由历史 smoke 数据干扰：`bash scripts/i1_retrieval_cleanup.sh` 清掉带 `metadata.aliases ⊇ ["I1 smoke fixture"]` 的旧行后重试。
 5. 3 次都通过后，把最新一次的 `run_token`、`document_id`、`module_knowledge_id` 与 `assert_*` 输出回填到本文件「最近一次实际结果摘要」段落。
 6. 执行 `bash scripts/i1_long_knowledge_eval.sh` 评估长知识库整篇 embedding；如历史长知识库 fixture 过多，可配合 `CASEAGENT_I1_CLEANUP_LEGACY=1` 与 `CASEAGENT_PSQL_DSN` 清理 `metadata.aliases ⊇ ["I1 long knowledge fixture"]` 的旧行后重试。
+7. 执行 `bash scripts/i1_private_corpus_eval.sh` 评估本地私有真实语料；私有目录路径通过环境变量传入，详细报告写入 gitignored `testdata/private/runs/`。
 
 ## 历史失败与处置（可选）
 
