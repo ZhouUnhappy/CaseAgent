@@ -93,12 +93,22 @@ func TestMergeKnowledgeResultSets(t *testing.T) {
 
 func TestMergeDocumentResultSets(t *testing.T) {
 	set1 := []DocumentResult{
-		{DocumentID: 1, Name: "Doc-1", MatchedChunks: []string{"step A", "step B"}},
-		{DocumentID: 2, Name: "Doc-2", MatchedChunks: []string{"step C"}},
+		{DocumentID: 1, Name: "Doc-1", MatchedChunks: []MatchedChunk{
+			{Text: "step A", Score: 0.9, Query: "q1", Rank: 1},
+			{Text: "step B", Score: 0.8, Query: "q1", Rank: 2},
+		}, HitQueries: []string{"q1"}, BestScore: 0.9},
+		{DocumentID: 2, Name: "Doc-2", MatchedChunks: []MatchedChunk{
+			{Text: "step C", Score: 0.7, Query: "q1", Rank: 3},
+		}, HitQueries: []string{"q1"}, BestScore: 0.7},
 	}
 	set2 := []DocumentResult{
-		{DocumentID: 2, Name: "Doc-2", MatchedChunks: []string{"step C", "step D"}},
-		{DocumentID: 3, Name: "Doc-3", MatchedChunks: []string{"step E"}},
+		{DocumentID: 2, Name: "Doc-2", MatchedChunks: []MatchedChunk{
+			{Text: "step C", Score: 0.85, Query: "q2", Rank: 1},
+			{Text: "step D", Score: 0.75, Query: "q2", Rank: 2},
+		}, HitQueries: []string{"q2"}, BestScore: 0.85},
+		{DocumentID: 3, Name: "Doc-3", MatchedChunks: []MatchedChunk{
+			{Text: "step E", Score: 0.6, Query: "q2", Rank: 3},
+		}, HitQueries: []string{"q2"}, BestScore: 0.6},
 	}
 
 	merged := mergeDocumentResultSets([][]DocumentResult{set1, set2}, 3)
@@ -108,23 +118,37 @@ func TestMergeDocumentResultSets(t *testing.T) {
 	if merged[0].DocumentID != 2 {
 		t.Fatalf("expected first document to be ID=2, got %d", merged[0].DocumentID)
 	}
+	if merged[0].Rank != 1 {
+		t.Fatalf("expected merged top result to have Rank=1, got %d", merged[0].Rank)
+	}
 	if len(merged[0].MatchedChunks) != 2 {
 		t.Fatalf("expected deduped matched chunks, got %#v", merged[0].MatchedChunks)
 	}
+	// "step C" appears in both sets — dedupe should keep the higher-score copy (0.85 from q2).
+	if merged[0].MatchedChunks[0].Text != "step C" || merged[0].MatchedChunks[0].Score != 0.85 {
+		t.Fatalf("expected first chunk to be step C@0.85, got %#v", merged[0].MatchedChunks[0])
+	}
+	if len(merged[0].HitQueries) != 2 {
+		t.Fatalf("expected hit_queries to merge to 2 entries, got %#v", merged[0].HitQueries)
+	}
 }
 
-func TestDedupeChunks(t *testing.T) {
-	chunks := []string{
-		"  first chunk ",
-		"first   chunk",
-		"",
-		"second chunk",
+func TestDedupeMatchedChunks(t *testing.T) {
+	chunks := []MatchedChunk{
+		{Text: "  first chunk ", Score: 0.5, Query: "q1", Rank: 1},
+		{Text: "first   chunk", Score: 0.9, Query: "q2", Rank: 1},
+		{Text: "", Score: 0.0},
+		{Text: "second chunk", Score: 0.7, Query: "q1", Rank: 2},
 	}
-	got := dedupeChunks(chunks)
+	got := dedupeMatchedChunks(chunks)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 deduped chunks, got %#v", got)
 	}
-	if got[0] != "first chunk" || got[1] != "second chunk" {
-		t.Fatalf("unexpected dedupe order: %#v", got)
+	// dedupe should keep the higher-score copy and sort by score desc.
+	if got[0].Score != 0.9 || got[0].Query != "q2" {
+		t.Fatalf("expected first chunk to win on score (0.9 from q2), got %#v", got[0])
+	}
+	if got[1].Text != "second chunk" {
+		t.Fatalf("expected second chunk text to be 'second chunk', got %q", got[1].Text)
 	}
 }

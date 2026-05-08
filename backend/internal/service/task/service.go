@@ -508,19 +508,25 @@ func buildRequirementsContext(ctx context.Context, db *bun.DB, requirements stri
 	var builder strings.Builder
 	builder.WriteString("## 需求命中上下文（基于文档检索）\n\n")
 	for _, result := range results {
-		builder.WriteString("### 文档：")
-		builder.WriteString(result.Name)
-		builder.WriteString("\n\n")
-
-		chunks := dedupeNonEmptyStrings(result.MatchedChunks)
-		maxChunks := 3
-		if len(chunks) < maxChunks {
-			maxChunks = len(chunks)
-		}
-		for idx := 0; idx < maxChunks; idx++ {
-			builder.WriteString("- ")
-			builder.WriteString(chunks[idx])
+		builder.WriteString(fmt.Sprintf("### [rank %d] %s (parent_doc_id=%d)\n\n", result.Rank, result.Name, result.ParentDocID))
+		if len(result.HitQueries) > 0 {
+			builder.WriteString("- 命中查询: ")
+			builder.WriteString(strings.Join(result.HitQueries, " | "))
 			builder.WriteString("\n")
+		}
+		builder.WriteString(fmt.Sprintf("- 综合得分: %.4f\n", result.BestScore))
+
+		maxChunks := 3
+		if len(result.MatchedChunks) < maxChunks {
+			maxChunks = len(result.MatchedChunks)
+		}
+		if maxChunks > 0 {
+			builder.WriteString("- 命中片段:\n")
+			for idx := 0; idx < maxChunks; idx++ {
+				chunk := result.MatchedChunks[idx]
+				builder.WriteString(fmt.Sprintf("  %d. [score=%.4f, query=%q, chunk_rank=%d] %s\n",
+					idx+1, chunk.Score, chunk.Query, chunk.Rank, chunk.Text))
+			}
 		}
 		builder.WriteString("\n")
 	}
