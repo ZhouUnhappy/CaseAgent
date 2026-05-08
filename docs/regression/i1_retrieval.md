@@ -95,6 +95,28 @@ cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行�
 - 知识检索：`VDS IGMP MLD Snooping`、`OVS Bridge OpenFlow`、`Everoute 分布式防火墙` 均 rank-1 命中本轮知识条目。
 - 详细本地报告：`testdata/private/runs/i1-private-20260507170014-5662.md`（已被 `.gitignore` 忽略，不提交）。
 
+## 样例 5：公开复杂文档语料回归（I1-T7）
+
+| 项 | 内容 |
+| --- | --- |
+| Fixture | `testdata/i1/public_corpus/long/`（6 篇 Apache Dubbo 中文长文）+ `testdata/i1/public_corpus/short/`（15 篇 Apache Dubbo 中文短文） |
+| 上游 | `apache/dubbo-website` @ `19e75d7c79c2a7fcf13477d47aac8a0867ea704c`（Apache-2.0），抓取细节见各子目录 `SOURCES.md` |
+| 文档查询 | `Dubbo 双注册原理 服务提供者 注册中心` / `模块发布器 服务发布全过程 ServiceConfig` / `Service Weaver 微服务编排 Google 论文` |
+| 知识查询 | `Dubbo 流量管理 路由规则` / `Dubbo SPI 扩展点 加载机制` / `Dubbo 回调参数 异步通知` |
+| 期望命中对象 | 长文与短文每个查询在 `top_k=5` 内 rank-1 命中本轮上传对象 |
+| 执行命令 | `CASEAGENT_PSQL_DSN='postgres://...' CASEAGENT_I1_CLEANUP_LEGACY=1 bash scripts/i1_public_corpus_eval.sh` |
+
+### 最近一次实际结果摘要
+
+最近一轮：本地执行 `scripts/i1_public_corpus_eval.sh` 通过。
+
+- run_token=`i1-public-20260508141320-19213`，project_id=14。
+- 长文：6 个 md，raw bytes=235,944，cleaned document bytes=235,950，document_chunks=252，document_embeddings=252。
+- 短文：15 个 md，raw bytes=74,733，cleaned knowledge bytes=74,748，knowledge_embeddings=15。
+- 文档检索 rank-1 命中：document_id=29 (`dubbo-provider-dual-register.md`)、27 (`dubbo-module-publisher.md`)、28 (`dubbo-service-weaver-paper.md`)。
+- 知识检索 rank-1 命中：knowledge_id=52 (`concepts-traffic-management.md`)、64 (`concepts-extensibility.md`)、53 (`advanced-callback-parameter.md`)。
+- 详细本地报告：`testdata/i1/public_corpus/runs/i1-public-20260508141320-19213.md`（已被 `.gitignore` 忽略，不提交）。
+
 ## 复现执行流程
 
 1. 准备前置环境（见上）。
@@ -111,6 +133,7 @@ cleanup 在 run 2 / run 3 起跑前各删除上一轮 2 条 knowledge_base 行�
 5. 3 次都通过后，把最新一次的 `run_token`、`document_id`、`module_knowledge_id` 与 `assert_*` 输出回填到本文件「最近一次实际结果摘要」段落。
 6. 执行 `bash scripts/i1_long_knowledge_eval.sh` 评估长知识库整篇 embedding；如历史长知识库 fixture 过多，可配合 `CASEAGENT_I1_CLEANUP_LEGACY=1` 与 `CASEAGENT_PSQL_DSN` 清理 `metadata.aliases ⊇ ["I1 long knowledge fixture"]` 的旧行后重试。
 7. 执行 `bash scripts/i1_private_corpus_eval.sh` 评估本地私有真实语料；私有目录路径通过环境变量传入，详细报告写入 gitignored `testdata/private/runs/`。
+8. 执行 `bash scripts/i1_public_corpus_eval.sh` 评估仓库内公开复杂语料（`testdata/i1/public_corpus/`）；如历史 fixture 过多，可配合 `CASEAGENT_I1_CLEANUP_LEGACY=1` 与 `CASEAGENT_PSQL_DSN` 清理 `metadata.aliases ⊇ ["I1 public corpus fixture"]` 的旧行后重试，详细报告写入 gitignored `testdata/i1/public_corpus/runs/`。
 
 ## 历史失败与处置（可选）
 
