@@ -1,9 +1,32 @@
+// Package agent owns the orchestration boundary between the application's
+// generation pipeline and the eino agent layer.
+//
+// Responsibility split:
+//
+//   - Service (this package) is the *application-level coordinator*. It owns
+//     the sub-agent instances (functional / ops / failure / boundary), runs
+//     them sequentially, applies retry-once on transient failures, isolates
+//     individual sub-agent failures so they don't block sibling agents,
+//     dedupes the merged sections, and finally hands the consolidated draft
+//     to DeepAgent for refinement. Service does not call the LLM directly.
+//
+//   - DeepAgent (backend/internal/agent/deep) is the *agent-level coordinator*
+//     that talks to the chat model. It serves two roles: (a) fallback —
+//     when every sub-agent fails or produces no parseable output, DeepAgent
+//     generates a full set of sections from scratch; (b) refinement —
+//     consolidating the dedup'd sub-agent draft into a single coherent
+//     output before persistence.
+//
+// Sub-agents are intentionally not yet wired through DeepAgent's adk.Agent
+// slot; the current architecture is sequential rather than graph-based, and
+// a follow-up will migrate to native eino adk.Agent coordination.
 package agent
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"caseagent/internal/agent/boundary"
@@ -100,7 +123,11 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	}, nil
 }
 
-// GenerateCases generates test cases using DeepAgent coordination
+// GenerateCases runs each sub-agent (with retry-once on transient failure),
+// dedupes the merged sections, and asks DeepAgent to refine the consolidated
+// draft. A single sub-agent failing — even after its retry — is logged and
+// skipped; sibling sub-agents continue running and their outputs still flow
+// through dedupe → refinement → persistence.
 func (s *Service) GenerateCases(ctx context.Context, requirements string, knowledge string) (string, error) {
 	type generator struct {
 		name string
@@ -115,38 +142,66 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 	}
 
 	sections := make([]generatedSection, 0, len(generators))
-	for _, generator := range generators {
-		output, err := generator.run(ctx, requirements, knowledge)
+	for _, g := range generators {
+		output, err := runSubAgentWithRetry(ctx, g.name, func(ctx context.Context) (string, error) {
+			return g.run(ctx, requirements, knowledge)
+		})
 		if err != nil {
+			log.Printf("[agent-service] sub-agent %q failed after retry, continuing without it: %v", g.name, err)
 			continue
 		}
 
 		parsed, parseErr := parseGeneratedSections(output)
 		if parseErr != nil || len(parsed) == 0 {
+			log.Printf("[agent-service] sub-agent %q produced unparseable output (parse_err=%v, len=%d), skipping", g.name, parseErr, len(parsed))
 			continue
 		}
 		sections = append(sections, parsed...)
 	}
 
 	if len(sections) == 0 {
+		log.Printf("[agent-service] all %d sub-agents produced no usable output; falling back to DeepAgent.GenerateCases", len(generators))
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
 	normalized := dedupeGeneratedSections(sections)
 	if len(normalized) == 0 {
+		log.Printf("[agent-service] dedupe collapsed all sub-agent sections; falling back to DeepAgent.GenerateCases")
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
 	payload, err := json.Marshal(normalized)
 	if err != nil {
+		log.Printf("[agent-service] failed to marshal dedup'd sections (%v); falling back to DeepAgent.GenerateCases", err)
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
 	refined, err := s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
 	if err != nil || strings.TrimSpace(refined) == "" {
+		if err != nil {
+			log.Printf("[agent-service] DeepAgent.RefineCases failed (%v); returning unrefined dedup'd payload", err)
+		} else {
+			log.Printf("[agent-service] DeepAgent.RefineCases returned empty content; returning unrefined dedup'd payload")
+		}
+		return string(payload), nil
+	}
+	if _, parseErr := parseGeneratedSections(refined); parseErr != nil {
+		log.Printf("[agent-service] DeepAgent.RefineCases produced unparseable output (%v); returning unrefined dedup'd payload", parseErr)
 		return string(payload), nil
 	}
 	return refined, nil
+}
+
+// runSubAgentWithRetry invokes fn once and, on error, retries exactly one
+// more time. It logs the first-attempt error so that intermittent provider
+// failures (rate limits, transient 5xx) are visible in operator logs.
+func runSubAgentWithRetry(ctx context.Context, name string, fn func(context.Context) (string, error)) (string, error) {
+	output, err := fn(ctx)
+	if err == nil {
+		return output, nil
+	}
+	log.Printf("[agent-service] sub-agent %q first attempt failed (%v); retrying once", name, err)
+	return fn(ctx)
 }
 
 type generatedSection struct {

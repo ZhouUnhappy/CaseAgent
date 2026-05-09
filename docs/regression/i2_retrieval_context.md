@@ -1,6 +1,6 @@
-# I2 检索上下文回归（支撑 I2-T1）
+# I2 生成闭环回归
 
-记录"生成前的检索上下文增强 + 同 fixture 连续 3 次稳定性"的端到端样例。
+记录 I2 各任务的端到端样例与稳定性证据。每个任务一个样例段落。
 
 ## 样例 1：检索响应承载追溯字段（I2-T1）
 
@@ -47,13 +47,64 @@
 
 `scripts/i1_retrieval_determinism.sh` 的指纹（fingerprint）函数因此**只比对 hit set + ordering**，把浮点 score 排除出确定性判定。
 
+## 样例 2：DeepAgent / Agent Service 协调 + 端到端落库（I2-T2）
+
+### 职责边界（已落档于代码）
+
+`backend/internal/service/agent/service.go` 顶部 package doc 详述：
+
+- **Agent Service**（应用层协调器）：拥有四个子 Agent 的实例（functional / ops / failure / boundary），按顺序调用，每个子 Agent 失败重试 1 次，失败后**记录日志并继续**（不阻塞其他子 Agent），最后把 dedupe 后的草稿交给 DeepAgent 做 refine。本层不直接调用 LLM。
+- **DeepAgent**（agent 层协调器，`backend/internal/agent/deep`）：直接持有 chat model，承担两个角色 —— (a) **fallback**：当所有子 Agent 都失败/无可解析输出时，由 DeepAgent 重新生成全部 sections；(b) **refine**：把 dedupe 后的子 Agent 草稿合并精炼。
+
+子 Agent 暂未挂入 DeepAgent 的 `adk.Agent` 槽位（保持顺序协调而非图协调），后续可平滑迁移到 eino 原生 `adk.Agent` 协调。
+
+### Retry-once + 非阻塞失败行为
+
+`runSubAgentWithRetry` 单测覆盖三种状态：
+
+- 第一次成功 → 仅 1 次调用
+- 第一次失败、第二次成功 → 恰好 2 次调用
+- 持续失败 → 恰好 2 次调用后向上抛错
+
+实战验证（task 2，临时 401 场景）：日志连续显示 4 个子 Agent 各重试 1 次（共 8 次 401），随后输出 `all 4 sub-agents produced no usable output; falling back to DeepAgent.GenerateCases`，DeepAgent 也 401 后 task 进入 `failed` 状态。证明任一子 Agent 失败不阻塞其他子 Agent；失败汇总后正确触发 fallback。
+
+`RefineCases` 输出加了 parse 校验：解析失败时退回未 refine 的 dedup 草稿（保证落库继续，不被 LLM 文本格式抖动卡死）。
+
+### 端到端跑通
+
+| 项 | 内容 |
+| --- | --- |
+| Fixture | I1-T7 公开语料 project_id=14 中的 document_id=30（`dubbo-zipkin-integration.md`） |
+| 影响范围 | 由分析阶段自动推断，6 个短篇 Dubbo 知识（concepts/references 类） |
+| 执行命令 | `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i2_generation_e2e.sh` |
+| 期望 | task 终态 `completed`；`/tasks/:id/cases` 至少 1 条用例落库 |
+
+### 最近一次实际结果摘要
+
+最近一轮：本地执行 `scripts/i2_generation_e2e.sh` 通过。
+
+- task_id=3，终态 `completed`，4 个 section（功能 / 运维 / 故障 / 边界）。
+- 实际落库 case 数：37（功能 8 + 运维 8 + 故障 9 + 边界 12）。
+- 前 5 条 case title：
+  - `[链路生成] 正常Dubbo调用链Trace生成验证`
+  - `[Span数据] 调用边界四个标注(cs/sr/ss/cr)正确性验证`
+  - `[日志透传] SLF4J MDC中traceId、spanId正确性验证`
+  - `[链路隔离] 多次并发调用TraceId互不干扰验证`
+  - `[异常场景] 服务调用抛出异常时链路数据正常上报验证`
+- 详细本地报告：`.dev/i2_generation_e2e.md`（gitignored）。
+
+### 已知遗留（交由后续任务处理）
+
+- `case_generation_results.cases` 字段在数据库中为**双重 JSON 字符串**（外层 string 包内层 escaped JSON 数组），脚本目前需要 `fromjson | fromjson` 才能取到 case 对象。这是 persist 路径的一个序列化重叠 bug，归入 **I2-T3（生成质量控制）** 一并修复。
+
 ## 复现执行流程
 
 1. 准备前置环境（同 `i1_retrieval.md`）。
-2. 执行 `bash scripts/i1_public_corpus_eval.sh` 把公开语料加载到 project（输出 run_token 与 project_id；脚本结束后 fixture 持久化在 DB 中）。
-3. 执行 `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i1_retrieval_determinism.sh` 验证 3 次连续调用的 hit 一致性；脚本会自动从 DB 取最近一次 `I1 public corpus %` project 的 document_ids，无需手动传 ID。
-4. 报告写入 `.dev/i1_retrieval_determinism.md`，把"3/3 identical"行回填到本文件「最近一次实际结果摘要」段。
+2. 执行 `bash scripts/i1_public_corpus_eval.sh` 把公开语料加载到 project（持久化在 DB 中）。
+3. 执行 `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i1_retrieval_determinism.sh` 验证 I2-T1 的 3 次稳定性，把 "3/3 identical" 行回填到本文件「样例 1 最近一次实际结果摘要」。
+4. 执行 `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i2_generation_e2e.sh` 触发 I2-T2 的 analyze → review → generate → 落库，把 task_id / section_count / case_count 回填到「样例 2 最近一次实际结果摘要」。
 
 ## 历史失败与处置（可选）
 
-记录有助于诊断的历史失败 + 处置；空段无需保留。
+- 2026-05-09：task 1 / task 2 因 Ark chat API key 失效返回 401，子 Agent 与 DeepAgent fallback 全部失败，task 进入 `failed`。处置：替换 `backend/configs/config.yaml` 中的 `model.chat.api_key`，重启后端后 task 3 通过。日志中 "[agent-service]" 前缀的行可清晰看到 retry-once + fallback 链路的全部决策点。
+- 2026-05-09：task 2 子 Agent 全部成功，但 DeepAgent.RefineCases 返回的内容无法被 `parseGeneratedSections` 解析，task 进入 `failed`。处置：在 agent service 给 RefineCases 输出加 parse 校验，失败时回落到未 refine 的 dedup payload；task 3 验证通过。
