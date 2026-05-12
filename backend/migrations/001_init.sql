@@ -81,7 +81,11 @@ CREATE TABLE IF NOT EXISTS test_cases (
     task_id INTEGER REFERENCES case_generation_tasks(id) ON DELETE CASCADE,
     section VARCHAR(255) NOT NULL,
     cases JSONB NOT NULL,
+    source_context JSONB,
     status VARCHAR(50) DEFAULT 'draft', -- 'draft', 'submitted', 'approved'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Backfill columns added after early local schemas already existed.
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS source_context JSONB;

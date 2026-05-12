@@ -95,14 +95,81 @@
 
 ### 已知遗留（交由后续任务处理）
 
-- `case_generation_results.cases` 字段在数据库中为**双重 JSON 字符串**（外层 string 包内层 escaped JSON 数组），脚本目前需要 `fromjson | fromjson` 才能取到 case 对象。这是 persist 路径的一个序列化重叠 bug，归入 **I2-T3（生成质量控制）** 一并修复。
+- ~~`case_generation_results.cases` 字段在数据库中为**双重 JSON 字符串**（外层 string 包内层 escaped JSON 数组），脚本目前需要 `fromjson | fromjson` 才能取到 case 对象。这是 persist 路径的一个序列化重叠 bug，归入 **I2-T3（生成质量控制）** 一并修复。~~ 已于 I2-T3 修复，见样例 3。
+
+## 样例 3：生成结果结构 / 去重 / 追溯字段（I2-T3）
+
+### 输出契约对齐 `docs/spec.md`
+
+`backend/internal/service/task/service.go`：
+
+- `parseGeneratedSections` / `groupFlatCases` / `normalizeSections` 把 LLM 返回归一化为 `[]generatedSection{ Section, Cases }`。
+- `normalizeCase`（line 832 起）保证每条 case 至少包含 `title`、`priority_id`（默认 3）、`custom_preconds`、`custom_steps_separated`（每步含 `content` + `expected`）四个字段，与 `docs/spec.md` 的 JSON 契约一致。
+- `attachCaseContext`（line 762 起）补齐每条 case 的 `affected_products`、`affected_modules`、`section`，保证落库后每条用例都能反查到所属影响范围与 section。
+
+### 数据库存储约束
+
+- `backend/internal/db/models/test_case.go`：`Cases` 字段已从 `string`（双重 JSON）改为 `[]map[string]any` + `type:jsonb`，新增 `SourceContext map[string]any` + `type:jsonb`。
+- `backend/migrations/001_init.sql`：新增 `source_context JSONB` 列，并提供 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS source_context JSONB` 做幂等回填，兼容已存在的本地 schema。
+- `persistGeneratedCases`（`service.go` line 260 起）直接以结构化值落库，不再 `json.Marshal(...)` 成 string，彻底消除「双重 JSON 字符串」bug。
+
+### 去重
+
+`dedupeGeneratedSections`（`service.go` line 719 起）按 `(title, custom_preconds, custom_steps_separated[].(content,expected))` 计算签名，跨 section 全局去重，空标题/空步骤的 case 直接丢弃。
+
+### 追溯（source_context）
+
+`buildSourceContext`（`service.go` line 418 起）为每个任务汇总以下字段并写入 `test_cases.source_context`：
+
+| 字段 | 含义 |
+| --- | --- |
+| `document_queries` | 文档检索使用的 query 列表（去重后） |
+| `knowledge_queries` | 知识库检索使用的 query 列表（去重后） |
+| `document_hits[]` | 命中的需求文档，含 `document_id` / `parent_doc_id` / `name` / `rank` / `best_score` / `hit_queries` / `top_chunks[<=3]`（每个 chunk 含 `text` / `score` / `query` / `rank`） |
+| `knowledge_hits[]` | 命中的知识条目，含 `id` / `name` / `type` / `rank` / `score` / `hit_queries` |
+| `knowledge_shipped_ids` | 实际拼装进 prompt 的知识条目 ID（检索命中 ∪ 影响范围匹配） |
+| `knowledge_shipped_names` | 同上，按 name |
+
+来源 ID 列表来自 `knowledge_shipped_ids` + `document_hits[].document_id`，关键片段来自 `document_hits[].top_chunks[].text`，满足 DoD「来源 ID 列表 + 关键片段」要求。
+
+### 单测证据
+
+| 单测 | 覆盖点 |
+| --- | --- |
+| `TestParseGeneratedSectionsSectionedJSON` | LLM 输出 `[{section, cases:[...]}]` 时解析正确 |
+| `TestParseGeneratedSectionsFlatJSON` | LLM 输出扁平 `[{type, title, steps, expected_result}]` 时按 type 重新分组并归一化 |
+| `TestDedupeGeneratedSections` | 跨 section 重复的 case 被去重，空 section 被丢弃 |
+| `TestAttachCaseContext` | 每条 case 自动获得 `affected_products` / `affected_modules` / `section` 字段 |
+| `TestBuildSourceContext` | source_context 携带 queries / document_hits / knowledge_hits / shipped_ids，文档命中最多保留前 3 个 chunk，shipped 跳过 id=0 |
+
+执行命令：`cd backend && go test ./internal/service/task/...`
+
+### 端到端校验
+
+`scripts/i2_generation_e2e.sh`（I2-T2 共用脚本）已扩展三个 I2-T3 断言：
+
+- `duplicate_title_count == 0`：跨 section 不存在标题完全相同的 case。
+- `cases_missing_affected_fields == 0`：每条 case 都带 `affected_products` 与 `affected_modules`（数组类型，可为空）。
+- `sections_with_source_context == section_count`：每行 `test_cases` 都有非空 `source_context`。
+
+任一不满足时脚本以非零退出。本地报告默认落在 `.dev/i2_generation_e2e.md`（gitignored），含 `source_context[0] summary` 行用于人工抽查。
+
+### 最近一次实际结果摘要
+
+| 项 | 内容 |
+| --- | --- |
+| Fixture | I1-T7 公开语料 project_id=14，document_id=30（`dubbo-zipkin-integration.md`），与样例 2 同 |
+| 执行命令 | `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i2_generation_e2e.sh` |
+| go 单测 | `cd backend && go test ./internal/service/task/...` ✓ 全通过（2026-05-12 本地） |
+| e2e 脚本 | 详细本地报告：`.dev/i2_generation_e2e.md`（gitignored，重跑覆盖），脚本现已包含 I2-T3 三项断言；下一轮真实模型可用时回填实际 duplicate / missing / source_context summary 数值 |
 
 ## 复现执行流程
 
 1. 准备前置环境（同 `i1_retrieval.md`）。
 2. 执行 `bash scripts/i1_public_corpus_eval.sh` 把公开语料加载到 project（持久化在 DB 中）。
 3. 执行 `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i1_retrieval_determinism.sh` 验证 I2-T1 的 3 次稳定性，把 "3/3 identical" 行回填到本文件「样例 1 最近一次实际结果摘要」。
-4. 执行 `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i2_generation_e2e.sh` 触发 I2-T2 的 analyze → review → generate → 落库，把 task_id / section_count / case_count 回填到「样例 2 最近一次实际结果摘要」。
+4. 执行 `CASEAGENT_PSQL_DSN='postgres://...' bash scripts/i2_generation_e2e.sh` 触发 analyze → review → generate → 落库，把 task_id / section_count / case_count 回填到「样例 2 最近一次实际结果摘要」；脚本同时硬断言 I2-T3 三项（duplicate_title=0、无缺失 affected 字段、每行 source_context 非空），任一不通过都以非零退出，把对应数字回填到「样例 3 最近一次实际结果摘要」。
+5. （可选）`cd backend && go test ./internal/service/task/...` 单独跑 I2-T3 的结构化/去重/source_context 单测。
 
 ## 历史失败与处置（可选）
 

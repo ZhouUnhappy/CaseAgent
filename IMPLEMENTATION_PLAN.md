@@ -65,7 +65,7 @@ CaseAgent 围绕"需求文档 + 架构知识"形成可审核测试用例闭环�
 | --- | --- | --- | --- |
 | I2-T1 | parent retriever 细化与上下文拼装增强 | Done | 生成前的检索上下文包含：父文档 ID、父文档名称、命中片段文本、检索 query、片段排序与得分；同一 fixture 连续执行 3 次返回的命中对象与排序一致。证据：`docs/regression/i2_retrieval_context.md` 样例 1。 |
 | I2-T2 | DeepAgent 协调逻辑完善 | Done | DeepAgent 与 Agent Service 的职责边界以代码注释或 `docs/` 内说明落档；任一子 Agent 失败可重试至少 1 次，重试后仍失败的子 Agent 不阻塞其他结果入库；选定需求 fixture 端到端跑通并落库 ≥1 条用例。证据：`backend/internal/service/agent/service.go` 顶部 package doc + `docs/regression/i2_retrieval_context.md` 样例 2（`scripts/i2_generation_e2e.sh` 一次跑通，37 cases / 4 sections 落库）。 |
-| I2-T3 | 生成质量控制（去重/结构化/追溯） | Todo | 生成结果结构满足 `docs/spec.md` 的 JSON 契约和数据库存储约束；同 fixture 重复用例可被去重；每条用例至少保留受影响产品/模块字段，并能追溯到生成使用的需求/知识上下文（来源 ID 列表 + 关键片段）。 |
+| I2-T3 | 生成质量控制（去重/结构化/追溯） | Done | 生成结果结构满足 `docs/spec.md` 的 JSON 契约和数据库存储约束；同 fixture 重复用例可被去重；每条用例至少保留受影响产品/模块字段，并能追溯到生成使用的需求/知识上下文（来源 ID 列表 + 关键片段）。证据：`backend/internal/service/task/service_test.go`（`TestParseGeneratedSectionsSectionedJSON` / `TestParseGeneratedSectionsFlatJSON` / `TestDedupeGeneratedSections` / `TestAttachCaseContext` / `TestBuildSourceContext`）+ `backend/migrations/001_init.sql`（`source_context JSONB` + `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`）+ `docs/regression/i2_retrieval_context.md` 样例 3；`scripts/i2_generation_e2e.sh` 已加入 `duplicate_title_count==0` / `cases_missing_affected_fields==0` / `sections_with_source_context==section_count` 三项硬断言。 |
 | I2-T4 | 生成闭环联调样例沉淀 | Todo | 在 `docs/regression/` 下提交端到端样例文档，覆盖"选定需求 -> 分析影响范围 -> 审核影响范围 -> 生成 -> 入库 -> 查询 -> 修改/提交"全流程，记录请求样例、关键响应、数据库结果、失败重试方式。 |
 
 ## Iteration 3：产品化闭环

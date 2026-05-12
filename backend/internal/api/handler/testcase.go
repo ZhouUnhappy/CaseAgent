@@ -11,8 +11,8 @@ import (
 )
 
 type UpdateTestCaseRequest struct {
-	Section string `json:"section"`
-	Cases   string `json:"cases"` // JSON string
+	Section string           `json:"section"`
+	Cases   []map[string]any `json:"cases"`
 }
 
 func (h *Handler) ListTestCases(c *gin.Context) {
@@ -51,7 +51,7 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 	if req.Section != "" {
 		tc.Section = req.Section
 	}
-	if req.Cases != "" {
+	if len(req.Cases) > 0 {
 		tc.Cases = req.Cases
 	}
 	tc.UpdatedAt = time.Now()

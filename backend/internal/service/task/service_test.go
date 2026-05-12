@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"caseagent/internal/db/models"
+	retrievalservice "caseagent/internal/service/retrieval"
 )
 
 func TestParseGeneratedSectionsSectionedJSON(t *testing.T) {
@@ -183,5 +184,88 @@ func TestAttachCaseContext(t *testing.T) {
 	}
 	if caseItem["section"] != "功能测试" {
 		t.Fatalf("unexpected section field: %#v", caseItem["section"])
+	}
+}
+
+func TestBuildSourceContext(t *testing.T) {
+	docHits := []retrievalservice.DocumentResult{
+		{
+			DocumentID:  101,
+			ParentDocID: 200,
+			Name:        "需求文档 A",
+			Rank:        1,
+			BestScore:   0.91,
+			HitQueries:  []string{"升级流程", "回滚流程"},
+			MatchedChunks: []retrievalservice.MatchedChunk{
+				{Text: "升级步骤片段", Score: 0.92, Query: "升级流程", Rank: 1},
+				{Text: "回滚步骤片段", Score: 0.88, Query: "回滚流程", Rank: 2},
+				{Text: "异常处理片段", Score: 0.81, Query: "升级流程", Rank: 3},
+				{Text: "应当被截断的第 4 个片段", Score: 0.70, Query: "升级流程", Rank: 4},
+			},
+		},
+	}
+	kbHits := []retrievalservice.KnowledgeResult{
+		{ID: 11, Type: "product", Name: "Product-A", Rank: 1, Score: 0.83, HitQueries: []string{"Product-A"}},
+		{ID: 22, Type: "module", Name: "Module-B", Rank: 2, Score: 0.79, HitQueries: []string{"Module-B"}},
+	}
+	shipped := []models.KnowledgeBase{
+		{ID: 11, Name: "Product-A"},
+		{ID: 22, Name: "Module-B"},
+		{ID: 33, Name: "Module-C"},
+		{ID: 0, Name: "should be skipped"},
+	}
+
+	ctx := buildSourceContext(
+		[]string{"升级 Product-A", "回滚流程"},
+		[]string{"Product-A", "Module-B"},
+		docHits,
+		kbHits,
+		shipped,
+	)
+
+	docQueries, ok := ctx["document_queries"].([]string)
+	if !ok || len(docQueries) != 2 || docQueries[0] != "升级 Product-A" {
+		t.Fatalf("unexpected document_queries: %#v", ctx["document_queries"])
+	}
+
+	kbQueries, ok := ctx["knowledge_queries"].([]string)
+	if !ok || len(kbQueries) != 2 {
+		t.Fatalf("unexpected knowledge_queries: %#v", ctx["knowledge_queries"])
+	}
+
+	docs, ok := ctx["document_hits"].([]map[string]any)
+	if !ok || len(docs) != 1 {
+		t.Fatalf("unexpected document_hits: %#v", ctx["document_hits"])
+	}
+	doc := docs[0]
+	if doc["document_id"] != 101 || doc["parent_doc_id"] != 200 {
+		t.Fatalf("unexpected doc ids: %#v", doc)
+	}
+	if doc["name"] != "需求文档 A" || doc["rank"] != 1 || doc["best_score"] != 0.91 {
+		t.Fatalf("unexpected doc summary: %#v", doc)
+	}
+	chunks, ok := doc["top_chunks"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected top_chunks slice, got %#v", doc["top_chunks"])
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("expected top 3 chunks (cap of 3), got %d", len(chunks))
+	}
+	if chunks[0]["text"] != "升级步骤片段" || chunks[0]["query"] != "升级流程" || chunks[0]["rank"] != 1 {
+		t.Fatalf("unexpected first chunk: %#v", chunks[0])
+	}
+
+	kbs, ok := ctx["knowledge_hits"].([]map[string]any)
+	if !ok || len(kbs) != 2 || kbs[0]["id"] != 11 || kbs[1]["id"] != 22 {
+		t.Fatalf("unexpected knowledge_hits: %#v", ctx["knowledge_hits"])
+	}
+
+	shippedIDs, ok := ctx["knowledge_shipped_ids"].([]int)
+	if !ok || len(shippedIDs) != 3 || shippedIDs[0] != 11 || shippedIDs[2] != 33 {
+		t.Fatalf("unexpected knowledge_shipped_ids (should skip id=0): %#v", ctx["knowledge_shipped_ids"])
+	}
+	shippedNames, ok := ctx["knowledge_shipped_names"].([]string)
+	if !ok || len(shippedNames) != 3 || shippedNames[0] != "Product-A" {
+		t.Fatalf("unexpected knowledge_shipped_names: %#v", ctx["knowledge_shipped_names"])
 	}
 }

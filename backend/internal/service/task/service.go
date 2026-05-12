@@ -84,9 +84,9 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	if err != nil {
 		return err
 	}
-	retrievedEntries := retrieveKnowledgeFallback(ctx, s.db, requirements, task.AffectedProducts, task.AffectedModules)
-	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, retrievedEntries)
-	requirementsContext := buildRequirementsContext(ctx, s.db, requirements, task.DocumentIDs, task.AffectedProducts, task.AffectedModules)
+	retrievedHits := retrieveKnowledgeFallback(ctx, s.db, requirements, task.AffectedProducts, task.AffectedModules)
+	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, knowledgeResultsToBaseEntries(retrievedHits))
+	requirementsContext, documentHits := buildRequirementsContext(ctx, s.db, requirements, task.DocumentIDs, task.AffectedProducts, task.AffectedModules)
 
 	agentSvc, err := agentservice.New(ctx, &agentservice.Config{})
 	if err != nil {
@@ -109,7 +109,15 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 		return fmt.Errorf("no test cases generated")
 	}
 
-	if err = s.persistGeneratedCases(ctx, taskID, sections); err != nil {
+	sourceContext := buildSourceContext(
+		buildDocumentQueries(requirements, task.AffectedProducts, task.AffectedModules),
+		buildKnowledgeQueries(requirements, task.AffectedProducts, task.AffectedModules),
+		documentHits,
+		retrievedHits,
+		knowledgeEntries,
+	)
+
+	if err = s.persistGeneratedCases(ctx, taskID, sections, sourceContext); err != nil {
 		return err
 	}
 
@@ -249,7 +257,7 @@ func (s *Service) loadRelevantKnowledge(ctx context.Context, products []string, 
 	return filtered, nil
 }
 
-func (s *Service) persistGeneratedCases(ctx context.Context, taskID int, sections []generatedSection) error {
+func (s *Service) persistGeneratedCases(ctx context.Context, taskID int, sections []generatedSection, sourceContext map[string]any) error {
 	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.NewDelete().Model(&models.TestCase{}).Where("task_id = ?", taskID).Exec(ctx); err != nil {
 			return fmt.Errorf("failed to clear existing test cases: %w", err)
@@ -257,18 +265,14 @@ func (s *Service) persistGeneratedCases(ctx context.Context, taskID int, section
 
 		now := time.Now()
 		for _, section := range sections {
-			payload, err := json.Marshal(section.Cases)
-			if err != nil {
-				return fmt.Errorf("failed to marshal test cases for section %s: %w", section.Section, err)
-			}
-
 			testCase := &models.TestCase{
-				TaskID:    taskID,
-				Section:   section.Section,
-				Cases:     string(payload),
-				Status:    models.TestCaseStatusDraft,
-				CreatedAt: now,
-				UpdatedAt: now,
+				TaskID:        taskID,
+				Section:       section.Section,
+				Cases:         section.Cases,
+				SourceContext: sourceContext,
+				Status:        models.TestCaseStatusDraft,
+				CreatedAt:     now,
+				UpdatedAt:     now,
 			}
 
 			if _, err := tx.NewInsert().Model(testCase).Exec(ctx); err != nil {
@@ -380,13 +384,19 @@ func formatKnowledgeContext(entries []models.KnowledgeBase) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements string, products []string, modules []string) []models.KnowledgeBase {
+func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements string, products []string, modules []string) []retrievalservice.KnowledgeResult {
 	queries := buildKnowledgeQueries(requirements, products, modules)
 	results, err := retrievalservice.New(db).SearchKnowledgeMultiQuery(ctx, queries, 6, "")
 	if err != nil {
 		return nil
 	}
+	return results
+}
 
+func knowledgeResultsToBaseEntries(results []retrievalservice.KnowledgeResult) []models.KnowledgeBase {
+	if len(results) == 0 {
+		return nil
+	}
 	entries := make([]models.KnowledgeBase, 0, len(results))
 	for _, result := range results {
 		entries = append(entries, models.KnowledgeBase{
@@ -397,8 +407,76 @@ func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements str
 			Metadata: result.Metadata,
 		})
 	}
-
 	return entries
+}
+
+// buildSourceContext assembles a JSONB-friendly map recording the retrieval
+// context that fed this generation: queries used, document hits with rank /
+// score / top chunks, knowledge hits with rank / score, and the union of
+// knowledge IDs actually shipped to the agent (retrieval hits plus those
+// matched via affected_products / affected_modules).
+func buildSourceContext(documentQueries, knowledgeQueries []string,
+	documentHits []retrievalservice.DocumentResult,
+	knowledgeHits []retrievalservice.KnowledgeResult,
+	knowledgeShipped []models.KnowledgeBase,
+) map[string]any {
+	docs := make([]map[string]any, 0, len(documentHits))
+	for _, hit := range documentHits {
+		chunks := make([]map[string]any, 0, len(hit.MatchedChunks))
+		maxChunks := 3
+		if len(hit.MatchedChunks) < maxChunks {
+			maxChunks = len(hit.MatchedChunks)
+		}
+		for i := 0; i < maxChunks; i++ {
+			c := hit.MatchedChunks[i]
+			chunks = append(chunks, map[string]any{
+				"text":  c.Text,
+				"score": c.Score,
+				"query": c.Query,
+				"rank":  c.Rank,
+			})
+		}
+		docs = append(docs, map[string]any{
+			"document_id":    hit.DocumentID,
+			"parent_doc_id":  hit.ParentDocID,
+			"name":           hit.Name,
+			"rank":           hit.Rank,
+			"best_score":     hit.BestScore,
+			"hit_queries":    hit.HitQueries,
+			"top_chunks":     chunks,
+		})
+	}
+
+	kbHits := make([]map[string]any, 0, len(knowledgeHits))
+	for _, hit := range knowledgeHits {
+		kbHits = append(kbHits, map[string]any{
+			"id":          hit.ID,
+			"name":        hit.Name,
+			"type":        hit.Type,
+			"rank":        hit.Rank,
+			"score":       hit.Score,
+			"hit_queries": hit.HitQueries,
+		})
+	}
+
+	shippedIDs := make([]int, 0, len(knowledgeShipped))
+	shippedNames := make([]string, 0, len(knowledgeShipped))
+	for _, entry := range knowledgeShipped {
+		if entry.ID <= 0 {
+			continue
+		}
+		shippedIDs = append(shippedIDs, entry.ID)
+		shippedNames = append(shippedNames, entry.Name)
+	}
+
+	return map[string]any{
+		"document_queries":         documentQueries,
+		"knowledge_queries":        knowledgeQueries,
+		"document_hits":            docs,
+		"knowledge_hits":           kbHits,
+		"knowledge_shipped_ids":    shippedIDs,
+		"knowledge_shipped_names":  shippedNames,
+	}
 }
 
 func buildKnowledgeQueries(requirements string, products []string, modules []string) []string {
@@ -494,15 +572,15 @@ func mergeKnowledgeEntries(primary []models.KnowledgeBase, secondary []models.Kn
 	return merged
 }
 
-func buildRequirementsContext(ctx context.Context, db *bun.DB, requirements string, documentIDs []int, products []string, modules []string) string {
+func buildRequirementsContext(ctx context.Context, db *bun.DB, requirements string, documentIDs []int, products []string, modules []string) (string, []retrievalservice.DocumentResult) {
 	queries := buildDocumentQueries(requirements, products, modules)
 	if len(queries) == 0 || len(documentIDs) == 0 {
-		return requirements
+		return requirements, nil
 	}
 
 	results, err := retrievalservice.New(db).SearchDocumentsMultiQuery(ctx, queries, 4, documentIDs)
 	if err != nil || len(results) == 0 {
-		return requirements
+		return requirements, nil
 	}
 
 	var builder strings.Builder
@@ -533,14 +611,14 @@ func buildRequirementsContext(ctx context.Context, db *bun.DB, requirements stri
 
 	context := strings.TrimSpace(builder.String())
 	if context == "" {
-		return requirements
+		return requirements, results
 	}
 
 	// If retrieval context is too short, append original requirements as fallback context.
 	if len([]rune(context)) < 400 {
-		return context + "\n\n## 完整需求文档\n\n" + requirements
+		return context + "\n\n## 完整需求文档\n\n" + requirements, results
 	}
-	return context
+	return context, results
 }
 
 func buildDocumentQueries(requirements string, products []string, modules []string) []string {
