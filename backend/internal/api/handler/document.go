@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -78,15 +78,19 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] document upload accepted: project_id=%d document_id=%d name=%q source=%s\n",
-		pid, document.ID, document.Name, document.Source)
+	slog.Info("document upload accepted",
+		"project_id", pid,
+		"document_id", document.ID,
+		"name", document.Name,
+		"source", document.Source,
+	)
 
 	// Process document asynchronously
 	go func(docID int, content string, gwsFileID string) {
 		ctx := context.Background()
 		docService, err := documentservice.New(ctx, h.DB)
 		if err != nil {
-			fmt.Printf("[handler] document_id=%d service init failed: %v\n", docID, err)
+			slog.Error("document service init failed", "document_id", docID, "error", err)
 			_, _ = h.DB.NewUpdate().Model(&models.Document{}).
 				Set("status = ?", "failed").
 				Set("updated_at = ?", time.Now()).
@@ -96,7 +100,7 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		}
 		err = docService.ProcessDocument(ctx, docID, content, gwsFileID)
 		if err != nil {
-			fmt.Printf("[handler] document_id=%d process failed: %v\n", docID, err)
+			slog.Error("document process failed", "document_id", docID, "error", err)
 		}
 	}(document.ID, content, req.FileID)
 
@@ -163,13 +167,13 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] document reprocess accepted: document_id=%d name=%q\n", document.ID, document.Name)
+	slog.Info("document reprocess accepted", "document_id", document.ID, "name", document.Name)
 
 	go func(docID int) {
 		ctx := context.Background()
 		docService, err := documentservice.New(ctx, h.DB)
 		if err != nil {
-			fmt.Printf("[handler] document_id=%d service init failed: %v\n", docID, err)
+			slog.Error("document service init failed", "document_id", docID, "error", err)
 			_, _ = h.DB.NewUpdate().Model(&models.Document{}).
 				Set("status = ?", "failed").
 				Set("updated_at = ?", time.Now()).
@@ -178,7 +182,7 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 			return
 		}
 		if err := docService.ReprocessDocument(ctx, docID); err != nil {
-			fmt.Printf("[handler] document_id=%d reprocess failed: %v\n", docID, err)
+			slog.Error("document reprocess failed", "document_id", docID, "error", err)
 		}
 	}(document.ID)
 

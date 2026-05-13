@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -48,7 +48,7 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] knowledge create accepted: knowledge_id=%d type=%s name=%q\n", kb.ID, kb.Type, kb.Name)
+	slog.Info("knowledge create accepted", "knowledge_id", kb.ID, "type", kb.Type, "name", kb.Name)
 
 	h.processKnowledgeAsync(kb.ID, req.Content)
 
@@ -131,7 +131,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 		h.processKnowledgeAsync(kb.ID, kb.Content)
 	}
 
-	fmt.Printf("[handler] knowledge update: knowledge_id=%d name=%q reprocess=%t\n", kb.ID, kb.Name, needsReprocess)
+	slog.Info("knowledge update", "knowledge_id", kb.ID, "name", kb.Name, "reprocess", needsReprocess)
 
 	c.JSON(http.StatusOK, kb)
 }
@@ -159,13 +159,13 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] knowledge reprocess accepted: knowledge_id=%d name=%q\n", kb.ID, kb.Name)
+	slog.Info("knowledge reprocess accepted", "knowledge_id", kb.ID, "name", kb.Name)
 
 	go func(kbID int) {
 		ctx := context.Background()
 		kbService, err := knowledge.New(ctx, h.DB)
 		if err != nil {
-			fmt.Printf("[handler] knowledge_id=%d service init failed: %v\n", kbID, err)
+			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
 			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
 				Set("status = ?", models.KnowledgeStatusFailed).
 				Set("updated_at = ?", time.Now()).
@@ -174,7 +174,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 			return
 		}
 		if err := kbService.ReprocessKnowledge(ctx, kbID); err != nil {
-			fmt.Printf("[handler] knowledge_id=%d reprocess failed: %v\n", kbID, err)
+			slog.Error("knowledge reprocess failed", "knowledge_id", kbID, "error", err)
 		}
 	}(kb.ID)
 
@@ -198,7 +198,7 @@ func (h *Handler) processKnowledgeAsync(kbID int, content string) {
 		ctx := context.Background()
 		kbService, err := knowledge.New(ctx, h.DB)
 		if err != nil {
-			fmt.Printf("[handler] knowledge_id=%d service init failed: %v\n", kbID, err)
+			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
 			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
 				Set("status = ?", models.KnowledgeStatusFailed).
 				Set("updated_at = ?", time.Now()).
@@ -207,7 +207,7 @@ func (h *Handler) processKnowledgeAsync(kbID int, content string) {
 			return
 		}
 		if err := kbService.ProcessKnowledge(ctx, kbID, content); err != nil {
-			fmt.Printf("[handler] knowledge_id=%d process failed: %v\n", kbID, err)
+			slog.Error("knowledge process failed", "knowledge_id", kbID, "error", err)
 		}
 	}()
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -62,14 +63,17 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] task created: task_id=%d project_id=%d document_ids=%v\n",
-		task.ID, task.ProjectID, task.DocumentIDs)
+	slog.Info("task created",
+		"task_id", task.ID,
+		"project_id", task.ProjectID,
+		"document_ids", task.DocumentIDs,
+	)
 
 	go func(taskID int) {
 		ctx := context.Background()
 		svc := taskservice.New(h.DB)
 		if err := svc.AnalyzeTask(ctx, taskID); err != nil {
-			fmt.Printf("[handler] task_id=%d analyze failed: %v\n", taskID, err)
+			slog.Error("task analyze failed", "task_id", taskID, "error", err)
 		}
 	}(task.ID)
 
@@ -139,8 +143,11 @@ func (h *Handler) ReviewAffected(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] task review: task_id=%s products=%v modules=%v\n",
-		id, task.AffectedProducts, task.AffectedModules)
+	slog.Info("task review",
+		"task_id", id,
+		"products", task.AffectedProducts,
+		"modules", task.AffectedModules,
+	)
 
 	c.JSON(http.StatusOK, task)
 }
@@ -182,11 +189,11 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 		ctx := context.Background()
 		svc := taskservice.New(h.DB)
 		if err := svc.GenerateCases(ctx, taskID); err != nil {
-			fmt.Printf("[handler] task_id=%d generate failed: %v\n", taskID, err)
+			slog.Error("task generate failed", "task_id", taskID, "error", err)
 		}
 	}(task.ID)
 
-	fmt.Printf("[handler] task generate accepted: task_id=%d\n", task.ID)
+	slog.Info("task generate accepted", "task_id", task.ID)
 
 	c.JSON(http.StatusOK, task)
 }

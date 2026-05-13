@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,29 +13,29 @@ import (
 	"caseagent/internal/api/router"
 	"caseagent/internal/config"
 	"caseagent/internal/db"
+	"caseagent/internal/logging"
 )
 
 func main() {
+	logging.Init()
 	ctx := context.Background()
 
-	// Load config
 	if err := config.Load("configs/config.yaml"); err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
 
-	// Initialize database
 	if err := db.Init(ctx); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		slog.Error("failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
-	log.Println("Database initialized successfully")
+	slog.Info("database initialized")
 
-	// Setup router
 	h := handler.New(db.DB)
 	r := router.SetupRouter(h)
 
-	// Start HTTP server
 	addr := ":8080"
 	if config.Get().Server.Port != 0 {
 		addr = fmt.Sprintf(":%d", config.Get().Server.Port)
@@ -47,20 +47,21 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Server starting on %s", addr)
+		slog.Info("server starting", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			slog.Error("server failed to start", "error", err)
+			os.Exit(1)
 		}
 	}()
 
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	slog.Info("server shutting down")
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shutdown error: %v", err)
+		slog.Error("server shutdown error", "error", err)
+		os.Exit(1)
 	}
-	log.Println("Server stopped")
+	slog.Info("server stopped")
 }

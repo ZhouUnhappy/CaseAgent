@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -59,12 +60,12 @@ func (h *Handler) runRepairPlan(plan *maintenanceservice.RepairPlan) {
 		if len(documentIDs) > 0 {
 			docService, err := documentservice.New(ctx, h.DB)
 			if err != nil {
-				fmt.Printf("Failed to initialize document service for batch reindex: %v\n", err)
+				slog.Error("document service init failed for batch reindex", "error", err)
 				_ = markDocumentsFailed(ctx, h.DB, documentIDs, time.Now())
 			} else {
 				for _, id := range documentIDs {
 					if err := docService.ReprocessDocument(ctx, id); err != nil {
-						fmt.Printf("Failed to reprocess document %d in batch reindex: %v\n", id, err)
+						slog.Error("batch reindex document failed", "document_id", id, "error", err)
 					}
 				}
 			}
@@ -73,13 +74,13 @@ func (h *Handler) runRepairPlan(plan *maintenanceservice.RepairPlan) {
 		if len(knowledgeIDs) > 0 {
 			knowledgeService, err := knowledgeservice.New(ctx, h.DB)
 			if err != nil {
-				fmt.Printf("Failed to initialize knowledge service for batch reindex: %v\n", err)
+				slog.Error("knowledge service init failed for batch reindex", "error", err)
 				_ = markKnowledgeFailed(ctx, h.DB, knowledgeIDs, time.Now())
 				return
 			}
 			for _, id := range knowledgeIDs {
 				if err := knowledgeService.ReprocessKnowledge(ctx, id); err != nil {
-					fmt.Printf("Failed to reprocess knowledge %d in batch reindex: %v\n", id, err)
+					slog.Error("batch reindex knowledge failed", "knowledge_id", id, "error", err)
 				}
 			}
 		}

@@ -26,7 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"caseagent/internal/agent/boundary"
@@ -147,46 +147,50 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 			return g.run(ctx, requirements, knowledge)
 		})
 		if err != nil {
-			log.Printf("[agent-service] sub-agent %q failed after retry, continuing without it: %v", g.name, err)
+			slog.Warn("sub-agent failed after retry, continuing without it",
+				"agent", g.name, "error", err)
 			continue
 		}
 
 		parsed, parseErr := parseGeneratedSections(output)
 		if parseErr != nil || len(parsed) == 0 {
-			log.Printf("[agent-service] sub-agent %q produced unparseable output (parse_err=%v, len=%d), skipping", g.name, parseErr, len(parsed))
+			slog.Warn("sub-agent produced unparseable output, skipping",
+				"agent", g.name, "parse_err", parseErr, "len", len(parsed))
 			continue
 		}
 		sections = append(sections, parsed...)
 	}
 
 	if len(sections) == 0 {
-		log.Printf("[agent-service] all %d sub-agents produced no usable output; falling back to DeepAgent.GenerateCases", len(generators))
+		slog.Warn("all sub-agents produced no usable output; falling back to DeepAgent.GenerateCases",
+			"sub_agent_count", len(generators))
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
 	normalized := dedupeGeneratedSections(sections)
 	if len(normalized) == 0 {
-		log.Printf("[agent-service] dedupe collapsed all sub-agent sections; falling back to DeepAgent.GenerateCases")
+		slog.Warn("dedupe collapsed all sub-agent sections; falling back to DeepAgent.GenerateCases")
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
 	payload, err := json.Marshal(normalized)
 	if err != nil {
-		log.Printf("[agent-service] failed to marshal dedup'd sections (%v); falling back to DeepAgent.GenerateCases", err)
+		slog.Warn("failed to marshal dedup'd sections; falling back to DeepAgent.GenerateCases", "error", err)
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	}
 
 	refined, err := s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
 	if err != nil || strings.TrimSpace(refined) == "" {
 		if err != nil {
-			log.Printf("[agent-service] DeepAgent.RefineCases failed (%v); returning unrefined dedup'd payload", err)
+			slog.Warn("DeepAgent.RefineCases failed; returning unrefined dedup'd payload", "error", err)
 		} else {
-			log.Printf("[agent-service] DeepAgent.RefineCases returned empty content; returning unrefined dedup'd payload")
+			slog.Warn("DeepAgent.RefineCases returned empty content; returning unrefined dedup'd payload")
 		}
 		return string(payload), nil
 	}
 	if _, parseErr := parseGeneratedSections(refined); parseErr != nil {
-		log.Printf("[agent-service] DeepAgent.RefineCases produced unparseable output (%v); returning unrefined dedup'd payload", parseErr)
+		slog.Warn("DeepAgent.RefineCases produced unparseable output; returning unrefined dedup'd payload",
+			"parse_err", parseErr)
 		return string(payload), nil
 	}
 	return refined, nil
@@ -200,7 +204,7 @@ func runSubAgentWithRetry(ctx context.Context, name string, fn func(context.Cont
 	if err == nil {
 		return output, nil
 	}
-	log.Printf("[agent-service] sub-agent %q first attempt failed (%v); retrying once", name, err)
+	slog.Warn("sub-agent first attempt failed; retrying once", "agent", name, "error", err)
 	return fn(ctx)
 }
 

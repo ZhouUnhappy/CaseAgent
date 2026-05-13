@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -63,8 +63,12 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] testcase update: task_id=%d case_id=%d section=%q cases=%d\n",
-		tc.TaskID, tc.ID, tc.Section, len(tc.Cases))
+	slog.Info("testcase update",
+		"task_id", tc.TaskID,
+		"case_id", tc.ID,
+		"section", tc.Section,
+		"cases", len(tc.Cases),
+	)
 
 	c.JSON(http.StatusOK, tc)
 }
@@ -88,8 +92,11 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("[handler] testcase submit: task_id=%d case_id=%d section=%q\n",
-		tc.TaskID, tc.ID, tc.Section)
+	slog.Info("testcase submit",
+		"task_id", tc.TaskID,
+		"case_id", tc.ID,
+		"section", tc.Section,
+	)
 
 	c.JSON(http.StatusOK, tc)
 }
