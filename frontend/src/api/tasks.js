@@ -19,3 +19,7 @@ export function reviewAffected(id, payload) {
 export function generateCases(id) {
   return client.put(`/tasks/${id}/generate`, {}).then((r) => r.data)
 }
+
+export function retryTask(id) {
+  return client.post(`/tasks/${id}/retry`, {}).then((r) => r.data)
+}

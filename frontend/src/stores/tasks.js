@@ -5,6 +5,7 @@ import {
   getTask,
   reviewAffected,
   generateCases,
+  retryTask,
 } from '../api/tasks'
 
 export const useTasksStore = defineStore('tasks', {
@@ -45,6 +46,12 @@ export const useTasksStore = defineStore('tasks', {
     },
     async generate(id) {
       const updated = await generateCases(id)
+      this.replace(updated)
+      this.current = updated
+      return updated
+    },
+    async retry(id) {
+      const updated = await retryTask(id)
       this.replace(updated)
       this.current = updated
       return updated

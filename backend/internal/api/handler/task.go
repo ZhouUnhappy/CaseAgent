@@ -198,6 +198,69 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
+// RetryTask brings a failed task back into the pipeline. The phase to re-run
+// is inferred from existing state:
+//
+//   - affected_products and affected_modules both empty → analyze failed
+//     before review; reset to "analyzing" and re-invoke AnalyzeTask.
+//   - otherwise → analyze had already succeeded at least once; reset to
+//     "ready_to_generate" so the operator can either tweak the review and
+//     retry, or call PUT /generate directly. We do NOT auto-trigger
+//     generation here, because the failure may have been caused by a
+//     transient model outage that the operator wants to verify is fixed
+//     before burning tokens.
+//
+// Only `failed` tasks may be retried. Other states return 409.
+func (h *Handler) RetryTask(c *gin.Context) {
+	id := c.Param("id")
+	task := &models.CaseGenerationTask{ID: 0}
+
+	if err := h.DB.NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	}
+	if task.Status != models.TaskStatusFailed {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("task status %q is not retryable; only failed tasks can be retried", task.Status),
+		})
+		return
+	}
+
+	rerunAnalyze := len(task.AffectedProducts) == 0 && len(task.AffectedModules) == 0
+	if rerunAnalyze {
+		task.Status = models.TaskStatusAnalyzing
+	} else {
+		task.Status = models.TaskStatusReadyToGenerate
+	}
+	task.UpdatedAt = time.Now()
+
+	if _, err := h.DB.NewUpdate().Model(task).
+		Set("status = ?", task.Status).
+		Set("updated_at = ?", task.UpdatedAt).
+		Where("id = ?", id).
+		Exec(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if rerunAnalyze {
+		go func(taskID int) {
+			ctx := context.Background()
+			svc := taskservice.New(h.DB)
+			if err := svc.AnalyzeTask(ctx, taskID); err != nil {
+				slog.Error("task retry analyze failed", "task_id", taskID, "error", err)
+			}
+		}(task.ID)
+	}
+
+	slog.Info("task retry accepted",
+		"task_id", task.ID,
+		"phase", map[bool]string{true: "analyze", false: "ready_to_generate"}[rerunAnalyze],
+	)
+
+	c.JSON(http.StatusAccepted, task)
+}
+
 func validateTaskDocuments(ctx context.Context, db *bun.DB, projectID int, documentIDs []int) error {
 	projectCount, err := db.NewSelect().Model((*models.Project)(nil)).Where("id = ?", projectID).Count(ctx)
 	if err != nil {

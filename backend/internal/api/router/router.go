@@ -39,6 +39,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		v1.GET("/tasks/:id", h.GetTask)
 		v1.PUT("/tasks/:id/review", h.ReviewAffected)
 		v1.PUT("/tasks/:id/generate", h.GenerateCases)
+		v1.POST("/tasks/:id/retry", h.RetryTask)
 
 		// Knowledge Base
 		knowledge := v1.Group("/knowledge")

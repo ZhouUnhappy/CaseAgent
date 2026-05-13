@@ -24,6 +24,7 @@ const { items: knowledge } = storeToRefs(knowledgeStore)
 const reviewForm = reactive({ products: [], modules: [] })
 const polling = ref(null)
 const generating = ref(false)
+const retrying = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
@@ -119,6 +120,23 @@ async function startGenerate() {
   }
 }
 
+async function retryTask() {
+  retrying.value = true
+  try {
+    const updated = await tasksStore.retry(taskId.value)
+    if (updated.status === 'analyzing') {
+      notifySuccess('已重新触发分析，正在等待结果...')
+      ensurePolling()
+    } else {
+      notifySuccess('任务已回到 ready_to_generate；可点击"开始生成"重新触发。')
+    }
+  } catch {
+    /* 错误已弹窗 */
+  } finally {
+    retrying.value = false
+  }
+}
+
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '-'
 }
@@ -191,13 +209,20 @@ async function submitSection(section) {
           v-if="task.status === 'failed'"
           type="warning"
           size="small"
+          :loading="retrying"
+          @click="retryTask"
+        >重试</el-button>
+        <el-button
+          v-if="task.status === 'failed'"
+          size="small"
           @click="loadTask"
         >刷新状态</el-button>
         <el-tag v-if="isPolling" type="warning" size="small">轮询中（3s）</el-tag>
       </div>
       <p v-if="task.status === 'failed'" class="muted danger">
         任务失败。常见原因：模型 API 失败、子 Agent 全部失败且 DeepAgent fallback 也失败。
-        恢复方式：检查后端日志（关键字 `[agent-service]`），修复后由后端运维把状态置回 `ready_to_generate`，再点击"开始生成"。
+        点击"重试"会根据当前状态自动回到 analyze 或 ready_to_generate；若回到 ready_to_generate，
+        请确认根因（后端日志关键字 <code>agent</code> / <code>document</code>）已修复后再"开始生成"。
       </p>
     </header>
 
