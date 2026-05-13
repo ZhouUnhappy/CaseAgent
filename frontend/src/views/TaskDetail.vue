@@ -1,0 +1,420 @@
+<script setup>
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
+import { ElMessageBox } from 'element-plus'
+import StatusTag from '../components/StatusTag.vue'
+import { useTasksStore } from '../stores/tasks'
+import { useTestCasesStore } from '../stores/testcases'
+import { useKnowledgeStore } from '../stores/knowledge'
+import { notifySuccess } from '../utils/error'
+
+const route = useRoute()
+const router = useRouter()
+const taskId = computed(() => Number(route.params.id))
+
+const tasksStore = useTasksStore()
+const casesStore = useTestCasesStore()
+const knowledgeStore = useKnowledgeStore()
+
+const { current: task } = storeToRefs(tasksStore)
+const { items: cases, loading: casesLoading, saving: casesSaving } = storeToRefs(casesStore)
+const { items: knowledge } = storeToRefs(knowledgeStore)
+
+const reviewForm = reactive({ products: [], modules: [] })
+const polling = ref(null)
+const generating = ref(false)
+const editingCase = ref(null)
+const editorVisible = ref(false)
+const editorBuffer = ref('')
+
+const productOptions = computed(() =>
+  knowledge.value.filter((k) => k.type === 'product').map((k) => k.name),
+)
+const moduleOptions = computed(() =>
+  knowledge.value.filter((k) => k.type === 'module').map((k) => k.name),
+)
+
+const canReview = computed(() =>
+  task.value && ['awaiting_review', 'ready_to_generate'].includes(task.value.status),
+)
+const canGenerate = computed(() => task.value?.status === 'ready_to_generate')
+const isPolling = computed(() => task.value && ['analyzing', 'generating'].includes(task.value.status))
+
+onMounted(async () => {
+  await loadTask()
+  knowledgeStore.fetch().catch(() => {})
+})
+onUnmounted(() => stopPolling())
+
+watch(taskId, () => {
+  stopPolling()
+  loadTask()
+})
+
+watch(
+  () => task.value?.status,
+  (status) => {
+    if (status === 'completed') {
+      casesStore.fetch(taskId.value).catch(() => {})
+      stopPolling()
+    } else if (status === 'failed') {
+      stopPolling()
+    } else if (status === 'analyzing' || status === 'generating') {
+      ensurePolling()
+    } else {
+      stopPolling()
+    }
+  },
+)
+
+async function loadTask() {
+  try {
+    const t = await tasksStore.load(taskId.value)
+    reviewForm.products = [...(t.affected_products || [])]
+    reviewForm.modules = [...(t.affected_modules || [])]
+    if (['completed'].includes(t.status)) {
+      casesStore.fetch(taskId.value).catch(() => {})
+    }
+  } catch {
+    /* 错误已弹窗 */
+  }
+}
+
+function ensurePolling() {
+  if (polling.value) return
+  polling.value = setInterval(() => {
+    tasksStore.load(taskId.value).catch(() => {})
+  }, 3000)
+}
+function stopPolling() {
+  if (polling.value) {
+    clearInterval(polling.value)
+    polling.value = null
+  }
+}
+
+async function submitReview() {
+  try {
+    await tasksStore.review(taskId.value, {
+      affected_products: reviewForm.products,
+      affected_modules: reviewForm.modules,
+    })
+    notifySuccess('影响范围已提交')
+  } catch {
+    /* 错误已弹窗 */
+  }
+}
+
+async function startGenerate() {
+  generating.value = true
+  try {
+    await tasksStore.generate(taskId.value)
+    notifySuccess('生成已触发，正在等待结果...')
+    ensurePolling()
+  } catch {
+    /* 错误已弹窗 */
+  } finally {
+    generating.value = false
+  }
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString() : '-'
+}
+
+function priorityLabel(id) {
+  return { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' }[id] || `P${id}`
+}
+
+function openEditor(section) {
+  editingCase.value = section
+  editorBuffer.value = JSON.stringify(section.cases || [], null, 2)
+  editorVisible.value = true
+}
+
+async function saveEditor() {
+  let parsed
+  try {
+    parsed = JSON.parse(editorBuffer.value)
+    if (!Array.isArray(parsed)) throw new Error('cases 必须是数组')
+  } catch (err) {
+    ElMessageBox.alert(`JSON 解析失败：${err.message}`)
+    return
+  }
+  try {
+    await casesStore.update(taskId.value, editingCase.value.id, {
+      section: editingCase.value.section,
+      cases: parsed,
+    })
+    notifySuccess('用例已保存')
+    editorVisible.value = false
+  } catch {
+    /* 错误已弹窗 */
+  }
+}
+
+async function submitSection(section) {
+  try {
+    await ElMessageBox.confirm(
+      `提交 section「${section.section}」共 ${section.cases?.length || 0} 条用例？`,
+      '确认',
+      { type: 'info' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await casesStore.submit(taskId.value, section.id)
+    notifySuccess('已提交')
+  } catch {
+    /* 错误已弹窗 */
+  }
+}
+</script>
+
+<template>
+  <section v-if="task" class="task-detail">
+    <header class="page-header">
+      <el-breadcrumb separator="/">
+        <el-breadcrumb-item :to="{ name: 'projects' }">项目</el-breadcrumb-item>
+        <el-breadcrumb-item
+          :to="{ name: 'project-detail', params: { id: task.project_id } }"
+        >项目 #{{ task.project_id }}</el-breadcrumb-item>
+        <el-breadcrumb-item>任务 #{{ task.id }}</el-breadcrumb-item>
+      </el-breadcrumb>
+      <div class="task-meta">
+        <StatusTag :status="task.status" />
+        <span class="muted">文档数：{{ (task.document_ids || []).length }}</span>
+        <span class="muted">更新：{{ formatDate(task.updated_at) }}</span>
+        <el-button
+          v-if="task.status === 'failed'"
+          type="warning"
+          size="small"
+          @click="loadTask"
+        >刷新状态</el-button>
+        <el-tag v-if="isPolling" type="warning" size="small">轮询中（3s）</el-tag>
+      </div>
+      <p v-if="task.status === 'failed'" class="muted danger">
+        任务失败。常见原因：模型 API 失败、子 Agent 全部失败且 DeepAgent fallback 也失败。
+        恢复方式：检查后端日志（关键字 `[agent-service]`），修复后由后端运维把状态置回 `ready_to_generate`，再点击"开始生成"。
+      </p>
+    </header>
+
+    <el-card shadow="never" class="card">
+      <template #header><span>影响范围审核</span></template>
+      <el-form label-width="100px">
+        <el-form-item label="受影响产品">
+          <el-select
+            v-model="reviewForm.products"
+            multiple
+            filterable
+            allow-create
+            :disabled="!canReview"
+            style="width: 100%"
+            placeholder="留空表示不限定"
+          >
+            <el-option v-for="p in productOptions" :key="p" :value="p" :label="p" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="受影响模块">
+          <el-select
+            v-model="reviewForm.modules"
+            multiple
+            filterable
+            allow-create
+            :disabled="!canReview"
+            style="width: 100%"
+            placeholder="留空表示不限定"
+          >
+            <el-option v-for="m in moduleOptions" :key="m" :value="m" :label="m" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            :disabled="!canReview"
+            @click="submitReview"
+          >提交审核</el-button>
+          <el-button
+            type="success"
+            :disabled="!canGenerate"
+            :loading="generating"
+            @click="startGenerate"
+          >开始生成</el-button>
+          <span v-if="!canReview && !canGenerate" class="muted small">
+            当前状态 {{ task.status }} 不允许编辑影响范围或触发生成。
+          </span>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card v-if="task.status === 'completed'" shadow="never" class="card">
+      <template #header>
+        <div class="card-header">
+          <span>生成用例（{{ cases.length }} sections）</span>
+          <el-button @click="casesStore.fetch(taskId)" :loading="casesLoading">刷新</el-button>
+        </div>
+      </template>
+      <el-empty v-if="!cases.length && !casesLoading" description="暂无用例" />
+      <el-collapse>
+        <el-collapse-item
+          v-for="section in cases"
+          :key="section.id"
+          :name="section.id"
+        >
+          <template #title>
+            <div class="section-title">
+              <span>{{ section.section }}</span>
+              <el-tag size="small" type="info">{{ section.cases?.length || 0 }} cases</el-tag>
+              <StatusTag :status="section.status" />
+            </div>
+          </template>
+
+          <div class="section-actions">
+            <el-button size="small" @click="openEditor(section)">编辑 JSON</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="section.status === 'submitted' || section.status === 'approved'"
+              @click="submitSection(section)"
+            >提交</el-button>
+          </div>
+
+          <el-table :data="section.cases || []" stripe size="small">
+            <el-table-column prop="title" label="标题" min-width="260" show-overflow-tooltip />
+            <el-table-column label="优先级" width="100">
+              <template #default="{ row }">{{ priorityLabel(row.priority_id) }}</template>
+            </el-table-column>
+            <el-table-column label="影响产品" min-width="140">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="p in row.affected_products || []"
+                  :key="p"
+                  size="small"
+                  type="info"
+                  class="chip"
+                >{{ p }}</el-tag>
+                <span v-if="!(row.affected_products || []).length" class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="影响模块" min-width="140">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="m in row.affected_modules || []"
+                  :key="m"
+                  size="small"
+                  class="chip"
+                >{{ m }}</el-tag>
+                <span v-if="!(row.affected_modules || []).length" class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="custom_preconds" label="前置条件" min-width="220" show-overflow-tooltip />
+            <el-table-column label="步骤数" width="90">
+              <template #default="{ row }">{{ (row.custom_steps_separated || []).length }}</template>
+            </el-table-column>
+          </el-table>
+
+          <details v-if="section.source_context" class="source-ctx">
+            <summary>source_context 追溯（{{
+              (section.source_context.knowledge_shipped_ids || []).length
+            }} knowledge ids,
+            {{ (section.source_context.document_hits || []).length }} doc hits）</summary>
+            <pre>{{ JSON.stringify(section.source_context, null, 2) }}</pre>
+          </details>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
+    <el-dialog
+      v-model="editorVisible"
+      :title="`编辑 section: ${editingCase?.section || ''}`"
+      width="780px"
+      :close-on-click-modal="false"
+    >
+      <p class="muted small">
+        直接编辑 JSON 数组（本 section 的全部 cases）。保存后整段替换；建议保留
+        <code>title / priority_id / custom_preconds / custom_steps_separated</code> 四个字段。
+      </p>
+      <el-input
+        v-model="editorBuffer"
+        type="textarea"
+        :rows="20"
+        spellcheck="false"
+        style="font-family: ui-monospace, Consolas, monospace"
+      />
+      <template #footer>
+        <el-button @click="editorVisible = false">取消</el-button>
+        <el-button type="primary" :loading="casesSaving" @click="saveEditor">保存</el-button>
+      </template>
+    </el-dialog>
+  </section>
+  <el-empty v-else description="加载中..." />
+</template>
+
+<style scoped>
+.task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.page-header {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.muted {
+  color: #909399;
+  font-size: 13px;
+}
+.danger {
+  color: #f56c6c;
+  margin-top: 12px;
+}
+.small {
+  font-size: 12px;
+}
+.card {
+  border-radius: 8px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.section-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.chip {
+  margin-right: 4px;
+}
+.source-ctx {
+  margin-top: 12px;
+  background: #fafafa;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.source-ctx pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
+}
+</style>

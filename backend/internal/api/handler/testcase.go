@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -62,6 +63,9 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 		return
 	}
 
+	fmt.Printf("[handler] testcase update: task_id=%d case_id=%d section=%q cases=%d\n",
+		tc.TaskID, tc.ID, tc.Section, len(tc.Cases))
+
 	c.JSON(http.StatusOK, tc)
 }
 
@@ -83,6 +87,9 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	fmt.Printf("[handler] testcase submit: task_id=%d case_id=%d section=%q\n",
+		tc.TaskID, tc.ID, tc.Section)
 
 	c.JSON(http.StatusOK, tc)
 }

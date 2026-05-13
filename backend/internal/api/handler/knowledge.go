@@ -48,6 +48,8 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		return
 	}
 
+	fmt.Printf("[handler] knowledge create accepted: knowledge_id=%d type=%s name=%q\n", kb.ID, kb.Type, kb.Name)
+
 	h.processKnowledgeAsync(kb.ID, req.Content)
 
 	c.JSON(http.StatusCreated, kb)
@@ -129,6 +131,8 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 		h.processKnowledgeAsync(kb.ID, kb.Content)
 	}
 
+	fmt.Printf("[handler] knowledge update: knowledge_id=%d name=%q reprocess=%t\n", kb.ID, kb.Name, needsReprocess)
+
 	c.JSON(http.StatusOK, kb)
 }
 
@@ -155,11 +159,13 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 		return
 	}
 
+	fmt.Printf("[handler] knowledge reprocess accepted: knowledge_id=%d name=%q\n", kb.ID, kb.Name)
+
 	go func(kbID int) {
 		ctx := context.Background()
 		kbService, err := knowledge.New(ctx, h.DB)
 		if err != nil {
-			fmt.Printf("Failed to initialize knowledge service: %v\n", err)
+			fmt.Printf("[handler] knowledge_id=%d service init failed: %v\n", kbID, err)
 			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
 				Set("status = ?", models.KnowledgeStatusFailed).
 				Set("updated_at = ?", time.Now()).
@@ -168,7 +174,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 			return
 		}
 		if err := kbService.ReprocessKnowledge(ctx, kbID); err != nil {
-			fmt.Printf("Failed to reprocess knowledge %d: %v\n", kbID, err)
+			fmt.Printf("[handler] knowledge_id=%d reprocess failed: %v\n", kbID, err)
 		}
 	}(kb.ID)
 
@@ -192,7 +198,7 @@ func (h *Handler) processKnowledgeAsync(kbID int, content string) {
 		ctx := context.Background()
 		kbService, err := knowledge.New(ctx, h.DB)
 		if err != nil {
-			fmt.Printf("Failed to initialize knowledge service: %v\n", err)
+			fmt.Printf("[handler] knowledge_id=%d service init failed: %v\n", kbID, err)
 			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
 				Set("status = ?", models.KnowledgeStatusFailed).
 				Set("updated_at = ?", time.Now()).
@@ -201,7 +207,7 @@ func (h *Handler) processKnowledgeAsync(kbID int, content string) {
 			return
 		}
 		if err := kbService.ProcessKnowledge(ctx, kbID, content); err != nil {
-			fmt.Printf("Failed to process knowledge %d: %v\n", kbID, err)
+			fmt.Printf("[handler] knowledge_id=%d process failed: %v\n", kbID, err)
 		}
 	}()
 }

@@ -37,7 +37,7 @@ CaseAgent 围绕"需求文档 + 架构知识"形成可审核测试用例闭环�
 | --- | --- | --- |
 | Iteration 1 | 数据闭环（文档/知识库 -> 向量化 -> 检索） | Done |
 | Iteration 2 | 生成闭环（需求 -> 检索增强 -> Agent -> 用例落库） | Done |
-| Iteration 3 | 产品化闭环（前端工作台 + 审核体验） | In Progress |
+| Iteration 3 | 产品化闭环（前端工作台 + 审核体验） | Done |
 
 迭代级 DoD = 本迭代所有任务 DoD 全部满足。
 
@@ -73,8 +73,8 @@ CaseAgent 围绕"需求文档 + 架构知识"形成可审核测试用例闭环�
 | ID | 任务项 | 状态 | DoD（完成定义） |
 | --- | --- | --- | --- |
 | I3-T1 | 前端基础设施（`element-plus`、`pinia`、路由、布局） | Done | `frontend/package.json` 接入 `element-plus`、`pinia`、`vue-router`；提供布局壳（顶栏/侧栏/内容区）、统一 API client、统一错误处理入口；至少 1 个示例业务页面跑通；`npm run build` 通过。证据：`frontend/src/api/client.js`（axios + 错误归一化拦截器）+ `frontend/src/utils/error.js`（Element Plus message + retryable 区分）+ `frontend/src/layout/AppLayout.vue`（顶栏/侧栏/内容区）+ `frontend/src/router/index.js` + `frontend/src/stores/projects.js` + `frontend/src/views/ProjectList.vue`（pinia + API client + Element Plus 表格/对话框完整跑通）+ `frontend/vite.config.js`（`/api` 代理到后端 8080）；`cd frontend && npm run build` 输出 dist/ 通过。 |
-| I3-T2 | 业务页面（文档、知识库、任务、结果、审核） | Todo | 不依赖手工 API 调用即可走完"项目创建/选择 -> 文档上传 -> 知识库维护 -> 任务创建 -> 影响范围审核 -> 用例生成 -> 用例修改/提交"主流程；页面展示的状态字段（`pending`/`processing`/`completed`/`failed` 等）直接来自后端响应，前端不本地推断。 |
-| I3-T3 | 错误提示与运维可观测性 | Todo | 主要失败场景（上传失败、embedding 失败、生成失败）有用户可见提示并区分可重试 / 不可重试；后端日志在每条主要请求中包含 task / document / knowledge ID；前端能展示 `processing`/`completed`/`failed` 状态并提供重试入口。 |
+| I3-T2 | 业务页面（文档、知识库、任务、结果、审核） | Done | 不依赖手工 API 调用即可走完"项目创建/选择 -> 文档上传 -> 知识库维护 -> 任务创建 -> 影响范围审核 -> 用例生成 -> 用例修改/提交"主流程；页面展示的状态字段（`pending`/`processing`/`completed`/`failed` 等）直接来自后端响应，前端不本地推断。证据：`frontend/src/views/ProjectList.vue`（项目列表 + 创建 + 跳详情）+ `frontend/src/views/ProjectDetail.vue`（文档上传/重处理/删除 + 任务创建跳详情）+ `frontend/src/views/KnowledgeBase.vue`（CRUD + 重处理）+ `frontend/src/views/TaskDetail.vue`（影响范围审核 + 触发生成 + 状态轮询 + section 用例 JSON 编辑 + section 提交）+ `frontend/src/components/StatusTag.vue`（状态字段直读后端，META 表只控制颜色与展示，不修改 label）+ `frontend/src/router/index.js` 路由表；`cd frontend && npm run build` 通过。 |
+| I3-T3 | 错误提示与运维可观测性 | Done | 主要失败场景（上传失败、embedding 失败、生成失败）有用户可见提示并区分可重试 / 不可重试；后端日志在每条主要请求中包含 task / document / knowledge ID；前端能展示 `processing`/`completed`/`failed` 状态并提供重试入口。证据：`frontend/src/api/client.js` 拦截器把 5xx/408/429/网络错误标记 `retryable=true`，`frontend/src/utils/error.js` 据此把消息分别以 `warning` / `error` 弹给用户；`frontend/src/components/StatusTag.vue` 在文档/知识/任务/section 行直读 status；文档行有「重新处理」按钮、知识行有「重新处理」按钮（status=processing 时禁用）、任务详情在 `failed` 时显示恢复指引；后端 handler 的 `[handler]` 前缀日志（`backend/internal/api/handler/{document,knowledge,task,testcase}.go`）在文档上传/重处理、知识库创建/更新/重处理、任务创建/审核/生成、用例修改/提交时输出含 `document_id` / `knowledge_id` / `task_id` / `case_id` 的请求级日志。 |
 
 ## 参考文件
 

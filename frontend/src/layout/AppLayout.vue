@@ -6,7 +6,8 @@ const route = useRoute()
 const pageTitle = computed(() => route.meta?.title || 'CaseAgent')
 
 const navItems = [
-  { index: '/projects', label: '项目', icon: 'Files' },
+  { index: '/projects', label: '项目' },
+  { index: '/knowledge', label: '知识库' },
 ]
 </script>
 

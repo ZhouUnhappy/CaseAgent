@@ -60,7 +60,13 @@ function formatDate(value) {
 
     <el-table :data="items" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="name" label="名称" min-width="180" />
+      <el-table-column label="名称" min-width="180">
+        <template #default="{ row }">
+          <router-link :to="{ name: 'project-detail', params: { id: row.id } }">
+            {{ row.name }}
+          </router-link>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
       <el-table-column label="创建时间" width="200">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
