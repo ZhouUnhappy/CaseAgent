@@ -8,4 +8,5 @@ var models = []interface{}{
 	&KnowledgeBase{},
 	&TestCase{},
 	&CaseGenerationTask{},
+	&KnowledgeUpdateSuggestion{},
 }

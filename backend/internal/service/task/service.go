@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
 	agentservice "caseagent/internal/service/agent"
 	retrievalservice "caseagent/internal/service/retrieval"
+	suggestionservice "caseagent/internal/service/suggestion"
 
 	"caseagent/internal/db/models"
 
@@ -56,7 +58,21 @@ func (s *Service) AnalyzeTask(ctx context.Context, taskID int) (err error) {
 		products, modules = inferAffectedKnowledgeWithRetrieval(ctx, s.db, requirements)
 	}
 
-	return s.updateTaskAnalysis(ctx, taskID, products, modules, models.TaskStatusAwaitingReview)
+	if err := s.updateTaskAnalysis(ctx, taskID, products, modules, models.TaskStatusAwaitingReview); err != nil {
+		return err
+	}
+
+	// Knowledge gap suggestions are best-effort: they must never block or fail
+	// AnalyzeTask. The task has already transitioned to awaiting_review above.
+	go func(taskID int, requirements string, products, modules []string) {
+		bgCtx := context.Background()
+		if err := suggestionservice.New(s.db).RecordCandidates(bgCtx, taskID, requirements, products, modules); err != nil {
+			slog.Warn("knowledge suggestion record failed",
+				"task_id", taskID, "error", err)
+		}
+	}(taskID, requirements, append([]string{}, products...), append([]string{}, modules...))
+
+	return nil
 }
 
 func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {

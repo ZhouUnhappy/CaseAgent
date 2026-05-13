@@ -89,3 +89,21 @@ CREATE TABLE IF NOT EXISTS test_cases (
 
 -- Backfill columns added after early local schemas already existed.
 ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS source_context JSONB;
+
+-- Knowledge update suggestions (I4-T1)
+CREATE TABLE IF NOT EXISTS knowledge_update_suggestions (
+    id SERIAL PRIMARY KEY,
+    source_task_id INTEGER NOT NULL REFERENCES case_generation_tasks(id) ON DELETE CASCADE,
+    candidate_type VARCHAR(32) NOT NULL, -- 'product' | 'module'
+    candidate_name VARCHAR(255) NOT NULL,
+    frequency INTEGER NOT NULL DEFAULT 0,
+    source_snippets JSONB,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending', -- 'pending' | 'adopted' | 'dismissed'
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_status_idx
+    ON knowledge_update_suggestions (status);
+CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_task_idx
+    ON knowledge_update_suggestions (source_task_id);
