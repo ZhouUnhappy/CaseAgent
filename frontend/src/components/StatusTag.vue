@@ -22,6 +22,9 @@ const META = {
   draft: { type: 'info', label: 'draft' },
   submitted: { type: 'success', label: 'submitted' },
   approved: { type: 'success', label: 'approved' },
+
+  adopted: { type: 'success', label: 'adopted' },
+  dismissed: { type: 'info', label: 'dismissed' },
 }
 
 const meta = computed(() => META[props.status] || { type: '', label: props.status || '-' })

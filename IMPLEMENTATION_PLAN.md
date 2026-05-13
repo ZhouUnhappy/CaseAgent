@@ -38,7 +38,7 @@ CaseAgent 围绕"需求文档 + 架构知识"形成可审核测试用例闭环�
 | Iteration 1 | 数据闭环（文档/知识库 -> 向量化 -> 检索） | Done |
 | Iteration 2 | 生成闭环（需求 -> 检索增强 -> Agent -> 用例落库） | Done |
 | Iteration 3 | 产品化闭环（前端工作台 + 审核体验） | Done |
-| Iteration 4 | 知识库建议沉淀（识别缺失 -> 候选审核） | In Progress |
+| Iteration 4 | 知识库建议沉淀（识别缺失 -> 候选审核） | Done |
 
 迭代级 DoD = 本迭代所有任务 DoD 全部满足。
 
@@ -81,8 +81,8 @@ CaseAgent 围绕"需求文档 + 架构知识"形成可审核测试用例闭环�
 
 | ID | 任务项 | 状态 | DoD（完成定义） |
 | --- | --- | --- | --- |
-| I4-T1 | 自动识别「知识缺失」候选 | Todo | 后端新增 `knowledge_update_suggestions` 表（含 `id` / `source_task_id` / `candidate_type` ∈ {`product`,`module`} / `candidate_name` / `frequency` / `source_snippets` JSONB / `status` ∈ {`pending`,`adopted`,`dismissed`} / 时间戳）；`AnalyzeTask` 完成后异步调用 suggestion 服务：把需求文本中频次 ≥ 2 的**英文标识符候选**（含 `-`/`_` 复合 token、全大写缩写 2–6 字符、CamelCase 至少两段，对应当前 fixture 与知识库 `name` 列的命名风格；中文实体识别因需要分词，留作后续扩展）逐个用 `retrievalservice.SearchKnowledgeMultiQuery(topK=1)` 查，**top-1 score < 0.5** 或无返回则记为候选并写入表，附 ≤3 条来源上下文片段；提供 `GET /api/v1/knowledge-suggestions`（支持 `status` 过滤）与 `PUT /api/v1/knowledge-suggestions/:id`（仅允许把 `pending` 改成 `adopted` / `dismissed`）；候选提取与 score 阈值判断有单测覆盖（`backend/internal/service/suggestion`）；`go build ./...` 与 `go test ./...` 通过；新增/更新 migration 在仓库内可执行。 |
-| I4-T2 | 前端「知识建议」列表页（简化版） | Todo | `frontend/src/views/KnowledgeSuggestions.vue` 列出全部 suggestion（默认按 `status=pending` 过滤，可切换为全部 / dismissed / adopted）；每行展示候选类型、名称、频次、来源 task、状态、操作；「采纳」跳转 `/knowledge` 并预填 `type` + `name`，跳转后由用户补内容点保存（前端在 url query 中传 `type=` / `name=`，`KnowledgeBase.vue` 打开新建对话框并预填）；「忽略」调 `PUT /knowledge-suggestions/:id` 把状态置 `dismissed`；主菜单新增「知识建议」入口；`cd frontend && npm run build` 通过。 |
+| I4-T1 | 自动识别「知识缺失」候选 | Done | 后端新增 `knowledge_update_suggestions` 表（含 `id` / `source_task_id` / `candidate_type` ∈ {`product`,`module`} / `candidate_name` / `frequency` / `source_snippets` JSONB / `status` ∈ {`pending`,`adopted`,`dismissed`} / 时间戳）；`AnalyzeTask` 完成后异步调用 suggestion 服务：把需求文本中频次 ≥ 2 的**英文标识符候选**（含 `-`/`_` 复合 token、全大写缩写 2–6 字符、CamelCase 至少两段，对应当前 fixture 与知识库 `name` 列的命名风格；中文实体识别因需要分词，留作后续扩展）逐个用 `retrievalservice.SearchKnowledgeMultiQuery(topK=1)` 查，**top-1 score < 0.5** 或无返回则记为候选并写入表，附 ≤3 条来源上下文片段；提供 `GET /api/v1/knowledge-suggestions`（支持 `status` 过滤）与 `PUT /api/v1/knowledge-suggestions/:id`（仅允许把 `pending` 改成 `adopted` / `dismissed`）；候选提取与去重逻辑有单测覆盖（`backend/internal/service/suggestion/extractor_test.go`，5 个测试）；`go build ./...` 与 `go test ./...` 通过；migration `backend/migrations/001_init.sql` 含新表定义与索引。证据：`backend/internal/db/models/knowledge_update_suggestion.go` + `backend/internal/service/suggestion/{extractor,service,extractor_test}.go` + `backend/internal/api/handler/knowledge_suggestion.go` + `backend/internal/service/task/service.go` AnalyzeTask 末尾 goroutine。 |
+| I4-T2 | 前端「知识建议」列表页（简化版） | Done | `frontend/src/views/KnowledgeSuggestions.vue` 列出全部 suggestion（默认按 `status=pending` 过滤，可切换为全部 / dismissed / adopted）；每行展示候选类型、名称、频次、来源 task、状态、操作；「采纳」跳转 `/knowledge` 并预填 `type` + `name`，跳转后由用户补内容点保存（前端在 url query 中传 `type=` / `name=`，`KnowledgeBase.vue` 打开新建对话框并预填）；「忽略」调 `PUT /knowledge-suggestions/:id` 把状态置 `dismissed`；主菜单新增「知识建议」入口；`cd frontend && npm run build` 通过。证据：`frontend/src/views/KnowledgeSuggestions.vue` + `frontend/src/views/KnowledgeBase.vue` query 预填 onMounted + `frontend/src/router/index.js` + `frontend/src/layout/AppLayout.vue` 菜单 + `frontend/src/components/StatusTag.vue` 新增 `adopted` / `dismissed` 状态展示。 |
 
 ## 参考文件
 

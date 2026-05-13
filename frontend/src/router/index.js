@@ -31,6 +31,12 @@ const routes = [
     component: () => import('../views/KnowledgeBase.vue'),
     meta: { title: '知识库' },
   },
+  {
+    path: '/knowledge-suggestions',
+    name: 'knowledge-suggestions',
+    component: () => import('../views/KnowledgeSuggestions.vue'),
+    meta: { title: '知识建议' },
+  },
 ]
 
 const router = createRouter({

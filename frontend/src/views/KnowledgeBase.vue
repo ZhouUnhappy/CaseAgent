@@ -1,11 +1,13 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import StatusTag from '../components/StatusTag.vue'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { notifySuccess } from '../utils/error'
 
+const route = useRoute()
 const store = useKnowledgeStore()
 const { items, loading, saving, typeFilter } = storeToRefs(store)
 
@@ -20,7 +22,23 @@ const rules = {
   content: [{ required: true, message: '请输入内容', trigger: 'blur' }],
 }
 
-onMounted(() => store.fetch().catch(() => {}))
+onMounted(() => {
+  store.fetch().catch(() => {})
+
+  // Knowledge-suggestion adopt flow: prefill the create dialog from the
+  // query string so the operator only needs to fill in content.
+  const { create_type: createType, create_name: createName } = route.query
+  if (createType && createName) {
+    editing.value = null
+    Object.assign(form, {
+      type: createType === 'product' ? 'product' : 'module',
+      name: String(createName),
+      content: '',
+      metadata: '',
+    })
+    dialogVisible.value = true
+  }
+})
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '-'
