@@ -27,9 +27,14 @@
 CaseAgent/
 ├── backend/          # Go 后端
 ├── frontend/         # Vue 前端
-├── docs/             # 规格说明等文档
-└── IMPLEMENTATION_PLAN.md  # 实施计划
+├── docs/             # 规格、架构、回归证据、后续优化方向
+├── scripts/          # 回归与冒烟脚本（用法见 scripts/README.md）
+└── testdata/         # 公开 fixture
 ```
+
+- 架构与回归索引：[`docs/architecture.md`](docs/architecture.md)
+- 回归脚本说明：[`scripts/README.md`](scripts/README.md)
+- 后续优化方向：[`docs/future_work.md`](docs/future_work.md)
 
 ## 快速开始
 
