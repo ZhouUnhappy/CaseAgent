@@ -152,7 +152,7 @@ func (s *Service) upsert(ctx context.Context, taskID int, candidateType string, 
 
 // List 列出 suggestion；status 为空时返回全部。按 created_at 倒序。
 func (s *Service) List(ctx context.Context, status string) ([]models.KnowledgeUpdateSuggestion, error) {
-	var rows []models.KnowledgeUpdateSuggestion
+	rows := []models.KnowledgeUpdateSuggestion{}
 	q := s.db.NewSelect().Model(&rows).OrderExpr("created_at DESC")
 	if status != "" {
 		q = q.Where("status = ?", status)

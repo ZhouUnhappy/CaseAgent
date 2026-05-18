@@ -113,7 +113,17 @@ async function reprocess(row) {
 
 async function remove(row) {
   try {
-    await ElMessageBox.confirm(`删除知识条目「${row.name}」？`, '确认', { type: 'warning' })
+    await ElMessageBox.confirm(
+      `确定要删除知识条目「${row.name}」吗？此操作不可恢复。`,
+      '删除知识条目',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+        draggable: false,
+      },
+    )
   } catch {
     return
   }

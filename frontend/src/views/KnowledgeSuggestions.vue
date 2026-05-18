@@ -110,14 +110,14 @@ async function dismiss(row) {
       <el-table-column label="发现时间" width="180">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220">
+      <el-table-column label="操作" width="180" align="center">
         <template #default="{ row }">
-          <template v-if="row.status === 'pending'">
+          <div v-if="row.status === 'pending'" class="op-buttons">
             <el-button size="small" type="primary" :loading="saving" @click="adopt(row)">
-              采纳并跳转
+              采纳
             </el-button>
             <el-button size="small" :loading="saving" @click="dismiss(row)">忽略</el-button>
-          </template>
+          </div>
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
@@ -175,5 +175,13 @@ async function dismiss(row) {
   margin: 4px 0 0 16px;
   padding: 0;
   color: #606266;
+}
+.op-buttons {
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+}
+.op-buttons :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 </style>

@@ -15,7 +15,7 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
     async fetch() {
       this.loading = true
       try {
-        this.items = await listKnowledgeSuggestions(this.statusFilter || undefined)
+        this.items = (await listKnowledgeSuggestions(this.statusFilter || undefined)) ?? []
       } finally {
         this.loading = false
       }
