@@ -148,8 +148,13 @@ async function dismiss(row) {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 16px;
+}
+.bar > div:first-child {
+  flex: 1 1 360px;
+  min-width: 0;
 }
 .bar h2 {
   margin: 0 0 4px;
@@ -164,6 +169,11 @@ async function dismiss(row) {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+.actions :deep(.el-radio-group) {
+  flex-wrap: nowrap;
 }
 .muted {
   color: #909399;
