@@ -1,9 +1,21 @@
 import axios from 'axios'
 import { notifyApiError } from '../utils/error'
 
+const TENANT_STORAGE_KEY = 'caseagent.tenant_slug'
+
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || '/api/v1',
   timeout: 30000,
+})
+
+// Inject X-Tenant-ID from localStorage on every request. /tenants endpoints
+// don't need it but accept it; sending unconditionally keeps the rule simple.
+client.interceptors.request.use((config) => {
+  const slug = localStorage.getItem(TENANT_STORAGE_KEY)
+  if (slug && !config.headers['X-Tenant-ID']) {
+    config.headers['X-Tenant-ID'] = slug
+  }
+  return config
 })
 
 client.interceptors.response.use(

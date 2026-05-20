@@ -1,6 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { useTenantStore } from '../stores/tenant'
 
 const route = useRoute()
 const pageTitle = computed(() => route.meta?.title || 'CaseAgent')
@@ -10,6 +12,46 @@ const navItems = [
   { index: '/knowledge', label: '知识库' },
   { index: '/knowledge-suggestions', label: '知识建议' },
 ]
+
+const tenantStore = useTenantStore()
+
+onMounted(() => {
+  tenantStore.fetch().catch(() => {
+    // notifyApiError already handles user-facing error; no-op here
+  })
+})
+
+function onTenantChange(slug) {
+  tenantStore.setCurrent(slug)
+  // Hard reload so every view re-fetches data scoped to the new tenant
+  // instead of needing each store to subscribe to tenant changes.
+  window.location.reload()
+}
+
+const createDialogVisible = ref(false)
+const createForm = ref({ slug: '', name: '' })
+
+function openCreateDialog() {
+  createForm.value = { slug: '', name: '' }
+  createDialogVisible.value = true
+}
+
+async function submitCreate() {
+  const { slug, name } = createForm.value
+  if (!slug || !name) {
+    ElMessage.warning('slug 和 name 都是必填')
+    return
+  }
+  try {
+    const created = await tenantStore.create({ slug, name })
+    ElMessage.success(`租户 ${created.slug} 已创建`)
+    createDialogVisible.value = false
+    tenantStore.setCurrent(created.slug)
+    window.location.reload()
+  } catch {
+    // notifyApiError already shown
+  }
+}
 </script>
 
 <template>
@@ -33,12 +75,54 @@ const navItems = [
     <el-container>
       <el-header class="layout-header">
         <div class="header-title">{{ pageTitle }}</div>
+        <div class="header-tenant">
+          <span class="tenant-label">当前租户</span>
+          <el-select
+            :model-value="tenantStore.currentSlug"
+            :loading="tenantStore.loading"
+            placeholder="选择租户"
+            size="small"
+            style="width: 180px"
+            @change="onTenantChange"
+          >
+            <el-option
+              v-for="t in tenantStore.items"
+              :key="t.slug"
+              :label="`${t.name} (${t.slug})`"
+              :value="t.slug"
+            />
+          </el-select>
+          <el-button size="small" @click="openCreateDialog">新建</el-button>
+        </div>
       </el-header>
       <el-main class="layout-main">
         <RouterView />
       </el-main>
     </el-container>
   </el-container>
+
+  <el-dialog
+    v-model="createDialogVisible"
+    title="新建租户"
+    width="420px"
+  >
+    <el-form label-width="80px">
+      <el-form-item label="slug" required>
+        <el-input v-model="createForm.slug" placeholder="例如 i1-smoke" />
+      </el-form-item>
+      <el-form-item label="名称" required>
+        <el-input v-model="createForm.name" placeholder="人类可读名称" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="createDialogVisible = false">取消</el-button>
+      <el-button
+        type="primary"
+        :loading="tenantStore.creating"
+        @click="submitCreate"
+      >创建</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -78,11 +162,22 @@ const navItems = [
   border-bottom: 1px solid #e4e7ed;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 24px;
+  gap: 16px;
 }
 .header-title {
   font-size: 18px;
   font-weight: 500;
+}
+.header-tenant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tenant-label {
+  color: #606266;
+  font-size: 13px;
 }
 .layout-main {
   background: #f5f7fa;
