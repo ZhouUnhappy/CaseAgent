@@ -18,13 +18,13 @@ import (
 )
 
 type Service struct {
-	db        *bun.DB
+	db        bun.IDB
 	embedding embedding.Embedder
 }
 
 const maxChunkRunes = 1200
 
-func New(ctx context.Context, db *bun.DB) (*Service, error) {
+func New(ctx context.Context, db bun.IDB) (*Service, error) {
 	cfg := config.Get()
 	embedder, err := ai.NewEmbedder(ctx, cfg.Model.Embedding)
 	if err != nil {

@@ -16,7 +16,7 @@ import (
 const defaultTopK = 5
 
 type Service struct {
-	db *bun.DB
+	db bun.IDB
 }
 
 // MatchedChunk records a single chunk that contributed to a document hit, along
@@ -51,7 +51,7 @@ type KnowledgeResult struct {
 	Rank       int            `json:"rank"`
 }
 
-func New(db *bun.DB) *Service {
+func New(db bun.IDB) *Service {
 	return &Service{db: db}
 }
 

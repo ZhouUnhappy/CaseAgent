@@ -19,7 +19,7 @@ import (
 )
 
 type Service struct {
-	db *bun.DB
+	db bun.IDB
 }
 
 type generatedSection struct {
@@ -27,7 +27,7 @@ type generatedSection struct {
 	Cases   []map[string]any `json:"cases"`
 }
 
-func New(db *bun.DB) *Service {
+func New(db bun.IDB) *Service {
 	return &Service{db: db}
 }
 
@@ -331,7 +331,7 @@ func inferAffectedKnowledge(requirements string, knowledgeEntries []models.Knowl
 	return products, modules
 }
 
-func inferAffectedKnowledgeWithRetrieval(ctx context.Context, db *bun.DB, requirements string) ([]string, []string) {
+func inferAffectedKnowledgeWithRetrieval(ctx context.Context, db bun.IDB, requirements string) ([]string, []string) {
 	queries := buildKnowledgeQueries(requirements, nil, nil)
 	results, err := retrievalservice.New(db).SearchKnowledgeMultiQuery(ctx, queries, 6, "")
 	if err != nil {
@@ -400,7 +400,7 @@ func formatKnowledgeContext(entries []models.KnowledgeBase) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func retrieveKnowledgeFallback(ctx context.Context, db *bun.DB, requirements string, products []string, modules []string) []retrievalservice.KnowledgeResult {
+func retrieveKnowledgeFallback(ctx context.Context, db bun.IDB, requirements string, products []string, modules []string) []retrievalservice.KnowledgeResult {
 	queries := buildKnowledgeQueries(requirements, products, modules)
 	results, err := retrievalservice.New(db).SearchKnowledgeMultiQuery(ctx, queries, 6, "")
 	if err != nil {
@@ -588,7 +588,7 @@ func mergeKnowledgeEntries(primary []models.KnowledgeBase, secondary []models.Kn
 	return merged
 }
 
-func buildRequirementsContext(ctx context.Context, db *bun.DB, requirements string, documentIDs []int, products []string, modules []string) (string, []retrievalservice.DocumentResult) {
+func buildRequirementsContext(ctx context.Context, db bun.IDB, requirements string, documentIDs []int, products []string, modules []string) (string, []retrievalservice.DocumentResult) {
 	queries := buildDocumentQueries(requirements, products, modules)
 	if len(queries) == 0 || len(documentIDs) == 0 {
 		return requirements, nil

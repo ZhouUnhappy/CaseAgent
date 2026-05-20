@@ -12,11 +12,11 @@ import (
 )
 
 type Indexer struct {
-	db *bun.DB
+	db bun.IDB
 }
 
 type Config struct {
-	DB *bun.DB
+	DB bun.IDB
 }
 
 func New(ctx context.Context, cfg *Config) (*Indexer, error) {

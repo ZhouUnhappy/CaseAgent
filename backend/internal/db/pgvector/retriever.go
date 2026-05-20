@@ -16,14 +16,14 @@ import (
 )
 
 type Retriever struct {
-	db         *bun.DB
+	db         bun.IDB
 	embedding  embedding.Embedder
 	dimensions int
 }
 
 type RetrieverConfig struct {
 	Provider   string
-	DB         *bun.DB
+	DB         bun.IDB
 	Dimensions int
 	APIKey     string
 	AccessKey  string

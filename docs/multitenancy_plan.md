@@ -57,17 +57,17 @@
 
 ### 2.1 引入 `RunInTx` 包装 (`backend/internal/db/`)
 
-- [ ] 2.1.1 在 `db/` 下新建 `tenantctx.go`：定义 `WithTenant(ctx, tenantID) ctx` / `TenantFromContext(ctx) (int, bool)`
-- [ ] 2.1.2 新建 `tx.go`：`RunInTenantTx(ctx, db, fn)` 辅助 —— 开事务 → `SET LOCAL app.tenant_id = $1` → 执行 fn → commit/rollback
-- [ ] 2.1.3 写单测 `tx_test.go`：验证 `SET LOCAL` 不会跨事务泄露（开两个事务，分别设不同 tenant_id，查询互不影响）
+- [x] 2.1.1 在 `db/` 下新建 `tenantctx.go`：定义 `WithTenant(ctx, tenantID) ctx` / `TenantFromContext(ctx) (int, bool)`
+- [x] 2.1.2 新建 `tx.go`：`RunInTenantTx(ctx, db, fn)` 辅助 —— 开事务 → `SET LOCAL app.tenant_id = $1` → 执行 fn → commit/rollback
+- [!] 2.1.3 写单测 `tx_test.go`：验证 `SET LOCAL` 不会跨事务泄露 —— **合并到 3.1.4 / 9.3.2 RLS 集成测试**（单独测 SET LOCAL 不跨事务是 PG 内置行为，没意义；有 RLS policy 后才值得验证）
 
 ### 2.2 Service 层接受 `bun.IDB` 而非 `*bun.DB`
 
-- [ ] 2.2.1 `service/knowledge/service.go:19-22`：`db *bun.DB` → `db bun.IDB`
-- [ ] 2.2.2 `service/document/`：同上
-- [ ] 2.2.3 `service/retrieval/service.go:18-20`：同上
-- [ ] 2.2.4 `service/task/`、`service/agent/`、`service/suggestion/`、`service/maintenance/`：同上
-- [ ] 2.2.5 `db/pgvector/retriever.go` 和 `indexer.go` 内部 DB 调用同步改造
+- [x] 2.2.1 `service/knowledge/service.go:19-22`：`db *bun.DB` → `db bun.IDB`
+- [x] 2.2.2 `service/document/`：同上
+- [x] 2.2.3 `service/retrieval/service.go:18-20`：同上
+- [x] 2.2.4 `service/task/`、`service/agent/`、`service/suggestion/`、`service/maintenance/`：同上
+- [x] 2.2.5 `db/pgvector/retriever.go` 和 `indexer.go` 内部 DB 调用同步改造
 
 ## Phase 3: RLS 落地
 

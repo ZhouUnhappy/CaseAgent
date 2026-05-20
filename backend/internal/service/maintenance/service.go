@@ -12,7 +12,7 @@ import (
 )
 
 type Service struct {
-	db *bun.DB
+	db bun.IDB
 }
 
 type VectorHealthReport struct {
@@ -66,7 +66,7 @@ type knowledgeVectorRow struct {
 	MismatchedEmbeddingCount int    `bun:"mismatched_embedding_count"`
 }
 
-func New(db *bun.DB) *Service {
+func New(db bun.IDB) *Service {
 	return &Service{db: db}
 }
 

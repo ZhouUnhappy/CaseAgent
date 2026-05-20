@@ -31,12 +31,12 @@ const MissingScoreThreshold = 0.5
 const MaxCandidatesPerTask = 20
 
 type Service struct {
-	db        *bun.DB
+	db        bun.IDB
 	retrieval *retrievalservice.Service
 	threshold float64
 }
 
-func New(db *bun.DB) *Service {
+func New(db bun.IDB) *Service {
 	return &Service{
 		db:        db,
 		retrieval: retrievalservice.New(db),
