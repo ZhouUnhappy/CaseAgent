@@ -22,6 +22,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
 REPORT="${CASEAGENT_I2_E2E_REPORT:-$ROOT_DIR/.dev/i2_generation_e2e.md}"
+
+# shellcheck source=lib/tenant.sh
+. "$ROOT_DIR/scripts/lib/tenant.sh"
 POLL_ATTEMPTS="${CASEAGENT_I2_E2E_POLL_ATTEMPTS:-600}"
 POLL_INTERVAL_SECONDS="${CASEAGENT_I2_E2E_POLL_INTERVAL_SECONDS:-2}"
 
@@ -76,22 +79,32 @@ if [ -z "$DOCUMENT_ID" ]; then
     exit 1
 fi
 
-echo "[i2-e2e] project_id=$PROJECT_ID document_id=$DOCUMENT_ID"
+TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-$(tenant_slug_for_project "$PROJECT_ID")}"
+if [ -z "$TENANT_SLUG" ]; then
+    echo "could not resolve tenant for project $PROJECT_ID (override via CASEAGENT_TENANT_SLUG)" >&2
+    exit 1
+fi
+
+echo "[i2-e2e] project_id=$PROJECT_ID document_id=$DOCUMENT_ID tenant=$TENANT_SLUG"
 
 post_json() {
     curl --fail --silent --show-error --noproxy '*' \
         -H 'Content-Type: application/json' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X POST -d "$2" "$BASE_URL$1"
 }
 
 put_json() {
     curl --fail --silent --show-error --noproxy '*' \
         -H 'Content-Type: application/json' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X PUT -d "$2" "$BASE_URL$1"
 }
 
 get_json() {
-    curl --fail --silent --show-error --noproxy '*' "$BASE_URL$1"
+    curl --fail --silent --show-error --noproxy '*' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
+        "$BASE_URL$1"
 }
 
 poll_until_status() {

@@ -4,6 +4,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+
+# Private corpora must NOT silently fall into a default tenant. The operator
+# has to name the tenant explicitly (see docs/multitenancy_plan.md §9.1).
+TENANT_SLUG="${CASEAGENT_I1_PRIVATE_TENANT_SLUG:-}"
+if [ -z "$TENANT_SLUG" ]; then
+    echo "CASEAGENT_I1_PRIVATE_TENANT_SLUG is required (e.g. export CASEAGENT_I1_PRIVATE_TENANT_SLUG=internal-corp)" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/tenant.sh
+. "$ROOT_DIR/scripts/lib/tenant.sh"
+
 ARCH_DIR="${CASEAGENT_I1_PRIVATE_ARCH_DIR:-}"
 INPUT_DIR="${CASEAGENT_I1_PRIVATE_INPUT_DIR:-}"
 POLL_ATTEMPTS="${CASEAGENT_POLL_ATTEMPTS:-240}"
@@ -63,6 +75,7 @@ post_json() {
 
     curl --fail --silent --show-error --noproxy '*' \
         -H 'Content-Type: application/json' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X POST \
         -d "$payload" \
         "$BASE_URL$path"
@@ -71,7 +84,9 @@ post_json() {
 get_json() {
     local path="$1"
 
-    curl --fail --silent --show-error --noproxy '*' "$BASE_URL$path"
+    curl --fail --silent --show-error --noproxy '*' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
+        "$BASE_URL$path"
 }
 
 load_md_files() {
@@ -165,6 +180,7 @@ upload_document() {
     local response
 
     response="$(curl --fail --silent --show-error --noproxy '*' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X POST \
         -F "name=$name" \
         -F 'type=markdown' \
@@ -398,6 +414,37 @@ assert_knowledge_retrieval() {
     done
 }
 
+# Cross-tenant probe: query the same knowledge endpoint with a different
+# X-Tenant-ID and assert none of this run's uploaded knowledge ids show up.
+# Default probe tenant is i1-smoke; override with CASEAGENT_I1_PRIVATE_PROBE_TENANT.
+assert_isolation_from_smoke() {
+    local probe_tenant="${CASEAGENT_I1_PRIVATE_PROBE_TENANT:-i1-smoke}"
+    if [ "$probe_tenant" = "$TENANT_SLUG" ]; then
+        log "skipping cross-tenant probe: probe tenant == current ($TENANT_SLUG)"
+        return 0
+    fi
+    ensure_tenant "$probe_tenant" "$probe_tenant"
+    log "probing cross-tenant isolation from $probe_tenant (must not see this run's knowledge)"
+
+    local ids_csv
+    ids_csv="$(printf '%s,' "${KNOWLEDGE_IDS[@]}" | sed 's/,$//')"
+
+    local query leaked
+    for query in "${KNOWLEDGE_QUERIES[@]}"; do
+        leaked="$(curl --fail --silent --show-error --noproxy '*' \
+            -H 'Content-Type: application/json' \
+            -H "X-Tenant-ID: $probe_tenant" \
+            -X POST -d "$(jq -n --arg q "$query" --argjson topk "$TOP_K" '{query: $q, top_k: $topk}')" \
+            "$BASE_URL/retrieval/knowledge" \
+            | jq --argjson ids "[$ids_csv]" '[.items[] | select(.id as $i | $ids | index($i))] | length')"
+        if [ "$leaked" -ne 0 ]; then
+            echo "ISOLATION LEAK: tenant $probe_tenant saw $leaked private knowledge entries for query: $query" >&2
+            exit 1
+        fi
+    done
+    log "isolation OK: $probe_tenant cannot see any of this run's private knowledge"
+}
+
 write_report() {
     mkdir -p "$REPORT_DIR"
 
@@ -460,9 +507,11 @@ main() {
 
     log "base url: $BASE_URL"
     log "run token: $RUN_TOKEN"
+    log "tenant: $TENANT_SLUG"
     log "architecture files=${#arch_files[@]} raw_bytes=$RAW_ARCH_BYTES"
     log "input files=${#input_files[@]} raw_bytes=$RAW_INPUT_BYTES"
 
+    ensure_tenant "$TENANT_SLUG" "I1 private corpus ($TENANT_SLUG)"
     cleanup_legacy
     create_project
 
@@ -477,6 +526,7 @@ main() {
     assert_db_counts
     assert_document_retrieval
     assert_knowledge_retrieval
+    assert_isolation_from_smoke
     write_report
 
     log "I1 private corpus evaluation passed"

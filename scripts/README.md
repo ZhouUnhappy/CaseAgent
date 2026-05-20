@@ -2,6 +2,23 @@
 
 CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，不构成顺序流水线——按需挑用即可，互相不依赖（唯一例外是 `i1_retrieval_cleanup.sh` 是 smoke 的反操作）。
 
+## 租户上下文
+
+所有 `i*.sh` 现在要求请求带 `X-Tenant-ID` header（多租户改造后强制；参见 `docs/multitenancy_plan.md` §9.1）。每个脚本顶部用 `TENANT_SLUG` 变量声明默认值：
+
+| 脚本 | 默认 TENANT_SLUG | 备注 |
+|---|---|---|
+| `i1_retrieval_smoke.sh` | `i1-smoke` | 仓库内简化 fixture |
+| `i1_public_corpus_eval.sh` | `apache-dubbo` | 全部 fixture 来自 apache/dubbo-website |
+| `i1_private_corpus_eval.sh` | `CASEAGENT_I1_PRIVATE_TENANT_SLUG` 必填，不给直接 exit | 防止私有数据误入默认 tenant |
+| `i2_generation_e2e.sh` | 自动从复用项目回查（`tenant_slug_for_project`） | 跟随被复用 project |
+| `multitenancy_isolation.sh` | 一次性创建 `iso-a-*` / `iso-b-*` 两个临时 tenant | 验证私有 vs 私有隔离 |
+| `i1_retrieval_cleanup.sh` | **绕过** RLS（用 `CASEAGENT_PSQL_DSN` superuser 直接 DELETE） | design intent |
+
+**`scripts/lib/tenant.sh`** 提供共享 helper：`ensure_tenant`（若不存在则 POST 创建），`tenant_slug_for_document` / `tenant_slug_for_project`（从 doc/project id 回查 slug，供 determinism / e2e 脚本使用）。
+
+**新增脚本约定**：必须在文档（README + 脚本头注释）里说明默认 `TENANT_SLUG` 及理由；如果脚本面向多个独立来源的语料，必须为每份语料声明独立的 tenant slug，不能塞进同一个 tenant。
+
 ## 通用前置
 
 - 后端起在 `http://localhost:8080`（或用 `CASEAGENT_BASE_URL` 覆盖）。
