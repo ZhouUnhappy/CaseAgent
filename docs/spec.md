@@ -12,6 +12,7 @@
 
 ## 核心业务对象
 
+- `tenants`：租户隔离边界（部门 / 公司）。所有业务对象都强归属于一个 tenant，跨 tenant 数据互不可见（由 PostgreSQL RLS 强制；详见 [`multitenancy.md`](multitenancy.md)）。
 - `projects`：项目空间，承载需求文档、任务和测试用例。
 - `documents`：需求文档原始记录，可来自 md 文件或 Google Drive。
 - `document_chunks`：需求文档分块后的检索单元。
@@ -93,6 +94,8 @@
 - `4` = Critical
 
 ## 主流程规格
+
+**前置**：选择或创建租户（前端顶栏；API 通过 `X-Tenant-ID` header 传 slug，由 `middleware/tenant.go` 解析）。所有后续步骤自动绑定当前 tenant 上下文，RLS 在 DB 层强制隔离。
 
 1. 创建项目。
 2. 上传需求文档，支持 md 文件或 Google Drive ID。

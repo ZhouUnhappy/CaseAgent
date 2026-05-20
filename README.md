@@ -48,6 +48,8 @@ go run cmd/server/main.go
 
 启动时会自动应用 `backend/migrations/001_init.sql` 中的当前 schema，测试库无需先手工建表。
 
+> **多租户**：所有业务 API 都要求 `X-Tenant-ID` header（tenant slug）。`POST /api/v1/tenants` 创建租户后，请求带上 `-H "X-Tenant-ID: <slug>"` 即可。生产环境建议用 NOBYPASSRLS role 连接 DB（superuser 会绕过 RLS）—— 配置细节见 [`docs/multitenancy.md`](docs/multitenancy.md)。
+
 ### 前端
 
 ```bash
@@ -57,6 +59,11 @@ npm run dev
 ```
 
 ## API 文档
+
+- `POST /api/v1/tenants` - 创建租户（slug + name；不需要 X-Tenant-ID header）
+- `GET /api/v1/tenants` - 列出租户（同上）
+
+以下端点都要求 `X-Tenant-ID: <slug>` header：
 
 - `POST /api/v1/projects` - 创建项目
 - `GET /api/v1/projects` - 列出项目

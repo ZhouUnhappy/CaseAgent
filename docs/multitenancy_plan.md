@@ -179,10 +179,10 @@
 
 ## Phase 10: 文档
 
-- [ ] 10.1 更新 `docs/architecture.md`：在"固定技术决策"加入 RLS / tenant model
-- [ ] 10.2 更新 `docs/spec.md`：核心业务对象加入 `tenants`，主流程加上"选择租户"前置
-- [ ] 10.3 在 `docs/` 下新增 `multitenancy.md`：RLS policy 设计、tenant 解析协议、新加表的 checklist
-- [ ] 10.4 更新 `README.md` 启动说明（DSN 用 app role、X-Tenant-ID 必传）
+- [x] 10.1 更新 `docs/architecture.md`：在"固定技术决策"加入 RLS / tenant model + ivfflat→hnsw 修正
+- [x] 10.2 更新 `docs/spec.md`：核心业务对象加入 `tenants`，主流程加上"选择租户"前置
+- [x] 10.3 在 `docs/` 下新增 `multitenancy.md`：数据模型 / RLS policy 模板 / 应用层链路 / tenant 解析协议 / NOBYPASSRLS role 配置 / 新加表 6 步 checklist / 暂不实现的扩展
+- [x] 10.4 更新 `README.md` 启动说明（X-Tenant-ID 必传、生产用 NOBYPASSRLS role）+ API 文档加 `/tenants`
 
 ---
 

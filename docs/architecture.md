@@ -29,8 +29,9 @@
 - 模型配置统一走配置文件，并支持环境变量覆盖。
 - chat 当前支持 Ark；embedding 当前支持 Ark / OpenAI-compatible。
 - embedding 维度通过 `model.embedding.dimensions` 显式配置。
-- 当前工程对 `Qwen3-Embedding-8B` 使用 `2000` 维输出，以兼容 `pgvector + ivfflat` 索引约束。
+- 当前工程对 `Qwen3-Embedding-8B` 使用 `2000` 维输出；向量索引使用 `pgvector hnsw`（多租户改造后切换，对带 filter 的 ANN 更友好）。
 - Google Drive 集成通过本地 `gws drive files export` 命令调用，无 Docker 依赖。
+- 多租户隔离：PostgreSQL Row-Level Security + 事务内 `SET LOCAL app.tenant_id`。所有业务表强制 `tenant_id NOT NULL`，policy 统一 `tenant_id = current_setting('app.tenant_id')::int`；HTTP 入口通过 `X-Tenant-ID` header（tenant slug）解析。详见 [`docs/multitenancy.md`](multitenancy.md)。
 
 ---
 
