@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"caseagent/internal/db"
 	"caseagent/internal/db/models"
 	retrievalservice "caseagent/internal/service/retrieval"
 
@@ -135,8 +136,10 @@ func (s *Service) upsert(ctx context.Context, taskID int, candidateType string, 
 		snippets = append(snippets, map[string]any{"text": s})
 	}
 
+	tenantID, _ := db.TenantFromContext(ctx)
 	now := time.Now()
 	row := &models.KnowledgeUpdateSuggestion{
+		TenantID:       tenantID,
 		SourceTaskID:   taskID,
 		CandidateType:  candidateType,
 		CandidateName:  strings.TrimSpace(c.Name),

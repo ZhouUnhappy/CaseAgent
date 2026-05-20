@@ -26,15 +26,16 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		return
 	}
 
+	tenantID, _ := TenantIDFromContext(c)
 	project := &models.Project{
+		TenantID:    tenantID,
 		Name:        req.Name,
 		Description: req.Description,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
 
-	_, err := h.DB.NewInsert().Model(project).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(project).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -44,8 +45,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 
 func (h *Handler) ListProjects(c *gin.Context) {
 	var projects []models.Project
-	err := h.DB.NewSelect().Model(&projects).Order("created_at DESC").Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(&projects).Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -57,8 +57,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 	id := c.Param("id")
 	project := &models.Project{ID: 0}
 
-	err := h.DB.NewSelect().Model(project).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(project).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
@@ -75,8 +74,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 	}
 
 	project := &models.Project{ID: 0}
-	err := h.DB.NewSelect().Model(project).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(project).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
@@ -89,8 +87,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 	}
 	project.UpdatedAt = time.Now()
 
-	_, err = h.DB.NewUpdate().Model(project).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewUpdate().Model(project).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -101,8 +98,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 func (h *Handler) DeleteProject(c *gin.Context) {
 	id := c.Param("id")
 
-	_, err := h.DB.NewDelete().Model(&models.Project{}).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewDelete().Model(&models.Project{}).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

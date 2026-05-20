@@ -101,20 +101,20 @@
 
 ### 5.1 Handler 改用 ctx 里的事务和 tenant_id
 
-- [ ] 5.1.1 `handler/project.go` 全部 5 个方法：`h.DB.NewInsert()` → `DBFromContext(c).NewInsert()`，并在 INSERT 时填 `TenantID`
-- [ ] 5.1.2 `handler/document.go` 全部方法同上（注意 `UploadDocument` 的异步 goroutine 要单独开 tx）
-- [ ] 5.1.3 `handler/knowledge.go` 全部方法同上（写入 `knowledge_base` 时从 ctx 自动取 tenant_id 填）
-- [ ] 5.1.4 `handler/task.go` 同上
-- [ ] 5.1.5 `handler/testcase.go` 同上
-- [ ] 5.1.6 `handler/knowledge_suggestion.go` 同上
-- [ ] 5.1.7 `handler/retrieval.go` 同上
-- [ ] 5.1.8 `handler/maintenance.go` 同上（reindex 跨租户操作要明确语义 —— 可能要走 admin 通道，先标记 TODO）
+- [x] 5.1.1 `handler/project.go` 全部 5 个方法：`h.DB.NewInsert()` → `DBFromContext(c).NewInsert()`，并在 INSERT 时填 `TenantID`
+- [x] 5.1.2 `handler/document.go` 全部方法同上（异步 goroutine 改用 RunAsync 单独开 tx）
+- [x] 5.1.3 `handler/knowledge.go` 全部方法同上（写入 `knowledge_base` 时从 ctx 自动取 tenant_id 填）
+- [x] 5.1.4 `handler/task.go` 同上
+- [x] 5.1.5 `handler/testcase.go` 同上
+- [x] 5.1.6 `handler/knowledge_suggestion.go` 同上
+- [x] 5.1.7 `handler/retrieval.go` 同上
+- [x] 5.1.8 `handler/maintenance.go` 同上 —— reindex 改成 tenant-scoped（只 repair 当前 tenant 的数据）；跨 tenant batch repair 需 admin 通道，未来再做
 
 ### 5.2 Service 写入 `tenant_id`
 
-- [ ] 5.2.1 `service/document/`：分块入库时把 document 的 `tenant_id` 透传给 `document_chunks`
-- [ ] 5.2.2 `service/suggestion/`：写 `knowledge_update_suggestions` 时填 `tenant_id`
-- [ ] 5.2.3 `service/task/` 的 `AnalyzeTask`（异步触发 suggestion 提取）：保留 tenant 上下文
+- [x] 5.2.1 `service/document/`：分块入库时从 ctx 取 tenant_id 透传给 `document_chunks`
+- [x] 5.2.2 `service/suggestion/`：写 `knowledge_update_suggestions` 时填 `tenant_id`
+- [x] 5.2.3 `service/task/`：suggestion 提取从 bg goroutine 改成同步（tx-scoped IDB 不能脱离请求 tx）；`persistGeneratedCases` 去掉 RunInTx wrap（外层 handler tx 已就位），TestCase INSERT 时填 tenant_id
 
 ## Phase 6: 检索代码改造
 
@@ -134,9 +134,9 @@
 
 ### 7.1 CRUD
 
-- [ ] 7.1.1 新建 `handler/tenant.go`：`POST/GET/LIST /api/v1/tenants`
-- [ ] 7.1.2 路由注册（在 tenant 中间件之外）
-- [ ] 7.1.3 启动时自动建 `default` tenant，slug=`default`（验证阶段单租户兜底）
+- [x] 7.1.1 新建 `handler/tenant.go`：`POST /api/v1/tenants` + `GET /api/v1/tenants`
+- [x] 7.1.2 路由注册（`tenants` 组只挂 `Tx`，不挂 `Tenant`）
+- [~] 7.1.3 ~启动时自动建 `default` tenant~ —— **不做**：plan 9.1 矩阵使用 fixture-specific slug（`i1-smoke` / `apache-dubbo` 等），没有 "default" 概念。各 fixture tenant 由 9.1 脚本按需创建
 
 ## Phase 8: 前端
 

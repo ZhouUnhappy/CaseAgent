@@ -17,7 +17,7 @@ import (
 )
 
 func (h *Handler) GetVectorHealth(c *gin.Context) {
-	report, err := maintenanceservice.New(h.DB).VectorHealth(c)
+	report, err := maintenanceservice.New(DBFromContext(c)).VectorHealth(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -26,24 +26,28 @@ func (h *Handler) GetVectorHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, report)
 }
 
+// ReindexVectors is tenant-scoped: it only repairs vectors for the calling
+// tenant's documents/knowledge. Cross-tenant batch repair would need an admin
+// endpoint and a superuser DSN to bypass RLS; not implemented yet.
 func (h *Handler) ReindexVectors(c *gin.Context) {
-	plan, err := maintenanceservice.New(h.DB).RepairPlan(c)
+	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	now := time.Now()
-	if err := markDocumentsProcessing(c, h.DB, plan.DocumentIDs, now); err != nil {
+	if err := markDocumentsProcessing(c, DBFromContext(c), plan.DocumentIDs, now); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := markKnowledgeProcessing(c, h.DB, plan.KnowledgeIDs, now); err != nil {
+	if err := markKnowledgeProcessing(c, DBFromContext(c), plan.KnowledgeIDs, now); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.runRepairPlan(plan)
+	tenantID, _ := TenantIDFromContext(c)
+	h.runRepairPlan(tenantID, plan)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"queued_documents":  len(plan.DocumentIDs),
@@ -53,15 +57,16 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 	})
 }
 
-func (h *Handler) runRepairPlan(plan *maintenanceservice.RepairPlan) {
-	go func(documentIDs []int, knowledgeIDs []int) {
-		ctx := context.Background()
+func (h *Handler) runRepairPlan(tenantID int, plan *maintenanceservice.RepairPlan) {
+	documentIDs := append([]int(nil), plan.DocumentIDs...)
+	knowledgeIDs := append([]int(nil), plan.KnowledgeIDs...)
 
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		if len(documentIDs) > 0 {
-			docService, err := documentservice.New(ctx, h.DB)
+			docService, err := documentservice.New(ctx, tx)
 			if err != nil {
 				slog.Error("document service init failed for batch reindex", "error", err)
-				_ = markDocumentsFailed(ctx, h.DB, documentIDs, time.Now())
+				_ = markDocumentsFailed(ctx, tx, documentIDs, time.Now())
 			} else {
 				for _, id := range documentIDs {
 					if err := docService.ReprocessDocument(ctx, id); err != nil {
@@ -72,11 +77,11 @@ func (h *Handler) runRepairPlan(plan *maintenanceservice.RepairPlan) {
 		}
 
 		if len(knowledgeIDs) > 0 {
-			knowledgeService, err := knowledgeservice.New(ctx, h.DB)
+			knowledgeService, err := knowledgeservice.New(ctx, tx)
 			if err != nil {
 				slog.Error("knowledge service init failed for batch reindex", "error", err)
-				_ = markKnowledgeFailed(ctx, h.DB, knowledgeIDs, time.Now())
-				return
+				_ = markKnowledgeFailed(ctx, tx, knowledgeIDs, time.Now())
+				return nil
 			}
 			for _, id := range knowledgeIDs {
 				if err := knowledgeService.ReprocessKnowledge(ctx, id); err != nil {
@@ -84,10 +89,11 @@ func (h *Handler) runRepairPlan(plan *maintenanceservice.RepairPlan) {
 				}
 			}
 		}
-	}(append([]int(nil), plan.DocumentIDs...), append([]int(nil), plan.KnowledgeIDs...))
+		return nil
+	})
 }
 
-func markDocumentsProcessing(ctx context.Context, db *bun.DB, ids []int, updatedAt time.Time) error {
+func markDocumentsProcessing(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -102,7 +108,7 @@ func markDocumentsProcessing(ctx context.Context, db *bun.DB, ids []int, updated
 	return nil
 }
 
-func markKnowledgeProcessing(ctx context.Context, db *bun.DB, ids []int, updatedAt time.Time) error {
+func markKnowledgeProcessing(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -118,7 +124,7 @@ func markKnowledgeProcessing(ctx context.Context, db *bun.DB, ids []int, updated
 	return nil
 }
 
-func markDocumentsFailed(ctx context.Context, db *bun.DB, ids []int, updatedAt time.Time) error {
+func markDocumentsFailed(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -133,7 +139,7 @@ func markDocumentsFailed(ctx context.Context, db *bun.DB, ids []int, updatedAt t
 	return nil
 }
 
-func markKnowledgeFailed(ctx context.Context, db *bun.DB, ids []int, updatedAt time.Time) error {
+func markKnowledgeFailed(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
 	if len(ids) == 0 {
 		return nil
 	}

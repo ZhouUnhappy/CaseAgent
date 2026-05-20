@@ -2,6 +2,7 @@ package router
 
 import (
 	"caseagent/internal/api/handler"
+	"caseagent/internal/api/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -9,11 +10,22 @@ import (
 func SetupRouter(h *handler.Handler) *gin.Engine {
 	r := gin.Default()
 
-	// API v1
 	v1 := r.Group("/api/v1")
+
+	// Tenants: bypass Tenant middleware (creating a tenant doesn't need a
+	// tenant context). Still wrap in Tx so DBFromContext works.
+	tenants := v1.Group("/tenants")
+	tenants.Use(middleware.Tx(h.DB))
 	{
-		// Projects
-		projects := v1.Group("/projects")
+		tenants.POST("", h.CreateTenant)
+		tenants.GET("", h.ListTenants)
+	}
+
+	// All other routes require X-Tenant-ID and run inside a tenant-scoped tx.
+	biz := v1.Group("")
+	biz.Use(middleware.Tenant(h.DB), middleware.Tx(h.DB))
+	{
+		projects := biz.Group("/projects")
 		{
 			projects.POST("", h.CreateProject)
 			projects.GET("", h.ListProjects)
@@ -21,32 +33,26 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 			projects.PUT("/:id", h.UpdateProject)
 			projects.DELETE("/:id", h.DeleteProject)
 
-			// Documents (nested under projects)
 			projects.GET("/:id/documents", h.ListDocuments)
 			projects.POST("/:id/documents", h.UploadDocument)
 
-			// Tasks (nested under projects)
 			projects.GET("/:id/tasks", h.ListTasks)
 			projects.POST("/:id/tasks", h.CreateGenerationTask)
 		}
 
-		// Documents (standalone)
-		v1.GET("/documents/:id", h.GetDocument)
-		v1.POST("/documents/:id/reprocess", h.ReprocessDocument)
-		v1.DELETE("/documents/:id", h.DeleteDocument)
+		biz.GET("/documents/:id", h.GetDocument)
+		biz.POST("/documents/:id/reprocess", h.ReprocessDocument)
+		biz.DELETE("/documents/:id", h.DeleteDocument)
 
-		// Tasks (standalone)
-		v1.GET("/tasks/:id", h.GetTask)
-		v1.PUT("/tasks/:id/review", h.ReviewAffected)
-		v1.PUT("/tasks/:id/generate", h.GenerateCases)
-		v1.POST("/tasks/:id/retry", h.RetryTask)
+		biz.GET("/tasks/:id", h.GetTask)
+		biz.PUT("/tasks/:id/review", h.ReviewAffected)
+		biz.PUT("/tasks/:id/generate", h.GenerateCases)
+		biz.POST("/tasks/:id/retry", h.RetryTask)
 
-		// Knowledge update suggestions (I4-T1)
-		v1.GET("/knowledge-suggestions", h.ListKnowledgeSuggestions)
-		v1.PUT("/knowledge-suggestions/:id", h.UpdateKnowledgeSuggestion)
+		biz.GET("/knowledge-suggestions", h.ListKnowledgeSuggestions)
+		biz.PUT("/knowledge-suggestions/:id", h.UpdateKnowledgeSuggestion)
 
-		// Knowledge Base
-		knowledge := v1.Group("/knowledge")
+		knowledge := biz.Group("/knowledge")
 		{
 			knowledge.POST("", h.UploadKnowledge)
 			knowledge.GET("", h.ListKnowledge)
@@ -56,21 +62,19 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 			knowledge.DELETE("/:id", h.DeleteKnowledge)
 		}
 
-		// Retrieval
-		retrieval := v1.Group("/retrieval")
+		retrieval := biz.Group("/retrieval")
 		{
 			retrieval.POST("/documents", h.SearchDocuments)
 			retrieval.POST("/knowledge", h.SearchKnowledge)
 		}
 
-		maintenance := v1.Group("/maintenance")
+		maintenance := biz.Group("/maintenance")
 		{
 			maintenance.GET("/vector-health", h.GetVectorHealth)
 			maintenance.POST("/reindex", h.ReindexVectors)
 		}
 
-		// Test Cases
-		cases := v1.Group("/tasks/:id/cases")
+		cases := biz.Group("/tasks/:id/cases")
 		{
 			cases.GET("", h.ListTestCases)
 			cases.PUT("/:case_id", h.UpdateTestCase)

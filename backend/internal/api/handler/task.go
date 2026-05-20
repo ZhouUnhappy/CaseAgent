@@ -44,12 +44,14 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		return
 	}
 
-	if err := validateTaskDocuments(c, h.DB, pid, documentIDs); err != nil {
+	if err := validateTaskDocuments(c, DBFromContext(c), pid, documentIDs); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	tenantID, _ := TenantIDFromContext(c)
 	task := &models.CaseGenerationTask{
+		TenantID:    tenantID,
 		ProjectID:   pid,
 		DocumentIDs: documentIDs,
 		Status:      models.TaskStatusAnalyzing,
@@ -57,8 +59,7 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		UpdatedAt:   time.Now(),
 	}
 
-	_, err = h.DB.NewInsert().Model(task).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(task).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -69,13 +70,14 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		"document_ids", task.DocumentIDs,
 	)
 
-	go func(taskID int) {
-		ctx := context.Background()
-		svc := taskservice.New(h.DB)
-		if err := svc.AnalyzeTask(ctx, taskID); err != nil {
+	taskID := task.ID
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
 			slog.Error("task analyze failed", "task_id", taskID, "error", err)
+			return err
 		}
-	}(task.ID)
+		return nil
+	})
 
 	c.JSON(http.StatusCreated, task)
 }
@@ -89,8 +91,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	}
 
 	var tasks []models.CaseGenerationTask
-	err = h.DB.NewSelect().Model(&tasks).Where("project_id = ?", pid).Order("created_at DESC").Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(&tasks).Where("project_id = ?", pid).Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -102,8 +103,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task := &models.CaseGenerationTask{ID: 0}
 
-	err := h.DB.NewSelect().Model(task).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
@@ -120,8 +120,7 @@ func (h *Handler) ReviewAffected(c *gin.Context) {
 	}
 
 	task := &models.CaseGenerationTask{ID: 0}
-	err := h.DB.NewSelect().Model(task).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
@@ -137,8 +136,7 @@ func (h *Handler) ReviewAffected(c *gin.Context) {
 	task.Status = models.TaskStatusReadyToGenerate
 	task.UpdatedAt = time.Now()
 
-	_, err = h.DB.NewUpdate().Model(task).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewUpdate().Model(task).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -156,8 +154,7 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 	id := c.Param("id")
 	task := &models.CaseGenerationTask{ID: 0}
 
-	err := h.DB.NewSelect().Model(task).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
@@ -171,7 +168,7 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 	task.Status = models.TaskStatusGenerating
 	task.UpdatedAt = time.Now()
 
-	updateResult, err := h.DB.NewUpdate().
+	updateResult, err := DBFromContext(c).NewUpdate().
 		Model(task).
 		Where("id = ?", id).
 		Where("status = ?", models.TaskStatusReadyToGenerate).
@@ -185,37 +182,26 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 		return
 	}
 
-	go func(taskID int) {
-		ctx := context.Background()
-		svc := taskservice.New(h.DB)
-		if err := svc.GenerateCases(ctx, taskID); err != nil {
+	tenantID, _ := TenantIDFromContext(c)
+	taskID := task.ID
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		if err := taskservice.New(tx).GenerateCases(ctx, taskID); err != nil {
 			slog.Error("task generate failed", "task_id", taskID, "error", err)
+			return err
 		}
-	}(task.ID)
+		return nil
+	})
 
 	slog.Info("task generate accepted", "task_id", task.ID)
 
 	c.JSON(http.StatusOK, task)
 }
 
-// RetryTask brings a failed task back into the pipeline. The phase to re-run
-// is inferred from existing state:
-//
-//   - affected_products and affected_modules both empty → analyze failed
-//     before review; reset to "analyzing" and re-invoke AnalyzeTask.
-//   - otherwise → analyze had already succeeded at least once; reset to
-//     "ready_to_generate" so the operator can either tweak the review and
-//     retry, or call PUT /generate directly. We do NOT auto-trigger
-//     generation here, because the failure may have been caused by a
-//     transient model outage that the operator wants to verify is fixed
-//     before burning tokens.
-//
-// Only `failed` tasks may be retried. Other states return 409.
 func (h *Handler) RetryTask(c *gin.Context) {
 	id := c.Param("id")
 	task := &models.CaseGenerationTask{ID: 0}
 
-	if err := h.DB.NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
@@ -234,7 +220,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	}
 	task.UpdatedAt = time.Now()
 
-	if _, err := h.DB.NewUpdate().Model(task).
+	if _, err := DBFromContext(c).NewUpdate().Model(task).
 		Set("status = ?", task.Status).
 		Set("updated_at = ?", task.UpdatedAt).
 		Where("id = ?", id).
@@ -244,13 +230,15 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	}
 
 	if rerunAnalyze {
-		go func(taskID int) {
-			ctx := context.Background()
-			svc := taskservice.New(h.DB)
-			if err := svc.AnalyzeTask(ctx, taskID); err != nil {
+		tenantID, _ := TenantIDFromContext(c)
+		taskID := task.ID
+		RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+			if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
 				slog.Error("task retry analyze failed", "task_id", taskID, "error", err)
+				return err
 			}
-		}(task.ID)
+			return nil
+		})
 	}
 
 	slog.Info("task retry accepted",
@@ -261,7 +249,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	c.JSON(http.StatusAccepted, task)
 }
 
-func validateTaskDocuments(ctx context.Context, db *bun.DB, projectID int, documentIDs []int) error {
+func validateTaskDocuments(ctx context.Context, db bun.IDB, projectID int, documentIDs []int) error {
 	projectCount, err := db.NewSelect().Model((*models.Project)(nil)).Where("id = ?", projectID).Count(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to verify project: %w", err)

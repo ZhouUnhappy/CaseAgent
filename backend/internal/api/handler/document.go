@@ -12,6 +12,7 @@ import (
 	documentservice "caseagent/internal/service/document"
 
 	"github.com/gin-gonic/gin"
+	"github.com/uptrace/bun"
 )
 
 type UploadDocumentRequest struct {
@@ -35,7 +36,6 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		return
 	}
 
-	// Get file content if uploaded
 	var content string
 	if req.Source == "upload" {
 		file, err := c.FormFile("file")
@@ -52,15 +52,16 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		defer fileContent.Close()
 
 		bytes := make([]byte, file.Size)
-		_, err = io.ReadFull(fileContent, bytes)
-		if err != nil {
+		if _, err := io.ReadFull(fileContent, bytes); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		content = string(bytes)
 	}
 
+	tenantID, _ := TenantIDFromContext(c)
 	document := &models.Document{
+		TenantID:  tenantID,
 		ProjectID: pid,
 		Name:      req.Name,
 		Type:      req.Type,
@@ -72,8 +73,7 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	_, err = h.DB.NewInsert().Model(document).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(document).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -85,24 +85,22 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		"source", document.Source,
 	)
 
-	// Process document asynchronously
-	go func(docID int, content string, gwsFileID string) {
-		ctx := context.Background()
-		docService, err := documentservice.New(ctx, h.DB)
+	docID := document.ID
+	docContent := content
+	gwsFileID := req.FileID
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		docService, err := documentservice.New(ctx, tx)
 		if err != nil {
 			slog.Error("document service init failed", "document_id", docID, "error", err)
-			_, _ = h.DB.NewUpdate().Model(&models.Document{}).
-				Set("status = ?", "failed").
-				Set("updated_at = ?", time.Now()).
-				Where("id = ?", docID).
-				Exec(ctx)
-			return
+			markDocumentFailed(ctx, tx, docID)
+			return err
 		}
-		err = docService.ProcessDocument(ctx, docID, content, gwsFileID)
-		if err != nil {
+		if err := docService.ProcessDocument(ctx, docID, docContent, gwsFileID); err != nil {
 			slog.Error("document process failed", "document_id", docID, "error", err)
+			return err
 		}
-	}(document.ID, content, req.FileID)
+		return nil
+	})
 
 	c.JSON(http.StatusCreated, document)
 }
@@ -116,8 +114,7 @@ func (h *Handler) ListDocuments(c *gin.Context) {
 	}
 
 	var documents []models.Document
-	err = h.DB.NewSelect().Model(&documents).Where("project_id = ?", pid).Order("created_at DESC").Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(&documents).Where("project_id = ?", pid).Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -129,8 +126,7 @@ func (h *Handler) GetDocument(c *gin.Context) {
 	id := c.Param("id")
 	document := &models.Document{ID: 0}
 
-	err := h.DB.NewSelect().Model(document).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(document).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
 		return
 	}
@@ -141,8 +137,7 @@ func (h *Handler) GetDocument(c *gin.Context) {
 func (h *Handler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 
-	_, err := h.DB.NewDelete().Model(&models.Document{}).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewDelete().Model(&models.Document{}).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -154,7 +149,7 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 	id := c.Param("id")
 	document := &models.Document{}
 
-	if err := h.DB.NewSelect().Model(document).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(document).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
 		return
 	}
@@ -162,29 +157,36 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 	document.Status = "processing"
 	document.UpdatedAt = time.Now()
 
-	if _, err := h.DB.NewUpdate().Model(document).Where("id = ?", id).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewUpdate().Model(document).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	slog.Info("document reprocess accepted", "document_id", document.ID, "name", document.Name)
 
-	go func(docID int) {
-		ctx := context.Background()
-		docService, err := documentservice.New(ctx, h.DB)
+	tenantID, _ := TenantIDFromContext(c)
+	docID := document.ID
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		docService, err := documentservice.New(ctx, tx)
 		if err != nil {
 			slog.Error("document service init failed", "document_id", docID, "error", err)
-			_, _ = h.DB.NewUpdate().Model(&models.Document{}).
-				Set("status = ?", "failed").
-				Set("updated_at = ?", time.Now()).
-				Where("id = ?", docID).
-				Exec(ctx)
-			return
+			markDocumentFailed(ctx, tx, docID)
+			return err
 		}
 		if err := docService.ReprocessDocument(ctx, docID); err != nil {
 			slog.Error("document reprocess failed", "document_id", docID, "error", err)
+			return err
 		}
-	}(document.ID)
+		return nil
+	})
 
 	c.JSON(http.StatusAccepted, document)
+}
+
+func markDocumentFailed(ctx context.Context, db bun.IDB, docID int) {
+	_, _ = db.NewUpdate().Model(&models.Document{}).
+		Set("status = ?", "failed").
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", docID).
+		Exec(ctx)
 }

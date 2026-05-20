@@ -29,7 +29,7 @@ func (h *Handler) SearchDocuments(c *gin.Context) {
 		return
 	}
 
-	svc := retrievalservice.New(h.DB)
+	svc := retrievalservice.New(DBFromContext(c))
 	queries := append([]string{}, req.Queries...)
 	if req.Query != "" {
 		queries = append([]string{req.Query}, queries...)
@@ -65,7 +65,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
-	svc := retrievalservice.New(h.DB)
+	svc := retrievalservice.New(DBFromContext(c))
 	queries := append([]string{}, req.Queries...)
 	if req.Query != "" {
 		queries = append([]string{req.Query}, queries...)

@@ -13,6 +13,7 @@ import (
 	retrievalservice "caseagent/internal/service/retrieval"
 	suggestionservice "caseagent/internal/service/suggestion"
 
+	"caseagent/internal/db"
 	"caseagent/internal/db/models"
 
 	"github.com/uptrace/bun"
@@ -62,15 +63,14 @@ func (s *Service) AnalyzeTask(ctx context.Context, taskID int) (err error) {
 		return err
 	}
 
-	// Knowledge gap suggestions are best-effort: they must never block or fail
-	// AnalyzeTask. The task has already transitioned to awaiting_review above.
-	go func(taskID int, requirements string, products, modules []string) {
-		bgCtx := context.Background()
-		if err := suggestionservice.New(s.db).RecordCandidates(bgCtx, taskID, requirements, products, modules); err != nil {
-			slog.Warn("knowledge suggestion record failed",
-				"task_id", taskID, "error", err)
-		}
-	}(taskID, requirements, append([]string{}, products...), append([]string{}, modules...))
+	// Knowledge gap suggestions are best-effort: failures must never break
+	// AnalyzeTask. Run synchronously inside the current tenant tx — the bg
+	// goroutine pattern broke when service moved to tx-scoped IDB (the tx
+	// would be closed by the time the goroutine ran).
+	if err := suggestionservice.New(s.db).RecordCandidates(ctx, taskID, requirements, products, modules); err != nil {
+		slog.Warn("knowledge suggestion record failed",
+			"task_id", taskID, "error", err)
+	}
 
 	return nil
 }
@@ -274,30 +274,30 @@ func (s *Service) loadRelevantKnowledge(ctx context.Context, products []string, 
 }
 
 func (s *Service) persistGeneratedCases(ctx context.Context, taskID int, sections []generatedSection, sourceContext map[string]any) error {
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewDelete().Model(&models.TestCase{}).Where("task_id = ?", taskID).Exec(ctx); err != nil {
-			return fmt.Errorf("failed to clear existing test cases: %w", err)
+	if _, err := s.db.NewDelete().Model(&models.TestCase{}).Where("task_id = ?", taskID).Exec(ctx); err != nil {
+		return fmt.Errorf("failed to clear existing test cases: %w", err)
+	}
+
+	tenantID, _ := db.TenantFromContext(ctx)
+	now := time.Now()
+	for _, section := range sections {
+		testCase := &models.TestCase{
+			TenantID:      tenantID,
+			TaskID:        taskID,
+			Section:       section.Section,
+			Cases:         section.Cases,
+			SourceContext: sourceContext,
+			Status:        models.TestCaseStatusDraft,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}
 
-		now := time.Now()
-		for _, section := range sections {
-			testCase := &models.TestCase{
-				TaskID:        taskID,
-				Section:       section.Section,
-				Cases:         section.Cases,
-				SourceContext: sourceContext,
-				Status:        models.TestCaseStatusDraft,
-				CreatedAt:     now,
-				UpdatedAt:     now,
-			}
-
-			if _, err := tx.NewInsert().Model(testCase).Exec(ctx); err != nil {
-				return fmt.Errorf("failed to store test cases for section %s: %w", section.Section, err)
-			}
+		if _, err := s.db.NewInsert().Model(testCase).Exec(ctx); err != nil {
+			return fmt.Errorf("failed to store test cases for section %s: %w", section.Section, err)
 		}
+	}
 
-		return nil
-	})
+	return nil
 }
 
 func inferAffectedKnowledge(requirements string, knowledgeEntries []models.KnowledgeBase) ([]string, []string) {

@@ -25,7 +25,7 @@ func (h *Handler) ListKnowledgeSuggestions(c *gin.Context) {
 		return
 	}
 
-	rows, err := suggestionservice.New(h.DB).List(c, status)
+	rows, err := suggestionservice.New(DBFromContext(c)).List(c, status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -47,7 +47,7 @@ func (h *Handler) UpdateKnowledgeSuggestion(c *gin.Context) {
 		return
 	}
 
-	row, ok, err := suggestionservice.New(h.DB).SetStatus(c, id, req.Status)
+	row, ok, err := suggestionservice.New(DBFromContext(c)).SetStatus(c, id, req.Status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

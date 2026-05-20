@@ -10,6 +10,7 @@ import (
 	"caseagent/internal/service/knowledge"
 
 	"github.com/gin-gonic/gin"
+	"github.com/uptrace/bun"
 )
 
 type UploadKnowledgeRequest struct {
@@ -32,7 +33,9 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		return
 	}
 
+	tenantID, _ := TenantIDFromContext(c)
 	kb := &models.KnowledgeBase{
+		TenantID:  tenantID,
 		Type:      req.Type,
 		Name:      req.Name,
 		Content:   req.Content,
@@ -42,15 +45,14 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	_, err := h.DB.NewInsert().Model(kb).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(kb).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	slog.Info("knowledge create accepted", "knowledge_id", kb.ID, "type", kb.Type, "name", kb.Name)
 
-	h.processKnowledgeAsync(kb.ID, req.Content)
+	h.processKnowledgeAsync(tenantID, kb.ID, req.Content)
 
 	c.JSON(http.StatusCreated, kb)
 }
@@ -59,13 +61,12 @@ func (h *Handler) ListKnowledge(c *gin.Context) {
 	kbType := c.Query("type")
 	var knowledge []models.KnowledgeBase
 
-	query := h.DB.NewSelect().Model(&knowledge)
+	query := DBFromContext(c).NewSelect().Model(&knowledge)
 	if kbType != "" {
 		query = query.Where("type = ?", kbType)
 	}
 
-	err := query.Order("created_at DESC").Scan(c)
-	if err != nil {
+	if err := query.Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -77,8 +78,7 @@ func (h *Handler) GetKnowledge(c *gin.Context) {
 	id := c.Param("id")
 	kb := &models.KnowledgeBase{ID: 0}
 
-	err := h.DB.NewSelect().Model(kb).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
@@ -95,8 +95,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 	}
 
 	kb := &models.KnowledgeBase{ID: 0}
-	err := h.DB.NewSelect().Model(kb).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
@@ -110,7 +109,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 	needsReprocess := applyKnowledgeUpdate(kb, req)
 	kb.UpdatedAt = time.Now()
 
-	update := h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
+	update := DBFromContext(c).NewUpdate().Model(&models.KnowledgeBase{}).
 		Set("name = ?", kb.Name).
 		Set("content = ?", kb.Content).
 		Set("metadata = ?", kb.Metadata).
@@ -121,14 +120,14 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 		update = update.Set("embedding = ?", nil)
 	}
 
-	_, err = update.Exec(c)
-	if err != nil {
+	if _, err := update.Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	if needsReprocess {
-		h.processKnowledgeAsync(kb.ID, kb.Content)
+		tenantID, _ := TenantIDFromContext(c)
+		h.processKnowledgeAsync(tenantID, kb.ID, kb.Content)
 	}
 
 	slog.Info("knowledge update", "knowledge_id", kb.ID, "name", kb.Name, "reprocess", needsReprocess)
@@ -140,7 +139,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 	id := c.Param("id")
 	kb := &models.KnowledgeBase{}
 
-	if err := h.DB.NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
@@ -149,7 +148,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 	kb.Status = models.KnowledgeStatusProcessing
 	kb.UpdatedAt = time.Now()
 
-	if _, err := h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
+	if _, err := DBFromContext(c).NewUpdate().Model(&models.KnowledgeBase{}).
 		Set("embedding = ?", nil).
 		Set("status = ?", kb.Status).
 		Set("updated_at = ?", kb.UpdatedAt).
@@ -161,22 +160,21 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 
 	slog.Info("knowledge reprocess accepted", "knowledge_id", kb.ID, "name", kb.Name)
 
-	go func(kbID int) {
-		ctx := context.Background()
-		kbService, err := knowledge.New(ctx, h.DB)
+	tenantID, _ := TenantIDFromContext(c)
+	kbID := kb.ID
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		kbService, err := knowledge.New(ctx, tx)
 		if err != nil {
 			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
-			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
-				Set("status = ?", models.KnowledgeStatusFailed).
-				Set("updated_at = ?", time.Now()).
-				Where("id = ?", kbID).
-				Exec(ctx)
-			return
+			markKnowledgeFailedSingle(ctx, tx, kbID)
+			return err
 		}
 		if err := kbService.ReprocessKnowledge(ctx, kbID); err != nil {
 			slog.Error("knowledge reprocess failed", "knowledge_id", kbID, "error", err)
+			return err
 		}
-	}(kb.ID)
+		return nil
+	})
 
 	c.JSON(http.StatusAccepted, kb)
 }
@@ -184,8 +182,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 func (h *Handler) DeleteKnowledge(c *gin.Context) {
 	id := c.Param("id")
 
-	_, err := h.DB.NewDelete().Model(&models.KnowledgeBase{}).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewDelete().Model(&models.KnowledgeBase{}).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -193,23 +190,28 @@ func (h *Handler) DeleteKnowledge(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
-func (h *Handler) processKnowledgeAsync(kbID int, content string) {
-	go func() {
-		ctx := context.Background()
-		kbService, err := knowledge.New(ctx, h.DB)
+func (h *Handler) processKnowledgeAsync(tenantID int, kbID int, content string) {
+	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		kbService, err := knowledge.New(ctx, tx)
 		if err != nil {
 			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
-			_, _ = h.DB.NewUpdate().Model(&models.KnowledgeBase{}).
-				Set("status = ?", models.KnowledgeStatusFailed).
-				Set("updated_at = ?", time.Now()).
-				Where("id = ?", kbID).
-				Exec(ctx)
-			return
+			markKnowledgeFailedSingle(ctx, tx, kbID)
+			return err
 		}
 		if err := kbService.ProcessKnowledge(ctx, kbID, content); err != nil {
 			slog.Error("knowledge process failed", "knowledge_id", kbID, "error", err)
+			return err
 		}
-	}()
+		return nil
+	})
+}
+
+func markKnowledgeFailedSingle(ctx context.Context, db bun.IDB, kbID int) {
+	_, _ = db.NewUpdate().Model(&models.KnowledgeBase{}).
+		Set("status = ?", models.KnowledgeStatusFailed).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", kbID).
+		Exec(ctx)
 }
 
 func applyKnowledgeUpdate(kb *models.KnowledgeBase, req UpdateKnowledgeRequest) bool {

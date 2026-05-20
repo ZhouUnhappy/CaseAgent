@@ -9,6 +9,7 @@ import (
 
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
+	"caseagent/internal/db"
 	"caseagent/internal/db/models"
 	dbvector "caseagent/internal/db/vector"
 	markdowncleaner "caseagent/internal/markdown"
@@ -67,6 +68,7 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		return fmt.Errorf("no valid document chunks generated")
 	}
 
+	tenantID, _ := db.TenantFromContext(ctx)
 	for _, chunk := range chunks {
 		embResult, err := s.embedding.EmbedStrings(ctx, []string{chunk})
 		if err != nil {
@@ -84,6 +86,7 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		}
 
 		docChunk := &models.DocumentChunk{
+			TenantID:    tenantID,
 			DocumentID:  docID,
 			ParentDocID: docID,
 			Content:     chunk,

@@ -25,8 +25,7 @@ func (h *Handler) ListTestCases(c *gin.Context) {
 	}
 
 	var testCases []models.TestCase
-	err = h.DB.NewSelect().Model(&testCases).Where("task_id = ?", tid).Order("created_at DESC").Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(&testCases).Where("task_id = ?", tid).Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -43,8 +42,7 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 	}
 
 	tc := &models.TestCase{ID: 0}
-	err := h.DB.NewSelect().Model(tc).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(tc).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
 		return
 	}
@@ -57,8 +55,7 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 	}
 	tc.UpdatedAt = time.Now()
 
-	_, err = h.DB.NewUpdate().Model(tc).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewUpdate().Model(tc).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -77,8 +74,7 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 	id := c.Param("case_id")
 	tc := &models.TestCase{ID: 0}
 
-	err := h.DB.NewSelect().Model(tc).Where("id = ?", id).Scan(c)
-	if err != nil {
+	if err := DBFromContext(c).NewSelect().Model(tc).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
 		return
 	}
@@ -86,8 +82,7 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 	tc.Status = models.TestCaseStatusSubmitted
 	tc.UpdatedAt = time.Now()
 
-	_, err = h.DB.NewUpdate().Model(tc).Where("id = ?", id).Exec(c)
-	if err != nil {
+	if _, err := DBFromContext(c).NewUpdate().Model(tc).Where("id = ?", id).Exec(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
