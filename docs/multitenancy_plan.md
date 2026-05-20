@@ -26,9 +26,9 @@
 
 ## Phase 0: 基线确认
 
-- [ ] 0.1 用户确认 plan（本文档）
-- [ ] 0.2 确认分支策略（继续在 `feat/implementation-plan-phase2`，或切新分支）
-- [ ] 0.3 备份当前可工作状态（确认 `git status` 干净，必要时 tag 一个 `pre-multitenancy` 点）
+- [x] 0.1 用户确认 plan（本文档）
+- [x] 0.2 确认分支策略 —— 切到 `feat/multitenancy`（commit `ee93576` 之后）
+- [x] 0.3 备份当前可工作状态 —— Phase 1 commit 之前 `git status` 干净
 
 ## Phase 1: 数据模型重构
 
@@ -190,9 +190,9 @@
 
 完成下列项目即视为改造完成：
 
-- [ ] 两个 tenant 互相完全看不到对方的 project / document / knowledge / task / test_case / suggestion
-- [ ] 所有现有回归脚本（`i1_*` / `i2_*`）在加上 tenant header 后全绿
-- [ ] 新加的隔离测试 `scripts/multitenancy_isolation.sh` 通过
-- [ ] `cd backend && go test ./...` 全绿
-- [ ] `cd frontend && npm run build` 通过
-- [ ] 故意漏掉某个 handler 的 tenant 填充，RLS 会让查询返回空 / INSERT 失败（防错性已生效）
+- [~] 两个 tenant 互相完全看不到对方的 project / document / knowledge / task / test_case / suggestion —— **设计已就位**（RLS policy + WITH CHECK 覆盖 7 张业务表）；端到端验证由 `schema_rls_test.go`（projects 表，已通过 CI 跑）+ `scripts/multitenancy_isolation.sh`（knowledge 表，需 PG + API key 跑）覆盖
+- [~] 所有现有回归脚本（`i1_*` / `i2_*`）在加上 tenant header 后全绿 —— smoke / public / private / i2 4 个核心脚本已改造；需用户在本地真环境跑确认
+- [~] 新加的隔离测试 `scripts/multitenancy_isolation.sh` 通过 —— 脚本已写，需真环境跑
+- [x] `cd backend && go test ./...` 全绿 —— 跨多个 commit 已验证
+- [x] `cd frontend && npm run build` 通过 —— 跨 Phase 8 commit 已验证
+- [~] 故意漏掉某个 handler 的 tenant 填充，RLS 会让查询返回空 / INSERT 失败（防错性已生效）—— `schema_rls_test.go` 用 `RunInTenantTx` + 不带 TenantID 的 INSERT 验证了 WITH CHECK 阻断；handler 层的等价测试 deferred 到 9.3.3
