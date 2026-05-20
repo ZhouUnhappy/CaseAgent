@@ -73,10 +73,10 @@
 
 ### 3.1 在 schema 里启用 RLS (`001_init.sql` 末尾)
 
-- [ ] 3.1.1 为所有带 `tenant_id` 的业务表执行 `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` + `... FORCE ROW LEVEL SECURITY`
-- [ ] 3.1.2 创建 policy 模板（每张表一条 `USING` + `WITH CHECK`）：`tenant_id = current_setting('app.tenant_id')::int`（所有业务表统一，无特例）
-- [ ] 3.1.3 用应用 role 而非 superuser 连接（superuser 会绕过 RLS）—— 在 schema 里创建 role，DSN 改用此 role
-- [ ] 3.1.4 写 SQL 级隔离测试 `db/schema_rls_test.go`：插入两个租户数据，验证查询自动过滤
+- [x] 3.1.1 为所有带 `tenant_id` 的业务表执行 `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` + `... FORCE ROW LEVEL SECURITY`
+- [x] 3.1.2 创建 policy 模板（每张表一条 `USING` + `WITH CHECK`）：`tenant_id = current_setting('app.tenant_id')::int`（所有业务表统一，无特例）
+- [~] 3.1.3 用应用 role 而非 superuser 连接（superuser 会绕过 RLS）—— schema 里加 FORCE 已完成；NOBYPASSRLS role 配置不写进 schema（环境差异大），延到 Phase 10.4 README 文档化
+- [x] 3.1.4 写 SQL 级隔离测试 `db/schema_rls_test.go`：插入两个租户数据，验证查询自动过滤；同时验证跨 tenant INSERT 被 WITH CHECK 阻断；用 `CASEAGENT_TEST_DSN` 环境变量提供连接，未设置时 skip
 
 ## Phase 4: HTTP 中间件 + 请求上下文
 

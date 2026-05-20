@@ -117,3 +117,58 @@ CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_status_idx
     ON knowledge_update_suggestions (status);
 CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_task_idx
     ON knowledge_update_suggestions (source_task_id);
+
+-- Phase 3: Row-Level Security
+-- All business tables enforce tenant_id = current_setting('app.tenant_id').
+-- Application sets it via RunInTenantTx (db/tx.go) at tx start.
+-- FORCE makes the table owner subject too; superusers still bypass — use a
+-- NOBYPASSRLS role for runtime and integration tests.
+
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS projects_tenant_isolation ON projects;
+CREATE POLICY projects_tenant_isolation ON projects
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
+
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS documents_tenant_isolation ON documents;
+CREATE POLICY documents_tenant_isolation ON documents
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
+
+ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_chunks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS document_chunks_tenant_isolation ON document_chunks;
+CREATE POLICY document_chunks_tenant_isolation ON document_chunks
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
+
+ALTER TABLE knowledge_base ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_base FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS knowledge_base_tenant_isolation ON knowledge_base;
+CREATE POLICY knowledge_base_tenant_isolation ON knowledge_base
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
+
+ALTER TABLE case_generation_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE case_generation_tasks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS case_generation_tasks_tenant_isolation ON case_generation_tasks;
+CREATE POLICY case_generation_tasks_tenant_isolation ON case_generation_tasks
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
+
+ALTER TABLE test_cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE test_cases FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS test_cases_tenant_isolation ON test_cases;
+CREATE POLICY test_cases_tenant_isolation ON test_cases
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
+
+ALTER TABLE knowledge_update_suggestions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_update_suggestions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS knowledge_update_suggestions_tenant_isolation ON knowledge_update_suggestions;
+CREATE POLICY knowledge_update_suggestions_tenant_isolation ON knowledge_update_suggestions
+    USING (tenant_id = current_setting('app.tenant_id')::int)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);
