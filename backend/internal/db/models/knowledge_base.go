@@ -19,6 +19,7 @@ type KnowledgeBase struct {
 	bun.BaseModel `bun:"table:knowledge_base"`
 
 	ID        int             `bun:"id,pk,autoincrement" json:"id"`
+	TenantID  int             `bun:"tenant_id,notnull" json:"tenant_id"`
 	Type      string          `bun:"type,notnull" json:"type"` // 'product', 'module'
 	Name      string          `bun:"name,notnull" json:"name"`
 	Content   string          `bun:"content,notnull" json:"content"`

@@ -8,6 +8,7 @@ import (
 
 type DocumentChunk struct {
 	ID          int             `bun:"id,pk,autoincrement" json:"id"`
+	TenantID    int             `bun:"tenant_id,notnull" json:"tenant_id"`
 	DocumentID  int             `bun:"document_id,notnull" json:"document_id"`
 	Content     string          `bun:"content,notnull" json:"content"`
 	Embedding   dbvector.Vector `bun:"embedding" json:"embedding"`

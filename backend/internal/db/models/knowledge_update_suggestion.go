@@ -18,6 +18,7 @@ const (
 // from it) or dismiss the suggestion via the API.
 type KnowledgeUpdateSuggestion struct {
 	ID             int              `bun:"id,pk,autoincrement" json:"id"`
+	TenantID       int              `bun:"tenant_id,notnull" json:"tenant_id"`
 	SourceTaskID   int              `bun:"source_task_id,notnull" json:"source_task_id"`
 	CandidateType  string           `bun:"candidate_type,notnull" json:"candidate_type"`
 	CandidateName  string           `bun:"candidate_name,notnull" json:"candidate_name"`

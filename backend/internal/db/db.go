@@ -40,6 +40,7 @@ func Init(ctx context.Context) error {
 
 	// Register models
 	for _, model := range []interface{}{
+		&models.Tenant{},
 		&models.Project{},
 		&models.Document{},
 		&models.DocumentChunk{},

@@ -11,6 +11,7 @@ const (
 
 type Document struct {
 	ID        int       `bun:"id,pk,autoincrement" json:"id"`
+	TenantID  int       `bun:"tenant_id,notnull" json:"tenant_id"`
 	ProjectID int       `bun:"project_id,notnull" json:"project_id"`
 	Name      string    `bun:"name,notnull" json:"name"`
 	Type      string    `bun:"type,notnull" json:"type"`     // 'markdown', 'gdrive'

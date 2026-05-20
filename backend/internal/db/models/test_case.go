@@ -19,6 +19,7 @@ const (
 // requirement / knowledge sources.
 type TestCase struct {
 	ID            int              `bun:"id,pk,autoincrement" json:"id"`
+	TenantID      int              `bun:"tenant_id,notnull" json:"tenant_id"`
 	TaskID        int              `bun:"task_id,notnull" json:"task_id"`
 	Section       string           `bun:"section,notnull" json:"section"`
 	Cases         []map[string]any `bun:"cases,notnull,type:jsonb" json:"cases"`

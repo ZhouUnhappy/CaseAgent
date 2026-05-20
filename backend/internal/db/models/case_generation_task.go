@@ -13,6 +13,7 @@ const (
 
 type CaseGenerationTask struct {
 	ID               int       `bun:"id,pk,autoincrement" json:"id"`
+	TenantID         int       `bun:"tenant_id,notnull" json:"tenant_id"`
 	ProjectID        int       `bun:"project_id,notnull" json:"project_id"`
 	DocumentIDs      []int     `bun:"document_ids,array,notnull" json:"document_ids"`
 	AffectedProducts []string  `bun:"affected_products,type:jsonb" json:"affected_products"`

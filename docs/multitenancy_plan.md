@@ -13,7 +13,6 @@
 |---|---|---|
 | 隔离层级 | tenant（部门/公司）> project（项目） | 跨部门/跨公司天然映射到 tenant；项目从属于 tenant |
 | 隔离机制 | PostgreSQL RLS + `SET LOCAL app.tenant_id` | DB 层兜底，漏 WHERE 也不会泄露 |
-| 共享语义 | 暂不实现（所有 knowledge 强归属 tenant） | YAGNI；同一组件在不同公司侧重点不同，"平台通用知识"目前无真实场景。未来真出现再加 `tenant_id IS NULL` 分支 |
 | 租户来源 | HTTP Header `X-Tenant-ID`（验证阶段） | 简单直接；真正 SaaS 化后再换成 JWT claims |
 | 连接管理 | 每个请求开 `RunInTx`，事务内 `SET LOCAL` | connection-scoped 设置会随连接复用泄露，必须 transaction-scoped |
 | 向量索引 | `ivfflat` → `hnsw`（pgvector 0.5+） | hnsw 对带 filter 的 ANN 友好得多 |
@@ -35,24 +34,24 @@
 
 ### 1.1 重写 schema (`backend/migrations/001_init.sql`)
 
-- [ ] 1.1.1 新增 `tenants` 表：`id / slug / name / created_at / updated_at`，`slug` 唯一索引
-- [ ] 1.1.2 `projects` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引
-- [ ] 1.1.3 `documents` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引
-- [ ] 1.1.4 `document_chunks` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引（冗余但 RLS 需要）
-- [ ] 1.1.5 `knowledge_base` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引
-- [ ] 1.1.6 `case_generation_tasks` / `test_cases` / `knowledge_update_suggestions` 加 `tenant_id NOT NULL`
-- [ ] 1.1.7 把 `vector(2000)` 索引从 `ivfflat` 切到 `hnsw`（`USING hnsw (embedding vector_cosine_ops)`）
-- [ ] 1.1.8 删掉 schema 里所有 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` 的兜底（推倒重来不需要）
+- [x] 1.1.1 新增 `tenants` 表：`id / slug / name / created_at / updated_at`，`slug` 唯一索引
+- [x] 1.1.2 `projects` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引
+- [x] 1.1.3 `documents` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引
+- [x] 1.1.4 `document_chunks` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引（冗余但 RLS 需要）
+- [x] 1.1.5 `knowledge_base` 加 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + 索引
+- [x] 1.1.6 `case_generation_tasks` / `test_cases` / `knowledge_update_suggestions` 加 `tenant_id NOT NULL`
+- [x] 1.1.7 把 `vector(2000)` 索引从 `ivfflat` 切到 `hnsw`（`USING hnsw (embedding vector_cosine_ops)`）
+- [x] 1.1.8 删掉 schema 里所有 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` 的兜底（推倒重来不需要）
 
 ### 1.2 Go model 同步 (`backend/internal/db/models/`)
 
-- [ ] 1.2.1 新建 `tenant.go`：`Tenant` 结构体
-- [ ] 1.2.2 `project.go`：加 `TenantID int`
-- [ ] 1.2.3 `document.go`：加 `TenantID int`
-- [ ] 1.2.4 `document_chunk.go`：加 `TenantID int`
-- [ ] 1.2.5 `knowledge_base.go`：加 `TenantID int`
-- [ ] 1.2.6 `case_generation_task.go` / `test_case.go` / `knowledge_update_suggestion.go`：加 `TenantID int`
-- [ ] 1.2.7 `all.go` 和 `db.go:42-50` 的模型注册列表加入 `Tenant{}`
+- [x] 1.2.1 新建 `tenant.go`：`Tenant` 结构体
+- [x] 1.2.2 `project.go`：加 `TenantID int`
+- [x] 1.2.3 `document.go`：加 `TenantID int`
+- [x] 1.2.4 `document_chunk.go`：加 `TenantID int`
+- [x] 1.2.5 `knowledge_base.go`：加 `TenantID int`
+- [x] 1.2.6 `case_generation_task.go` / `test_case.go` / `knowledge_update_suggestion.go`：加 `TenantID int`
+- [x] 1.2.7 `all.go` 和 `db.go:42-50` 的模型注册列表加入 `Tenant{}`
 
 ## Phase 2: DB 连接和事务封装
 
