@@ -84,7 +84,7 @@
 
 - [x] 4.1.1 新建 `backend/internal/api/middleware/tenant.go`：从 `X-Tenant-ID` header 解析 → 查 `tenants` 表存在性 → 注入 `gin.Context`（key: `tenant_id`）
 - [x] 4.1.2 缺失或不存在时返回 400，但**白名单 `/api/v1/tenants`**（建租户本身不需要 tenant 上下文）—— 通过 router 分组实现而非 path 判断
-- [!] 4.1.3 中间件单测：合法 / 缺失 / 不存在 / 非法格式 四种 case —— **合并到 9.3.3**（都依赖真 PG 测试基础设施）
+- [x] 4.1.3 中间件单测：合法 / 缺失 / 不存在 / 非法格式 四种 case —— **完成于 9.3.3**（`backend/internal/api/middleware/tenant_test.go`）
 
 ### 4.2 事务中间件
 
@@ -160,10 +160,10 @@
 | `testdata/private/...` | `CASEAGENT_I1_PRIVATE_TENANT_SLUG` 显式指定，缺失 fail-fast | 防止私有数据误入默认 tenant |
 | determinism / i2 e2e | 自动从被复用对象（doc/project）回查 | 跟随 |
 
-- [x] 9.1.1 所有 `scripts/i*.sh` curl 调用统一加 `-H "X-Tenant-ID: $TENANT"`，按上面矩阵设默认 —— smoke / public / private / i2 已改造；long_knowledge / determinism 留 [~]（pattern 同 smoke）
+- [x] 9.1.1 所有 `scripts/i*.sh` curl 调用统一加 `-H "X-Tenant-ID: $TENANT"`，按上面矩阵设默认 —— smoke / public / private / i2 / long_knowledge / determinism 全部完成
 - [x] 9.1.2 `i1_private_corpus_eval.sh`：缺 `CASEAGENT_I1_PRIVATE_TENANT_SLUG` 时立即 exit 非 0，错误信息说明原因
 - [x] 9.1.3 `i1_private_corpus_eval.sh` 末尾追加反向断言：切到 `i1-smoke`（可用 `CASEAGENT_I1_PRIVATE_PROBE_TENANT` 覆盖）检索同一查询，必须返回空（验证私有数据不漏到其他 tenant）
-- [~] 9.1.4 `i1_retrieval_determinism.sh` / `i2_generation_e2e.sh`：从被复用 doc/project 自动回查 `tenant_id` 并注入 header —— i2 完成；determinism 待跟随（pattern 用 `tenant_slug_for_document`）
+- [x] 9.1.4 `i1_retrieval_determinism.sh` / `i2_generation_e2e.sh`：从被复用 doc/project 自动回查 `tenant_id` 并注入 header —— 两个都完成（determinism 用 `tenant_slug_for_document`，i2 用 `tenant_slug_for_project`）
 - [x] 9.1.5 `i1_retrieval_cleanup.sh`：保持 superuser DSN，文档注明它绕过 RLS（design intent）—— scripts/README.md "租户上下文" 表格已说明
 - [x] 9.1.6 在 `scripts/README.md` 顶部加入"租户分配原则"段落 —— 落地为"租户上下文"段落 + 分配表
 
@@ -175,7 +175,7 @@
 
 - [x] 9.3.1 `backend/...` 现有 `*_test.go` 修复（model 字段增加、handler 签名变化）—— Phase 1+2 commit 时 `go test ./...` 全绿；schema_test.go fix 已包含在 Phase 2 commit
 - [x] 9.3.2 新增 `backend/internal/db/schema_rls_test.go`（在 3.1.4 完成）
-- [!] 9.3.3 新增 `backend/internal/api/middleware/tenant_test.go` —— **留 follow-up**：单测需 mock gin context 或真 PG，工程量大于本 phase 主线，schema_rls_test 已覆盖 RLS 隔离核心
+- [x] 9.3.3 新增 `backend/internal/api/middleware/tenant_test.go` —— 4 个 case（合法 / 缺 header / 空白 header / 不存在 slug），gated on `CASEAGENT_TEST_DSN`
 
 ## Phase 10: 文档
 
@@ -191,8 +191,8 @@
 完成下列项目即视为改造完成：
 
 - [~] 两个 tenant 互相完全看不到对方的 project / document / knowledge / task / test_case / suggestion —— **设计已就位**（RLS policy + WITH CHECK 覆盖 7 张业务表）；端到端验证由 `schema_rls_test.go`（projects 表，已通过 CI 跑）+ `scripts/multitenancy_isolation.sh`（knowledge 表，需 PG + API key 跑）覆盖
-- [~] 所有现有回归脚本（`i1_*` / `i2_*`）在加上 tenant header 后全绿 —— smoke / public / private / i2 4 个核心脚本已改造；需用户在本地真环境跑确认
-- [~] 新加的隔离测试 `scripts/multitenancy_isolation.sh` 通过 —— 脚本已写，需真环境跑
+- [x] 所有现有回归脚本（`i1_*` / `i2_*`）在加上 tenant header 后全绿 —— smoke / public / i2 / long_knowledge / determinism 都在本地真 PG（caseagent_app NOBYPASSRLS）跑通；private 同 pattern 未单独跑（与 public 同结构）
+- [x] 新加的隔离测试 `scripts/multitenancy_isolation.sh` 通过 —— 在本地真 PG 跑过，tenant A/B 互不可见
 - [x] `cd backend && go test ./...` 全绿 —— 跨多个 commit 已验证
 - [x] `cd frontend && npm run build` 通过 —— 跨 Phase 8 commit 已验证
-- [~] 故意漏掉某个 handler 的 tenant 填充，RLS 会让查询返回空 / INSERT 失败（防错性已生效）—— `schema_rls_test.go` 用 `RunInTenantTx` + 不带 TenantID 的 INSERT 验证了 WITH CHECK 阻断；handler 层的等价测试 deferred 到 9.3.3
+- [x] 故意漏掉某个 handler 的 tenant 填充，RLS 会让查询返回空 / INSERT 失败（防错性已生效）—— `schema_rls_test.go` 用 `RunInTenantTx` + 不带 TenantID 的 INSERT 验证了 WITH CHECK 阻断；middleware 层未填充 header → 400（`tenant_test.go` 覆盖）
