@@ -37,7 +37,7 @@ func (h *Handler) CreateTenant(c *gin.Context) {
 }
 
 func (h *Handler) ListTenants(c *gin.Context) {
-	var tenants []models.Tenant
+	tenants := []models.Tenant{}
 	if err := DBFromContext(c).NewSelect().Model(&tenants).Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
