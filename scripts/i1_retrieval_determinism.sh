@@ -21,6 +21,9 @@ BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
 REPORT="${CASEAGENT_I1_DETERMINISM_REPORT:-$ROOT_DIR/.dev/i1_retrieval_determinism.md}"
 TOP_K="${CASEAGENT_I1_DETERMINISM_TOP_K:-5}"
 
+# shellcheck source=lib/tenant.sh
+. "$ROOT_DIR/scripts/lib/tenant.sh"
+
 DOC_QUERIES=(
     "Dubbo 双注册原理 服务提供者 注册中心"
     "模块发布器 服务发布全过程 ServiceConfig"
@@ -67,6 +70,14 @@ if [ -z "$DOC_IDS_CSV" ]; then
 fi
 DOC_IDS_JSON="$(printf '%s\n' "$DOC_IDS_CSV" | tr ',' '\n' | jq -R 'tonumber' | jq -s '.')"
 
+FIRST_DOC_ID="$(printf '%s' "$DOC_IDS_CSV" | cut -d',' -f1)"
+TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-$(tenant_slug_for_document "$FIRST_DOC_ID")}"
+if [ -z "$TENANT_SLUG" ]; then
+    echo "could not resolve tenant for document $FIRST_DOC_ID (override via CASEAGENT_TENANT_SLUG)" >&2
+    exit 1
+fi
+echo "[i1-determinism] tenant=$TENANT_SLUG document_ids=$DOC_IDS_CSV"
+
 # fingerprint extracts the deterministic-relevant subset of an /retrieval/* response.
 # Floating-point scores from the embedding API can micro-jitter between calls
 # (same input -> slightly different vector); the DoD targets *hit set + ordering*,
@@ -91,6 +102,7 @@ run_doc_query() {
         '{query: $q, top_k: $top_k, document_ids: $document_ids}')"
     curl --fail --silent --show-error --noproxy '*' \
         -H 'Content-Type: application/json' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X POST -d "$payload" \
         "$BASE_URL/retrieval/documents"
 }
@@ -102,6 +114,7 @@ run_kb_query() {
         '{query: $q, top_k: $top_k}')"
     curl --fail --silent --show-error --noproxy '*' \
         -H 'Content-Type: application/json' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X POST -d "$payload" \
         "$BASE_URL/retrieval/knowledge"
 }

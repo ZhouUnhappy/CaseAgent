@@ -4,6 +4,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-i1-long-knowledge}"
+
+# shellcheck source=lib/tenant.sh
+. "$ROOT_DIR/scripts/lib/tenant.sh"
+
 POLL_ATTEMPTS="${CASEAGENT_POLL_ATTEMPTS:-30}"
 POLL_INTERVAL_SECONDS="${CASEAGENT_POLL_INTERVAL_SECONDS:-2}"
 LONG_KNOWLEDGE_FIXTURE="${CASEAGENT_I1_LONG_KNOWLEDGE_FIXTURE:-$ROOT_DIR/testdata/i1/long_knowledge.md}"
@@ -46,6 +51,7 @@ post_json() {
 
     curl --fail --silent --show-error --noproxy '*' \
         -H 'Content-Type: application/json' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
         -X POST \
         -d "$payload" \
         "$BASE_URL$path"
@@ -54,7 +60,9 @@ post_json() {
 get_json() {
     local path="$1"
 
-    curl --fail --silent --show-error --noproxy '*' "$BASE_URL$path"
+    curl --fail --silent --show-error --noproxy '*' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
+        "$BASE_URL$path"
 }
 
 cleanup_legacy() {
@@ -191,6 +199,9 @@ main() {
 
     log "base url: $BASE_URL"
     log "run token: $RUN_TOKEN"
+    log "tenant: $TENANT_SLUG"
+
+    ensure_tenant "$TENANT_SLUG" "I1 long knowledge"
 
     cleanup_legacy
     upload_long_knowledge
