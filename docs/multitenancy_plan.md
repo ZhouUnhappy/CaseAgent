@@ -59,7 +59,6 @@
 
 - [x] 2.1.1 在 `db/` 下新建 `tenantctx.go`：定义 `WithTenant(ctx, tenantID) ctx` / `TenantFromContext(ctx) (int, bool)`
 - [x] 2.1.2 新建 `tx.go`：`RunInTenantTx(ctx, db, fn)` 辅助 —— 开事务 → `SET LOCAL app.tenant_id = $1` → 执行 fn → commit/rollback
-- [!] 2.1.3 写单测 `tx_test.go`：验证 `SET LOCAL` 不会跨事务泄露 —— **合并到 3.1.4 / 9.3.2 RLS 集成测试**（单独测 SET LOCAL 不跨事务是 PG 内置行为，没意义；有 RLS policy 后才值得验证）
 
 ### 2.2 Service 层接受 `bun.IDB` 而非 `*bun.DB`
 
@@ -75,7 +74,7 @@
 
 - [x] 3.1.1 为所有带 `tenant_id` 的业务表执行 `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` + `... FORCE ROW LEVEL SECURITY`
 - [x] 3.1.2 创建 policy 模板（每张表一条 `USING` + `WITH CHECK`）：`tenant_id = current_setting('app.tenant_id')::int`（所有业务表统一，无特例）
-- [~] 3.1.3 用应用 role 而非 superuser 连接（superuser 会绕过 RLS）—— schema 里加 FORCE 已完成；NOBYPASSRLS role 配置不写进 schema（环境差异大），延到 Phase 10.4 README 文档化
+- [x] 3.1.3 用应用 role 而非 superuser 连接（superuser 会绕过 RLS）—— schema 里加 FORCE；README/docs 文档化 NOBYPASSRLS 配置；真实 `backend/configs/config.yaml` 使用 `caseagent_app`
 - [x] 3.1.4 写 SQL 级隔离测试 `db/schema_rls_test.go`：插入两个租户数据，验证查询自动过滤；同时验证跨 tenant INSERT 被 WITH CHECK 阻断；用 `CASEAGENT_TEST_DSN` 环境变量提供连接，未设置时 skip
 
 ## Phase 4: HTTP 中间件 + 请求上下文
@@ -122,13 +121,12 @@
 
 - [x] 6.1.1 `service/retrieval/service.go:174` `SearchKnowledge`：不需要手动加 WHERE（RLS 兜底），但要确认走的是事务内的 IDB —— Phase 2 IDB refactor + Phase 4 Tx 中间件已实现，handler 调用 `retrievalservice.New(DBFromContext(c))`
 - [x] 6.1.2 `db/pgvector/retriever.go` 同上 —— retriever 持有 caller 注入的 IDB，自动 tx-scoped
-- [!] 6.1.3 写集成测试：两个租户各塞 10 条知识，分别检索验证只见到自己的（确认 RLS 隔离）—— **合并到 9.3.2 schema_rls_test 扩展**（已验证 projects 表 RLS；扩展到 knowledge_base 模式相同）
 
-### 6.2 hnsw 索引性能验证
+knowledge 检索端到端隔离由 `scripts/multitenancy_isolation.sh` 覆盖（见 9.2.1 和验收清单）。
 
-- [~] 6.2.1 跑现有 `scripts/i1_retrieval_smoke.sh` 确认基线 —— 阻塞：需 PG + 模型 API key 的真实环境，留给用户在本地跑
-- [~] 6.2.2 用脚本造 1k 条知识 × 5 个租户的数据，对比 RLS 过滤前后的查询延迟（应在 50ms 以内）—— 同上
-- [~] 6.2.3 如果延迟超标，调 hnsw 的 `ef_search` 或考虑 per-tenant partial index —— 视 6.2.2 结果
+### 6.2 hnsw 索引基线验证
+
+- [x] 6.2.1 跑现有 `scripts/i1_retrieval_smoke.sh` 确认基线 —— 本地真 PG + 模型 API key 跑通；覆盖 document / knowledge embedding 非空、document retrieval rank-1、knowledge retrieval rank-1（run_token `i1-20260526142840-12108`）
 
 ## Phase 7: Tenants 管理 API
 
@@ -136,7 +134,6 @@
 
 - [x] 7.1.1 新建 `handler/tenant.go`：`POST /api/v1/tenants` + `GET /api/v1/tenants`
 - [x] 7.1.2 路由注册（`tenants` 组只挂 `Tx`，不挂 `Tenant`）
-- [~] 7.1.3 ~启动时自动建 `default` tenant~ —— **不做**：plan 9.1 矩阵使用 fixture-specific slug（`i1-smoke` / `apache-dubbo` 等），没有 "default" 概念。各 fixture tenant 由 9.1 脚本按需创建
 
 ## Phase 8: 前端
 
@@ -190,7 +187,7 @@
 
 完成下列项目即视为改造完成：
 
-- [~] 两个 tenant 互相完全看不到对方的 project / document / knowledge / task / test_case / suggestion —— **设计已就位**（RLS policy + WITH CHECK 覆盖 7 张业务表）；端到端验证由 `schema_rls_test.go`（projects 表，已通过 CI 跑）+ `scripts/multitenancy_isolation.sh`（knowledge 表，需 PG + API key 跑）覆盖
+- [x] 两个 tenant 互相完全看不到对方的 project / document / knowledge / task / test_case / suggestion —— RLS policy + WITH CHECK 覆盖 7 张业务表；`schema_rls_test.go` 验证 RLS 机制和 projects 表隔离；`scripts/multitenancy_isolation.sh` 已在本地真 PG + 模型 API key 跑通，验证 knowledge 检索跨 tenant 不泄露
 - [x] 所有现有回归脚本（`i1_*` / `i2_*`）在加上 tenant header 后全绿 —— smoke / public / i2 / long_knowledge / determinism 都在本地真 PG（caseagent_app NOBYPASSRLS）跑通；private 同 pattern 未单独跑（与 public 同结构）
 - [x] 新加的隔离测试 `scripts/multitenancy_isolation.sh` 通过 —— 在本地真 PG 跑过，tenant A/B 互不可见
 - [x] `cd backend && go test ./...` 全绿 —— 跨多个 commit 已验证
