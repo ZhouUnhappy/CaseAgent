@@ -32,7 +32,22 @@
 
 ---
 
-## P2：失败信号驱动的 suggestion
+## P2：Adopted 与 knowledge_id 反向绑定
+
+**价值**：suggestion adopted 后只是状态变了，没记录到底创建/更新了哪条 `knowledge_base.id`。后续这条 suggestion 复发时无法追溯第一次是谁采纳的、改了什么。
+
+**Trigger**：发现"建议反复出现"，或审计场景需要回答"这条知识当时是因为哪个需求加的"。
+
+**DoD**：
+
+- Schema：`knowledge_update_suggestions` 新增 `resolved_knowledge_id` FK（migration `00X_*.sql`），指向同 tenant 下的 `knowledge_base.id`。
+- 后端：`PUT /api/v1/knowledge-suggestions/:id` 在 `status` 改为 `adopted` 时接受可选的 `resolved_knowledge_id`，校验存在性和 tenant 归属。
+- 前端：`KnowledgeBase.vue` 新建/编辑成功的回调里，如果 url 带了 `from_suggestion_id`，调一次 PUT 回填 `resolved_knowledge_id`；同时把 `KnowledgeSuggestions.vue` 跳转链接改为带 `from_suggestion_id`。
+- 验证：跑一遍"建议 → 跳预填 → 保存知识 → 回到建议列表"，确认该建议状态为 `adopted` 且 `resolved_knowledge_id` 已填。
+
+---
+
+## P3：失败信号驱动的 suggestion
 
 **价值**：当前 suggestion 只在 analyze 阶段产出。生成阶段的失败信号其实更值钱——子 Agent 全部失败、DeepAgent fallback 也失败、RefineCases 解析失败，都暗示「上下文不够」。
 
@@ -40,7 +55,7 @@
 
 **DoD**：
 
-- Schema：`knowledge_update_suggestions.candidate_type` 新增枚举值 `context_gap`（`backend/migrations/001_init.sql` + 模型枚举同步）。
+- 业务类型：`knowledge_update_suggestions.candidate_type` 允许值新增 `context_gap`（当前 DB 列是 `VARCHAR(32)`；同步 handler/service/frontend 的类型判断，不引入数据库 enum）。
 - 注入点：`backend/internal/service/agent/service.go` 的 fallback / parse 失败分支，调用 suggestion service 写入一条 `candidate_type='context_gap'` 的 suggestion，`source_snippets` 含当前 task 的 `affected_products` / `affected_modules` / 命中的 `knowledge_id` 列表 + 失败阶段标识。
 - 前端：`frontend/src/views/KnowledgeSuggestions.vue` 列表能展示 `context_gap` 类型（与 `product` / `module` 区分颜色或图标），「采纳」对该类型禁用或改为"补充关联知识"流程。
 - 单测：`backend/internal/service/agent/` 新增覆盖"agent 失败 → suggestion 写入"路径。
@@ -48,7 +63,7 @@
 
 ---
 
-## P3：跨任务聚合 + 优先级
+## P4：跨任务聚合 + 优先级
 
 **价值**：现在按 `(task_id, candidate_type, candidate_name)` 去重，同一个 `Billing-Core` 在 5 个 task 里都未被覆盖会产生 5 条独立 suggestion。审核体验差。
 
@@ -56,15 +71,15 @@
 
 **DoD**：
 
-- Schema：拆出 `knowledge_update_suggestions`（一级聚合，主键 `candidate_type + candidate_name`，含 `total_frequency` / `task_count` / `first_seen_at` / `last_seen_at`）+ `knowledge_update_suggestion_occurrences`（子表，记每次出现的 `source_task_id` / `source_snippets`）。
-- 迁移：写 `002_*.sql`，把现有行按 `(candidate_type, candidate_name)` 聚合到主表，detail 写入子表。**保留旧字段为只读视图**直到前端切换完成。
-- 服务层：`backend/internal/service/suggestion/service.go` 写入逻辑改为"先 upsert 主表，再 append 子表"。
+- Schema：新建聚合表 `knowledge_update_suggestion_groups`（主键按 tenant + `candidate_type + candidate_name`，含 `total_frequency` / `task_count` / `first_seen_at` / `last_seen_at`）和明细表 `knowledge_update_suggestion_occurrences`（记每次出现的 `source_task_id` / `source_snippets`）。现有 `knowledge_update_suggestions` 保留为兼容视图或过渡表，直到前端切换完成。
+- 迁移：写 `002_*.sql`，把现有行按 `(tenant_id, candidate_type, candidate_name)` 聚合到 groups，detail 写入 occurrences。
+- 服务层：`backend/internal/service/suggestion/service.go` 写入逻辑改为"先 upsert group，再 append occurrence"。
 - 前端：`KnowledgeSuggestions.vue` 列表按 `task_count desc, total_frequency desc` 排序；点开某行展示 occurrences 子表。
 - 验证：`scripts/i2_generation_e2e.sh` 多跑几次，确认主表行数稳定、子表行数累加。
 
 ---
 
-## P4：中文实体识别
+## P5：中文实体识别
 
 **价值**：现有 MVP 只识别英文标识符。需求里"对账核心"、"发票核对模块"这类中文复合词识别不出来——国内项目这类命名占大头。
 
@@ -79,7 +94,7 @@
 
 ---
 
-## P5：采纳 → 自动生成知识条目骨架
+## P6：采纳 → 自动生成知识条目骨架
 
 **价值**：当前「采纳」只跳到知识库页预填 `type+name`，content 要用户从空白手写。如果有 30 条 pending suggestion 要逐条写，体验差。
 
@@ -88,24 +103,9 @@
 **DoD**：
 
 - 后端：新增 `POST /api/v1/knowledge-suggestions/:id/draft`，调用 chat model 把 `source_snippets` 喂给一个新 prompt，按知识库文档规范模板（概述 / 相关服务 / 工作原理…）生成 markdown 草稿；返回 `{draft_content}`。
-- 前端：`KnowledgeSuggestions.vue` 「采纳」按钮先调上述 API（带 loading 态），再跳 `/knowledge?type=&name=&content=<base64>`；`KnowledgeBase.vue` onMounted 解析 `content` 预填表单。
+- 前端：`KnowledgeSuggestions.vue` 「采纳」按钮先调上述 API（带 loading 态），把 `draft_content` 写入 `sessionStorage`（key 包含 suggestion id），再跳 `/knowledge?type=&name=&from_suggestion_id=<id>`；`KnowledgeBase.vue` onMounted 读取并清理该草稿。不要把完整 markdown 草稿塞进 URL query。
 - Prompt 规范：在 `backend/internal/agent/` 下新增独立 agent 或在现有 agent 中加 prompt 文件；prompt 必须明确"草稿待人工校对"以避免 hallucination 直接落库。
 - 单测：覆盖"无 source_snippets 时不调用 LLM、返回空 draft"的边界。
-
----
-
-## P6：Adopted 与 knowledge_id 反向绑定
-
-**价值**：suggestion adopted 后只是状态变了，没记录到底创建/更新了哪条 `knowledge_base.id`。后续这条 suggestion 复发时无法追溯第一次是谁采纳的、改了什么。
-
-**Trigger**：发现"建议反复出现"，或审计场景需要回答"这条知识当时是因为哪个需求加的"。
-
-**DoD**：
-
-- Schema：`knowledge_update_suggestions` 新增 `resolved_knowledge_id` FK（migration `00X_*.sql`）。
-- 后端：`PUT /api/v1/knowledge-suggestions/:id` 在 `status` 改为 `adopted` 时接受可选的 `resolved_knowledge_id`，校验存在性。
-- 前端：`KnowledgeBase.vue` 新建/编辑成功的回调里，如果 url 带了 `from_suggestion_id`，调一次 PUT 回填 `resolved_knowledge_id`；同时把 `KnowledgeSuggestions.vue` 跳转链接改为带 `from_suggestion_id`。
-- 验证：跑一遍"建议 → 跳预填 → 保存知识 → 回到建议列表"，确认该建议状态为 `adopted` 且 `resolved_knowledge_id` 已填。
 
 ---
 

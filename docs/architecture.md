@@ -134,9 +134,9 @@
 
 **当前能力边界**（写在这里防止误以为是 bug）：
 
-- 候选只识别**英文标识符**（kebab-case / snake_case 复合 token、2–6 字符全大写缩写、CamelCase 至少两段）。中文实体识别留作后续扩展，见 [`docs/future_work.md`](future_work.md) 第 1 项。
-- 触发只在 analyze 阶段；生成阶段失败信号目前不入 suggestion，见 [`docs/future_work.md`](future_work.md) 第 2 项。
-- 采纳时只跳转预填 `type+name`，不生成内容草稿，见 [`docs/future_work.md`](future_work.md) 第 4 项。
+- 候选只识别**英文标识符**（kebab-case / snake_case 复合 token、2–6 字符全大写缩写、CamelCase 至少两段）。中文实体识别留作后续扩展，见 [`docs/future_work.md`](future_work.md) 的 `P5：中文实体识别`。
+- 触发只在 analyze 阶段；生成阶段失败信号目前不入 suggestion，见 [`docs/future_work.md`](future_work.md) 的 `P3：失败信号驱动的 suggestion`。
+- 采纳时只跳转预填 `type+name`，不生成内容草稿，见 [`docs/future_work.md`](future_work.md) 的 `P6：采纳 → 自动生成知识条目骨架`。
 
 **单元测试**：`backend/internal/service/suggestion/extractor_test.go`
 
