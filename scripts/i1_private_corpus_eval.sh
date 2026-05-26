@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
 
 # Private corpora must NOT silently fall into a default tenant. The operator
-# has to name the tenant explicitly (see docs/multitenancy_plan.md §9.1).
+# has to name the tenant explicitly (see scripts/README.md).
 TENANT_SLUG="${CASEAGENT_I1_PRIVATE_TENANT_SLUG:-}"
 if [ -z "$TENANT_SLUG" ]; then
     echo "CASEAGENT_I1_PRIVATE_TENANT_SLUG is required (e.g. export CASEAGENT_I1_PRIVATE_TENANT_SLUG=internal-corp)" >&2

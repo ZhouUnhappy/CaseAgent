@@ -1,6 +1,6 @@
 # I2 生成闭环端到端样例（I2-T4）
 
-支撑 `IMPLEMENTATION_PLAN.md` 中 I2-T4 的 DoD：从「选定需求 → 分析影响范围 → 审核影响范围 → 生成 → 入库 → 查询 → 修改/提交」全流程，落地一份可对照执行的样例文档。
+支撑生成闭环端到端验证：从「选定需求 → 分析影响范围 → 审核影响范围 → 生成 → 入库 → 查询 → 修改/提交」全流程，落地一份可对照执行的样例文档。
 本文与 `i2_retrieval_context.md` 互补：
 
 - `i2_retrieval_context.md` 关注检索/上下文构造与生成质量的**断言式回归**（I2-T1/T2/T3）。
@@ -12,6 +12,14 @@
 - PostgreSQL 启用 `pgvector` 扩展；`model.chat` 与 `model.embedding` 在 `backend/configs/config.yaml` 中可用。
 - 本地命令：`curl`、`jq`、`psql`（数据库验证用）；`CASEAGENT_PSQL_DSN` 指向同一库。
 - 已通过 `scripts/i1_public_corpus_eval.sh` 或私有语料把至少 1 个 `documents.status = 'completed'` 与若干 `knowledge_base.status = 'completed'` 写入库。
+
+以下 cURL 示例默认先设置租户上下文：
+
+```bash
+export BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+export TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-i1-smoke}"
+TENANT_HEADER=(-H "X-Tenant-ID: $TENANT_SLUG")
+```
 
 ## 主流程涉及的 API
 
@@ -40,6 +48,7 @@
 
 ```bash
 curl -fsS -X POST "$BASE_URL/projects" \
+    "${TENANT_HEADER[@]}" \
     -H 'Content-Type: application/json' \
     -d '{"name":"I2-T4 demo","description":"end-to-end walkthrough"}'
 ```
@@ -62,6 +71,7 @@ curl -fsS -X POST "$BASE_URL/projects" \
 
 ```bash
 curl -fsS -X POST "$BASE_URL/projects/$PROJECT_ID/documents" \
+    "${TENANT_HEADER[@]}" \
     -F 'name=需求-导出账单V2.md' \
     -F 'type=markdown' \
     -F 'source=upload' \
@@ -71,7 +81,7 @@ curl -fsS -X POST "$BASE_URL/projects/$PROJECT_ID/documents" \
 关键响应：`id`（`DOCUMENT_ID`）、`status: "processing"`。处理为异步：
 
 ```bash
-until [ "$(curl -fsS "$BASE_URL/documents/$DOCUMENT_ID" | jq -r .status)" = "completed" ]; do
+until [ "$(curl -fsS "${TENANT_HEADER[@]}" "$BASE_URL/documents/$DOCUMENT_ID" | jq -r .status)" = "completed" ]; do
     sleep 2
 done
 ```
@@ -94,6 +104,7 @@ SELECT
 
 ```bash
 curl -fsS -X POST "$BASE_URL/knowledge" \
+    "${TENANT_HEADER[@]}" \
     -H 'Content-Type: application/json' \
     -d '{
         "type":"product",
@@ -109,6 +120,7 @@ curl -fsS -X POST "$BASE_URL/knowledge" \
 
 ```bash
 curl -fsS -X POST "$BASE_URL/projects/$PROJECT_ID/tasks" \
+    "${TENANT_HEADER[@]}" \
     -H 'Content-Type: application/json' \
     -d '{"document_ids":['"$DOCUMENT_ID"']}'
 ```
@@ -141,16 +153,17 @@ curl -fsS -X POST "$BASE_URL/projects/$PROJECT_ID/tasks" \
 轮询：
 
 ```bash
-until [ "$(curl -fsS "$BASE_URL/tasks/$TASK_ID" | jq -r .status)" = "awaiting_review" ]; do
+until [ "$(curl -fsS "${TENANT_HEADER[@]}" "$BASE_URL/tasks/$TASK_ID" | jq -r .status)" = "awaiting_review" ]; do
     sleep 2
 done
-curl -fsS "$BASE_URL/tasks/$TASK_ID" | jq '.affected_products, .affected_modules'
+curl -fsS "${TENANT_HEADER[@]}" "$BASE_URL/tasks/$TASK_ID" | jq '.affected_products, .affected_modules'
 ```
 
 ## 步骤 5：审核影响范围
 
 ```bash
 curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/review" \
+    "${TENANT_HEADER[@]}" \
     -H 'Content-Type: application/json' \
     -d '{
         "affected_products":["Billing-Core"],
@@ -163,7 +176,9 @@ curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/review" \
 ## 步骤 6：触发生成
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/generate" -d '{}'
+curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/generate" \
+    "${TENANT_HEADER[@]}" \
+    -d '{}'
 ```
 
 服务端用乐观锁：`UPDATE case_generation_tasks SET status = 'generating' WHERE id = ? AND status = 'ready_to_generate'`，`affected_rows = 0` 时返回 409 `task status has changed, please retry`，避免并发重复触发。
@@ -182,7 +197,7 @@ curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/generate" -d '{}'
 轮询：
 
 ```bash
-until [[ "$(curl -fsS "$BASE_URL/tasks/$TASK_ID" | jq -r .status)" =~ ^(completed|failed)$ ]]; do
+until [[ "$(curl -fsS "${TENANT_HEADER[@]}" "$BASE_URL/tasks/$TASK_ID" | jq -r .status)" =~ ^(completed|failed)$ ]]; do
     sleep 2
 done
 ```
@@ -190,7 +205,7 @@ done
 ## 步骤 7：查询生成结果
 
 ```bash
-curl -fsS "$BASE_URL/tasks/$TASK_ID/cases" \
+curl -fsS "${TENANT_HEADER[@]}" "$BASE_URL/tasks/$TASK_ID/cases" \
     | jq '[.[] | {id, section, status, case_count: (.cases|length),
                   source_doc_ids: (.source_context.document_hits | map(.document_id)),
                   source_kb_ids: .source_context.knowledge_shipped_ids,
@@ -225,6 +240,7 @@ ORDER BY id;
 
 ```bash
 curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/cases/$CASE_ID" \
+    "${TENANT_HEADER[@]}" \
     -H 'Content-Type: application/json' \
     -d '{
         "section":"功能测试",
@@ -253,7 +269,9 @@ curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/cases/$CASE_ID" \
 ## 步骤 9：提交用例
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/cases/$CASE_ID/submit" -d '{}'
+curl -fsS -X PUT "$BASE_URL/tasks/$TASK_ID/cases/$CASE_ID/submit" \
+    "${TENANT_HEADER[@]}" \
+    -d '{}'
 ```
 
 服务端把 `test_cases.status` 从 `draft` 改成 `submitted`，`updated_at` 刷新；响应整行。`approved` 状态保留给后续维护/审核策略使用，本流程不强制推进。
@@ -295,4 +313,3 @@ WHERE id = :task_id AND status = 'failed';
 - 步骤 4–7：由 `scripts/i2_generation_e2e.sh`（task_id=3 / 4 个 section / 37 cases，与 `i2_retrieval_context.md` 样例 2 同源）承担，已在 I2-T3 中跑通；脚本内含 I2-T3 三项断言（无重复标题 / 每条 case 都有 `affected_products`+`affected_modules` / 每行 `test_cases` 都有 `source_context`）。
 - 步骤 1–3 与 步骤 8–9：本文 cURL 样例可直接对照执行；首次走完整流程后，把请求/响应/`UPDATE` 后的 `jsonb_typeof(cases)` 校验结果回填到 `.dev/i2_e2e_generation.md`（gitignored，重跑覆盖）。
 - DB 直查校验：在 task_id=3 上执行 `SELECT id, jsonb_typeof(cases), jsonb_array_length(cases), source_context ? 'document_queries' FROM test_cases WHERE task_id=3 ORDER BY id`，所有 4 行均返回 `array / >0 / t`，证明 I2-T3 修复后的 JSONB 数组形态与 source_context 字段在生成阶段已稳定落库（这一项也是 `scripts/i2_generation_e2e.sh` 退出码隐含验证的内容）。
-

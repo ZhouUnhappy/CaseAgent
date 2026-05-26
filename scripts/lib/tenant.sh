@@ -8,8 +8,7 @@
 #   . "$ROOT_DIR/scripts/lib/tenant.sh"
 #
 # All curl helpers expect TENANT_SLUG to be set before they're called; each
-# script picks its own default per the fixture-to-tenant matrix in
-# docs/multitenancy_plan.md (Phase 9.1).
+# script picks its own default per the tenant table in scripts/README.md.
 
 ensure_tenant() {
     local slug="$1"

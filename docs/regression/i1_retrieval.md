@@ -1,6 +1,6 @@
 # I1 检索回归样例
 
-支撑 `IMPLEMENTATION_PLAN.md` 中 I1-T1 / I1-T2 / I1-T3 的回归证据。
+支撑数据闭环（文档 / 知识库 → 向量化 → 检索）的回归证据。
 每次 `bash scripts/i1_retrieval_smoke.sh` 通过后，在「最近一次实际结果摘要」追加最新一次 `run_token` 与命中详情。
 
 ## 前置环境

@@ -4,7 +4,7 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 
 ## 租户上下文
 
-所有 `i*.sh` 现在要求请求带 `X-Tenant-ID` header（多租户改造后强制；参见 `docs/multitenancy_plan.md` §9.1）。每个脚本顶部用 `TENANT_SLUG` 变量声明默认值：
+所有 `i*.sh` 现在要求请求带 `X-Tenant-ID` header（多租户改造后强制；参见 `docs/multitenancy.md`）。每个脚本顶部用 `TENANT_SLUG` 变量声明默认值：
 
 | 脚本 | 默认 TENANT_SLUG | 备注 |
 |---|---|---|

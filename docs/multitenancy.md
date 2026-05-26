@@ -2,7 +2,7 @@
 
 CaseAgent 的所有业务对象（projects / documents / document_chunks / knowledge_base / case_generation_tasks / test_cases / knowledge_update_suggestions）都强归属于一个 tenant。跨 tenant 数据互不可见，由 PostgreSQL Row-Level Security 在 DB 层兜底强制，应用层即使漏掉 WHERE 也不会泄露。
 
-> 实施计划与决策记录见 [`multitenancy_plan.md`](multitenancy_plan.md)。
+> 本文维护当前多租户架构约束；历史实施过程以 git log 为准。
 
 ## 数据模型
 
@@ -102,7 +102,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 3. **RLS**：schema 末尾追加 `ENABLE / FORCE ROW LEVEL SECURITY` + `DROP POLICY IF EXISTS` + `CREATE POLICY` 三行（复用同一模板）
 4. **handler**：所有 INSERT 路径填 `TenantID: handler.TenantIDFromContext(c)`；service.New 接 `bun.IDB`；异步任务用 `handler.RunAsync`
 5. **测试**：扩展 `db/schema_rls_test.go`（或新建表的隔离测试）证明跨 tenant 不可见
-6. **plan**：在 `multitenancy_plan.md` 的"验收清单"加一条 tenant 不可见的检查
+6. **文档**：更新本文、`scripts/README.md` 和相关回归脚本说明，写清新表的 tenant 归属与验证方式
 
 ## 暂不实现的扩展
 
