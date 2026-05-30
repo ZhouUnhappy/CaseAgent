@@ -121,15 +121,16 @@
 
 ## 四、知识库建议沉淀
 
-**做什么**：分析阶段自动从需求里挖未覆盖的"产品/模块"候选，写入 `knowledge_update_suggestions`；用户也可以在用例审核页手动反馈知识缺失。前端列表支持采纳（跳到知识库页预填，保存后回填 `resolved_knowledge_id`）/ 忽略；长期未处理的 pending 建议会自动过期为 `dismissed_reason='auto_expired'`。
+**做什么**：分析阶段自动从需求里挖未覆盖的"产品/模块"候选，写入 `knowledge_update_suggestions`；用户也可以在用例审核页手动反馈知识缺失。前端列表支持采纳（生成知识条目草稿并跳到知识库页，保存后回填 `resolved_knowledge_id`）/ 忽略；长期未处理的 pending 建议会自动过期为 `dismissed_reason='auto_expired'`。
 
 **关键入口**：
 
 - 表定义：`backend/migrations/001_init.sql`（表 `knowledge_update_suggestions`，含 `source_case_id` / `resolved_knowledge_id` / `dismissed_reason`）
 - 模型：`backend/internal/db/models/knowledge_update_suggestion.go`
 - 候选提取与去重：`backend/internal/service/suggestion/{extractor,service}.go`
+- 知识草稿生成：`backend/internal/agent/knowledge/`、`backend/internal/service/suggestion/draft.go`
 - 生命周期清理：`backend/internal/service/suggestion/cleanup.go`（启动时一次 + 每天一次；阈值见 `backend/configs/config-example.yaml` 的 `suggestion.auto_dismiss_pending_days`）
-- API handler：`backend/internal/api/handler/knowledge_suggestion.go`（`GET/POST/PUT /knowledge-suggestions`）
+- API handler：`backend/internal/api/handler/knowledge_suggestion.go`（`GET/POST/PUT /knowledge-suggestions`、`POST /knowledge-suggestions/:id/draft`）
 - 异步触发：`backend/internal/service/task/service.go` 的 `AnalyzeTask` 末尾 goroutine
 - 前端：`frontend/src/views/TaskDetail.vue`（手动反馈）、`frontend/src/views/KnowledgeSuggestions.vue`、`frontend/src/views/KnowledgeBase.vue`（接收 `?type=&name=&from_suggestion_id=` 或兼容 `?create_type=&create_name=` 预填）
 
@@ -137,9 +138,9 @@
 
 - 候选识别覆盖英文标识符（kebab-case / snake_case 复合 token、2–6 字符全大写缩写、CamelCase 至少两段）和常见中文后缀实体（如 `X模块` / `Y服务` / `Z组件`）。
 - 触发只在 analyze 阶段；生成阶段失败信号目前不入 suggestion，见 [`docs/future_work.md`](future_work.md) 的 `P3：失败信号驱动的 suggestion`。
-- 采纳时只预填 `type+name`，不生成内容草稿，见 [`docs/future_work.md`](future_work.md) 的 `P6：采纳 → 自动生成知识条目骨架`。
+- 采纳时的草稿不会自动落库，仍需人工校对后保存。
 
-**单元测试 / 集成测试**：`backend/internal/service/suggestion/extractor_test.go`、`backend/internal/service/suggestion/service_integration_test.go`
+**单元测试 / 集成测试**：`backend/internal/agent/knowledge/draft_test.go`、`backend/internal/service/suggestion/{extractor,draft}_test.go`、`backend/internal/service/suggestion/service_integration_test.go`
 
 ---
 

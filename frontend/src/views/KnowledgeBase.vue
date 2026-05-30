@@ -6,6 +6,7 @@ import { ElMessageBox } from 'element-plus'
 import StatusTag from '../components/StatusTag.vue'
 import { updateKnowledgeSuggestion } from '../api/knowledgeSuggestions'
 import { useKnowledgeStore } from '../stores/knowledge'
+import { readAndClearSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
 import { notifySuccess } from '../utils/error'
 
 const route = useRoute()
@@ -38,11 +39,13 @@ onMounted(() => {
   const targetType = createType || type
   const targetName = createName || name
   if (targetType && targetName) {
+    const suggestionID = Number(route.query.from_suggestion_id)
+    const draftContent = readAndClearSuggestionDraft(suggestionID)
     editing.value = null
     Object.assign(form, {
       type: targetType === 'product' ? 'product' : 'module',
       name: String(targetName),
-      content: '',
+      content: draftContent,
       metadata: '',
     })
     dialogVisible.value = true

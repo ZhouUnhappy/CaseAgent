@@ -83,7 +83,7 @@ start_dev() {
     print_info "Starting backend..."
     (
         cd "$SCRIPT_DIR/backend"
-        SERVER_PORT="$GO_PORT" go run cmd/server/main.go >"$backend_log" 2>&1
+        nohup env SERVER_PORT="$GO_PORT" go run cmd/server/main.go >"$backend_log" 2>&1 &
     ) &
     print_info "Backend log: $backend_log"
 
@@ -92,7 +92,7 @@ start_dev() {
     print_info "Starting frontend..."
     (
         cd "$SCRIPT_DIR/frontend"
-        npm run dev -- --port "$VITE_PORT" >"$frontend_log" 2>&1
+        nohup npm run dev -- --host 127.0.0.1 --port "$VITE_PORT" >"$frontend_log" 2>&1 &
     ) &
     print_info "Frontend log: $frontend_log"
 

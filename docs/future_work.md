@@ -43,19 +43,6 @@
 - 前端：`KnowledgeSuggestions.vue` 列表按 `task_count desc, total_frequency desc` 排序；点开某行展示 occurrences 子表。
 - 验证：`scripts/i2_generation_e2e.sh` 多跑几次，确认主表行数稳定、子表行数累加。
 
-## P6：采纳 → 自动生成知识条目骨架
-
-**价值**：当前「采纳」只跳到知识库页预填 `type+name`，content 要用户从空白手写。如果有 30 条 pending suggestion 要逐条写，体验差。
-
-**Trigger**：suggestion 数量上来（>20 条/周），且用户反馈"写起来累"。
-
-**DoD**：
-
-- 后端：新增 `POST /api/v1/knowledge-suggestions/:id/draft`，调用 chat model 把 `source_snippets` 喂给一个新 prompt，按知识库文档规范模板（概述 / 相关服务 / 工作原理…）生成 markdown 草稿；返回 `{draft_content}`。
-- 前端：`KnowledgeSuggestions.vue` 「采纳」按钮先调上述 API（带 loading 态），把 `draft_content` 写入 `sessionStorage`（key 包含 suggestion id），再跳 `/knowledge?type=&name=&from_suggestion_id=<id>`；`KnowledgeBase.vue` onMounted 读取并清理该草稿。不要把完整 markdown 草稿塞进 URL query。
-- Prompt 规范：在 `backend/internal/agent/` 下新增独立 agent 或在现有 agent 中加 prompt 文件；prompt 必须明确"草稿待人工校对"以避免 hallucination 直接落库。
-- 单测：覆盖"无 source_snippets 时不调用 LLM、返回空 draft"的边界。
-
 ## 备忘：暂不做的事
 
 - 自动 OCR / 图片识别：README 已声明"输入文档中的图片内容已在正文以文字描述覆盖"。除非这个约定被破坏，否则不引入。

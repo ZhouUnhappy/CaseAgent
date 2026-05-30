@@ -4,11 +4,12 @@ import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import StatusTag from '../components/StatusTag.vue'
 import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
+import { writeSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
 import { notifySuccess } from '../utils/error'
 
 const router = useRouter()
 const store = useKnowledgeSuggestionsStore()
-const { items, loading, saving, statusFilter, showAutoExpired } = storeToRefs(store)
+const { items, loading, saving, draftingId, statusFilter, showAutoExpired } = storeToRefs(store)
 
 onMounted(() => store.fetch().catch(() => {}))
 
@@ -39,16 +40,21 @@ const hiddenAutoExpiredCount = computed(
 )
 
 async function adopt(row) {
-  // 跳转到知识库页，预填 type + name。保存知识条目后再回填 adopted + knowledge id。
-  router.push({
-    name: 'knowledge',
-    query: {
-      create_type: row.candidate_type,
-      create_name: row.candidate_name,
-      from_suggestion_id: row.id,
-    },
-  })
-  notifySuccess('请填写内容并保存，保存后会标记为已采纳')
+  try {
+    const draft = await store.draft(row.id)
+    writeSuggestionDraft(row.id, draft?.draft_content || '')
+    router.push({
+      name: 'knowledge',
+      query: {
+        type: row.candidate_type,
+        name: row.candidate_name,
+        from_suggestion_id: row.id,
+      },
+    })
+    notifySuccess(draft?.draft_content ? '草稿已生成，请校对后保存' : '请填写内容并保存，保存后会标记为已采纳')
+  } catch {
+    /* 错误已弹窗 */
+  }
 }
 
 async function dismiss(row) {
@@ -68,7 +74,7 @@ async function dismiss(row) {
         <h2>知识建议</h2>
         <p class="hint">
           analyze 阶段在需求中识别出但当前知识库未覆盖（retrieval top-1 score &lt; 0.5）的候选词。
-          采纳会跳转到知识库页预填新建对话框；忽略则把候选标记为 dismissed。
+          采纳会生成草稿并跳转到知识库页；忽略则把候选标记为 dismissed。
         </p>
       </div>
       <div class="actions">
@@ -134,7 +140,7 @@ async function dismiss(row) {
       <el-table-column label="操作" width="180" align="center">
         <template #default="{ row }">
           <div v-if="row.status === 'pending'" class="op-buttons">
-            <el-button size="small" type="primary" :loading="saving" @click="adopt(row)">
+            <el-button size="small" type="primary" :loading="draftingId === row.id" @click="adopt(row)">
               采纳
             </el-button>
             <el-button size="small" :loading="saving" @click="dismiss(row)">忽略</el-button>

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import {
   createKnowledgeSuggestion,
+  draftKnowledgeSuggestion,
   listKnowledgeSuggestions,
   updateKnowledgeSuggestion,
 } from '../api/knowledgeSuggestions'
@@ -10,6 +11,7 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
     items: [],
     loading: false,
     saving: false,
+    draftingId: null,
     statusFilter: 'pending',
     showAutoExpired: false,
   }),
@@ -39,6 +41,14 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
         return created
       } finally {
         this.saving = false
+      }
+    },
+    async draft(id) {
+      this.draftingId = id
+      try {
+        return await draftKnowledgeSuggestion(id)
+      } finally {
+        this.draftingId = null
       }
     },
     async setStatus(id, status, resolvedKnowledgeId) {

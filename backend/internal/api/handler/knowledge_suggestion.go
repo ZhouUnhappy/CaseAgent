@@ -118,6 +118,27 @@ func (h *Handler) UpdateKnowledgeSuggestion(c *gin.Context) {
 	c.JSON(http.StatusOK, row)
 }
 
+func (h *Handler) DraftKnowledgeSuggestion(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	result, found, err := suggestionservice.New(DBFromContext(c)).Draft(c, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 func manualSuggestionInput(req createSuggestionRequest) suggestionservice.ManualSuggestionInput {
 	return suggestionservice.ManualSuggestionInput{
 		CandidateType:   strings.TrimSpace(req.CandidateType),

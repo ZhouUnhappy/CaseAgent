@@ -37,9 +37,10 @@ const MaxCandidatesPerTask = 20
 const AutoExpiredDismissedReason = "auto_expired"
 
 type Service struct {
-	db        bun.IDB
-	retrieval *retrievalservice.Service
-	threshold float64
+	db             bun.IDB
+	retrieval      *retrievalservice.Service
+	threshold      float64
+	draftGenerator DraftGenerator
 }
 
 type ManualSuggestionInput struct {
@@ -55,9 +56,10 @@ var ErrInvalidManualSuggestion = errors.New("invalid manual suggestion")
 
 func New(db bun.IDB) *Service {
 	return &Service{
-		db:        db,
-		retrieval: retrievalservice.New(db),
-		threshold: MissingScoreThreshold,
+		db:             db,
+		retrieval:      retrievalservice.New(db),
+		threshold:      MissingScoreThreshold,
+		draftGenerator: draftGeneratorFunc(newConfiguredDraftGenerator),
 	}
 }
 
