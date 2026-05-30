@@ -27,7 +27,7 @@
 - 后端：Golang + Gin + Bun ORM + eino + eino-ext。
 - 数据库：PostgreSQL + pgvector。
 - 模型配置统一走配置文件，并支持环境变量覆盖。
-- chat 当前支持 Ark；embedding 当前支持 Ark / OpenAI-compatible。
+- chat 当前支持 Ark / DeepSeek / OpenAI-compatible；embedding 当前支持 Ark / OpenAI-compatible。
 - embedding 维度通过 `model.embedding.dimensions` 显式配置。
 - 当前工程对 `Qwen3-Embedding-8B` 使用 `2000` 维输出；向量索引使用 `pgvector hnsw`（多租户改造后切换，对带 filter 的 ANN 更友好）。
 - Google Drive 集成通过本地 `gws drive files export` 命令调用，无 Docker 依赖。

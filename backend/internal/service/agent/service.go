@@ -34,9 +34,9 @@ import (
 	"caseagent/internal/agent/failure"
 	"caseagent/internal/agent/functional"
 	"caseagent/internal/agent/ops"
+	"caseagent/internal/ai"
 	"caseagent/internal/config"
 
-	"github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 )
@@ -63,19 +63,7 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	} else {
 		// Initialize chat model from config
 		appCfg := config.Get()
-		if appCfg.Model.Chat.Provider != "ark" {
-			return nil, fmt.Errorf("only ark chat model provider is supported, got: %s", appCfg.Model.Chat.Provider)
-		}
-
-		chatModel, err = ark.NewChatModel(ctx, &ark.ChatModelConfig{
-			APIKey:    appCfg.Model.Chat.APIKey,
-			AccessKey: appCfg.Model.Chat.AccessKey,
-			SecretKey: appCfg.Model.Chat.SecretKey,
-			BaseURL:   appCfg.Model.Chat.BaseURL,
-			Region:    appCfg.Model.Chat.Region,
-			Model:     appCfg.Model.Chat.Model,
-		})
-
+		chatModel, err = ai.NewChatModel(ctx, appCfg.Model.Chat)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize chat model: %w", err)
 		}

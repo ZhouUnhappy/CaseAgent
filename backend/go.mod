@@ -7,6 +7,7 @@ require (
 	github.com/cloudwego/eino-ext/components/embedding/ark v0.1.1
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260415031821-e2fcf1501241
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.66
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.15
 	github.com/gin-gonic/gin v1.12.0
 	github.com/spf13/viper v1.18.2
 	github.com/uptrace/bun v1.2.18
@@ -22,7 +23,6 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.15 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
