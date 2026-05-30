@@ -32,17 +32,16 @@ const filterOptions = [
 const totalPending = computed(() => items.value.filter((s) => s.status === 'pending').length)
 
 async function adopt(row) {
-  // 跳转到知识库页，预填 type + name，由用户补内容点保存
+  // 跳转到知识库页，预填 type + name。保存知识条目后再回填 adopted + knowledge id。
   router.push({
     name: 'knowledge',
-    query: { create_type: row.candidate_type, create_name: row.candidate_name },
+    query: {
+      create_type: row.candidate_type,
+      create_name: row.candidate_name,
+      from_suggestion_id: row.id,
+    },
   })
-  try {
-    await store.setStatus(row.id, 'adopted')
-    notifySuccess(`已标记为已采纳，请在知识库页填写内容后保存`)
-  } catch {
-    /* 错误已弹窗 */
-  }
+  notifySuccess('请填写内容并保存，保存后会标记为已采纳')
 }
 
 async function dismiss(row) {

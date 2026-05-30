@@ -76,6 +76,9 @@ npm run dev
 - `POST /api/v1/knowledge/:id/reprocess` - 重处理知识库
 - `POST /api/v1/projects/:id/tasks` - 创建生成任务
 - `GET /api/v1/tasks/:id/cases` - 获取测试用例
+- `GET /api/v1/knowledge-suggestions` - 列出知识建议
+- `POST /api/v1/knowledge-suggestions` - 从用例手动反馈知识缺失
+- `PUT /api/v1/knowledge-suggestions/:id` - 采纳/忽略知识建议，可回填 `resolved_knowledge_id`
 - `GET /api/v1/maintenance/vector-health` - 查看向量健康状态
 - `POST /api/v1/maintenance/reindex` - 批量重建异常向量
 

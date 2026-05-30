@@ -1,13 +1,15 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import StatusTag from '../components/StatusTag.vue'
+import { updateKnowledgeSuggestion } from '../api/knowledgeSuggestions'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { notifySuccess } from '../utils/error'
 
 const route = useRoute()
+const router = useRouter()
 const store = useKnowledgeStore()
 const { items, loading, saving, typeFilter } = storeToRefs(store)
 
@@ -27,12 +29,19 @@ onMounted(() => {
 
   // Knowledge-suggestion adopt flow: prefill the create dialog from the
   // query string so the operator only needs to fill in content.
-  const { create_type: createType, create_name: createName } = route.query
-  if (createType && createName) {
+  const {
+    create_type: createType,
+    create_name: createName,
+    type,
+    name,
+  } = route.query
+  const targetType = createType || type
+  const targetName = createName || name
+  if (targetType && targetName) {
     editing.value = null
     Object.assign(form, {
-      type: createType === 'product' ? 'product' : 'module',
-      name: String(createName),
+      type: targetType === 'product' ? 'product' : 'module',
+      name: String(targetName),
       content: '',
       metadata: '',
     })
@@ -85,21 +94,36 @@ async function submit() {
   }
   const payload = { type: form.type, name: form.name, content: form.content, metadata }
   try {
+    let saved
     if (editing.value) {
-      await store.update(editing.value.id, {
+      saved = await store.update(editing.value.id, {
         name: payload.name,
         content: payload.content,
         metadata: payload.metadata,
       })
       notifySuccess('知识条目已更新')
     } else {
-      await store.create(payload)
+      saved = await store.create(payload)
       notifySuccess('知识条目已创建，后台正在向量化')
+    }
+    try {
+      await markSourceSuggestionAdopted(saved.id)
+    } catch {
+      /* 知识条目已经保存；关联失败由 api/client.js 弹错，用户可回建议列表重试。 */
     }
     dialogVisible.value = false
   } catch {
     /* api/client.js 已弹错 */
   }
+}
+
+async function markSourceSuggestionAdopted(knowledgeID) {
+  const suggestionID = Number(route.query.from_suggestion_id)
+  if (!suggestionID || !knowledgeID) return
+
+  await updateKnowledgeSuggestion(suggestionID, 'adopted', knowledgeID)
+  await router.replace({ name: 'knowledge', query: {} })
+  notifySuccess('知识建议已关联到新知识条目')
 }
 
 async function reprocess(row) {

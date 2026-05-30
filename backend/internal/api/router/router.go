@@ -50,6 +50,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		biz.POST("/tasks/:id/retry", h.RetryTask)
 
 		biz.GET("/knowledge-suggestions", h.ListKnowledgeSuggestions)
+		biz.POST("/knowledge-suggestions", h.CreateKnowledgeSuggestion)
 		biz.PUT("/knowledge-suggestions/:id", h.UpdateKnowledgeSuggestion)
 
 		knowledge := biz.Group("/knowledge")

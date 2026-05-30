@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS knowledge_update_suggestions (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     source_task_id INTEGER NOT NULL REFERENCES case_generation_tasks(id) ON DELETE CASCADE,
+    source_case_id INTEGER REFERENCES test_cases(id) ON DELETE SET NULL,
+    resolved_knowledge_id INTEGER REFERENCES knowledge_base(id) ON DELETE SET NULL,
     candidate_type VARCHAR(32) NOT NULL, -- 'product' | 'module'
     candidate_name VARCHAR(255) NOT NULL,
     frequency INTEGER NOT NULL DEFAULT 0,
@@ -111,12 +113,20 @@ CREATE TABLE IF NOT EXISTS knowledge_update_suggestions (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE knowledge_update_suggestions
+    ADD COLUMN IF NOT EXISTS source_case_id INTEGER REFERENCES test_cases(id) ON DELETE SET NULL;
+ALTER TABLE knowledge_update_suggestions
+    ADD COLUMN IF NOT EXISTS resolved_knowledge_id INTEGER REFERENCES knowledge_base(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_tenant_id_idx
     ON knowledge_update_suggestions (tenant_id);
 CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_status_idx
     ON knowledge_update_suggestions (status);
 CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_task_idx
     ON knowledge_update_suggestions (source_task_id);
+CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_case_idx
+    ON knowledge_update_suggestions (source_case_id);
+CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_resolved_knowledge_idx
+    ON knowledge_update_suggestions (resolved_knowledge_id);
 
 -- Phase 3: Row-Level Security
 -- All business tables enforce tenant_id = current_setting('app.tenant_id').

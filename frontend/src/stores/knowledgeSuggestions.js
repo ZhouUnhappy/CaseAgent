@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import {
+  createKnowledgeSuggestion,
   listKnowledgeSuggestions,
   updateKnowledgeSuggestion,
 } from '../api/knowledgeSuggestions'
@@ -24,10 +25,22 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
       this.statusFilter = value
       return this.fetch()
     },
-    async setStatus(id, status) {
+    async createManual(payload) {
       this.saving = true
       try {
-        const updated = await updateKnowledgeSuggestion(id, status)
+        const created = await createKnowledgeSuggestion(payload)
+        if (!this.statusFilter || created.status === this.statusFilter) {
+          this.items = [created, ...this.items]
+        }
+        return created
+      } finally {
+        this.saving = false
+      }
+    },
+    async setStatus(id, status, resolvedKnowledgeId) {
+      this.saving = true
+      try {
+        const updated = await updateKnowledgeSuggestion(id, status, resolvedKnowledgeId)
         const idx = this.items.findIndex((s) => s.id === updated.id)
         if (idx >= 0) {
           // 若当前过滤为 pending，状态变更后这行应该消失

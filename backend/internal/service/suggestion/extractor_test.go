@@ -1,7 +1,10 @@
 package suggestion
 
 import (
+	"strings"
 	"testing"
+
+	"caseagent/internal/db/models"
 )
 
 func TestExtractCandidates_EnglishIdentifiers(t *testing.T) {
@@ -31,6 +34,57 @@ Export-PDF 改造后将通过 PDF/A 兼容性校验。
 	for _, c := range got {
 		if c.Name == "ABC" {
 			t.Fatalf("excluded candidate ABC should not appear: %+v", got)
+		}
+	}
+}
+
+func TestExtractCandidates_ChineseSuffixEntities(t *testing.T) {
+	requirements := `
+本次需求涉及对账核心和发票核对模块。
+对账核心需要接入新的核对规则，发票核对模块需要输出差异明细。
+`
+	got := ExtractCandidates(requirements, nil)
+
+	want := map[string]int{
+		"对账核心":   2,
+		"发票核对模块": 2,
+	}
+	for _, c := range got {
+		if expected, ok := want[c.Name]; ok {
+			if c.Frequency != expected {
+				t.Fatalf("candidate %q expected frequency %d, got %d", c.Name, expected, c.Frequency)
+			}
+			delete(want, c.Name)
+		}
+	}
+	if len(want) > 0 {
+		t.Fatalf("missing expected Chinese candidates: %+v; got=%+v", want, got)
+	}
+}
+
+func TestExtractCandidates_ChineseStopPrefixTrim(t *testing.T) {
+	requirements := `
+本次需求涉及对账核心。
+需求涉及对账核心的异常恢复。
+`
+	got := ExtractCandidates(requirements, nil)
+	for _, c := range got {
+		if c.Name == "对账核心" {
+			return
+		}
+		if strings.Contains(c.Name, "需求涉及") {
+			t.Fatalf("candidate should strip generic Chinese prefix, got %+v", got)
+		}
+	}
+	t.Fatalf("expected 对账核心 candidate, got %+v", got)
+}
+
+func TestExtractCandidates_ChineseGenericStopWords(t *testing.T) {
+	requirements := "本模块需要记录日志，本模块需要暴露指标。"
+	got := ExtractCandidates(requirements, nil)
+	for _, c := range got {
+		if c.Name == "本模块" {
+			t.Fatalf("generic Chinese candidate should be filtered: %+v", got)
 		}
 	}
 }
@@ -76,5 +130,23 @@ func TestExtractCandidates_RespectsExcludeNormalization(t *testing.T) {
 		if c.Name == "Billing-Core" {
 			t.Fatalf("normalize-equivalent exclude should match; got %+v", got)
 		}
+	}
+}
+
+func TestValidateManualSuggestionInput(t *testing.T) {
+	valid := ManualSuggestionInput{
+		CandidateType: models.SuggestionCandidateProduct,
+		CandidateName: "Billing-Core",
+		SourceTaskID:  1,
+		SourceCaseID:  2,
+	}
+	if err := ValidateManualSuggestionInput(valid); err != nil {
+		t.Fatalf("valid input returned error: %v", err)
+	}
+
+	invalid := valid
+	invalid.CandidateType = "context_gap"
+	if err := ValidateManualSuggestionInput(invalid); err == nil {
+		t.Fatal("expected candidate_type validation error")
 	}
 }

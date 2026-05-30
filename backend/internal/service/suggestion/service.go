@@ -11,6 +11,9 @@ package suggestion
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -36,6 +39,17 @@ type Service struct {
 	retrieval *retrievalservice.Service
 	threshold float64
 }
+
+type ManualSuggestionInput struct {
+	CandidateType   string
+	CandidateName   string
+	SourceTaskID    int
+	SourceCaseID    int
+	SourceCaseTitle string
+	Note            string
+}
+
+var ErrInvalidManualSuggestion = errors.New("invalid manual suggestion")
 
 func New(db bun.IDB) *Service {
 	return &Service{
@@ -153,6 +167,90 @@ func (s *Service) upsert(ctx context.Context, taskID int, candidateType string, 
 	return err
 }
 
+func ValidateManualSuggestionInput(input ManualSuggestionInput) error {
+	if input.SourceTaskID <= 0 {
+		return fmt.Errorf("%w: source_task_id is required", ErrInvalidManualSuggestion)
+	}
+	if input.SourceCaseID <= 0 {
+		return fmt.Errorf("%w: source_case_id is required", ErrInvalidManualSuggestion)
+	}
+	if input.CandidateType != models.SuggestionCandidateProduct && input.CandidateType != models.SuggestionCandidateModule {
+		return fmt.Errorf("%w: candidate_type must be product or module", ErrInvalidManualSuggestion)
+	}
+	if strings.TrimSpace(input.CandidateName) == "" {
+		return fmt.Errorf("%w: candidate_name is required", ErrInvalidManualSuggestion)
+	}
+	return nil
+}
+
+func (s *Service) CreateManual(ctx context.Context, input ManualSuggestionInput) (*models.KnowledgeUpdateSuggestion, error) {
+	if err := ValidateManualSuggestionInput(input); err != nil {
+		return nil, err
+	}
+
+	tc := &models.TestCase{}
+	if err := s.db.NewSelect().Model(tc).
+		Where("id = ?", input.SourceCaseID).
+		Where("task_id = ?", input.SourceTaskID).
+		Scan(ctx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: source_case_id does not belong to source_task_id", ErrInvalidManualSuggestion)
+		}
+		return nil, err
+	}
+
+	title := strings.TrimSpace(input.SourceCaseTitle)
+	if title == "" {
+		title = firstCaseTitle(tc)
+	}
+	if title == "" {
+		title = tc.Section
+	}
+
+	snippets := []map[string]any{{
+		"type":    "case",
+		"case_id": input.SourceCaseID,
+		"title":   title,
+	}}
+	if note := strings.TrimSpace(input.Note); note != "" {
+		snippets = append(snippets, map[string]any{
+			"type": "note",
+			"text": note,
+		})
+	}
+
+	tenantID, _ := db.TenantFromContext(ctx)
+	now := time.Now()
+	sourceCaseID := input.SourceCaseID
+	row := &models.KnowledgeUpdateSuggestion{
+		TenantID:       tenantID,
+		SourceTaskID:   input.SourceTaskID,
+		SourceCaseID:   &sourceCaseID,
+		CandidateType:  input.CandidateType,
+		CandidateName:  strings.TrimSpace(input.CandidateName),
+		Frequency:      1,
+		SourceSnippets: snippets,
+		Status:         models.SuggestionStatusPending,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if _, err := s.db.NewInsert().Model(row).Exec(ctx); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+func firstCaseTitle(tc *models.TestCase) string {
+	for _, item := range tc.Cases {
+		if title, ok := item["title"].(string); ok {
+			if title = strings.TrimSpace(title); title != "" {
+				return title
+			}
+		}
+	}
+	return ""
+}
+
 // List 列出 suggestion；status 为空时返回全部。按 created_at 倒序。
 func (s *Service) List(ctx context.Context, status string) ([]models.KnowledgeUpdateSuggestion, error) {
 	rows := []models.KnowledgeUpdateSuggestion{}
@@ -168,9 +266,26 @@ func (s *Service) List(ctx context.Context, status string) ([]models.KnowledgeUp
 
 // SetStatus 把 suggestion 从 pending 推进到 adopted/dismissed。其它转换返回
 // false（调用方决定 409 还是 silent）。
-func (s *Service) SetStatus(ctx context.Context, id int, target string) (*models.KnowledgeUpdateSuggestion, bool, error) {
+func (s *Service) SetStatus(ctx context.Context, id int, target string, resolvedKnowledgeID *int) (*models.KnowledgeUpdateSuggestion, bool, error) {
 	if target != models.SuggestionStatusAdopted && target != models.SuggestionStatusDismissed {
 		return nil, false, nil
+	}
+	if target == models.SuggestionStatusDismissed && resolvedKnowledgeID != nil {
+		return nil, false, fmt.Errorf("%w: resolved_knowledge_id is only valid for adopted suggestions", ErrInvalidManualSuggestion)
+	}
+	if target == models.SuggestionStatusAdopted && resolvedKnowledgeID != nil {
+		if *resolvedKnowledgeID <= 0 {
+			return nil, false, fmt.Errorf("%w: resolved_knowledge_id must be positive", ErrInvalidManualSuggestion)
+		}
+		count, err := s.db.NewSelect().Model((*models.KnowledgeBase)(nil)).
+			Where("id = ?", *resolvedKnowledgeID).
+			Count(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		if count == 0 {
+			return nil, false, fmt.Errorf("%w: resolved_knowledge_id not found", ErrInvalidManualSuggestion)
+		}
 	}
 
 	row := &models.KnowledgeUpdateSuggestion{}
@@ -182,12 +297,15 @@ func (s *Service) SetStatus(ctx context.Context, id int, target string) (*models
 	}
 
 	row.Status = target
+	row.ResolvedKnowledgeID = resolvedKnowledgeID
 	row.UpdatedAt = time.Now()
-	if _, err := s.db.NewUpdate().Model(row).
+	q := s.db.NewUpdate().Model(row).
 		Set("status = ?", row.Status).
-		Set("updated_at = ?", row.UpdatedAt).
-		Where("id = ?", id).
-		Exec(ctx); err != nil {
+		Set("updated_at = ?", row.UpdatedAt)
+	if target == models.SuggestionStatusAdopted {
+		q = q.Set("resolved_knowledge_id = ?", row.ResolvedKnowledgeID)
+	}
+	if _, err := q.Where("id = ?", id).Exec(ctx); err != nil {
 		return nil, false, err
 	}
 	return row, true, nil

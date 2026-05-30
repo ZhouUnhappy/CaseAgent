@@ -7,6 +7,7 @@ import StatusTag from '../components/StatusTag.vue'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
+import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
 import { notifySuccess } from '../utils/error'
 
 const route = useRoute()
@@ -16,6 +17,7 @@ const taskId = computed(() => Number(route.params.id))
 const tasksStore = useTasksStore()
 const casesStore = useTestCasesStore()
 const knowledgeStore = useKnowledgeStore()
+const suggestionStore = useKnowledgeSuggestionsStore()
 
 const { current: task } = storeToRefs(tasksStore)
 const { items: cases, loading: casesLoading, saving: casesSaving } = storeToRefs(casesStore)
@@ -28,6 +30,15 @@ const retrying = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
+const feedbackVisible = ref(false)
+const feedbackForm = reactive({
+  candidate_type: 'module',
+  candidate_name: '',
+  source_case_id: 0,
+  source_task_id: 0,
+  source_case_title: '',
+  note: '',
+})
 
 const productOptions = computed(() =>
   knowledge.value.filter((k) => k.type === 'product').map((k) => k.name),
@@ -189,6 +200,41 @@ async function submitSection(section) {
     /* 错误已弹窗 */
   }
 }
+
+function openKnowledgeFeedback(section, row) {
+  const moduleName = (row.affected_modules || [])[0] || ''
+  const productName = (row.affected_products || [])[0] || ''
+  Object.assign(feedbackForm, {
+    candidate_type: moduleName ? 'module' : 'product',
+    candidate_name: moduleName || productName || '',
+    source_case_id: section.id,
+    source_task_id: taskId.value,
+    source_case_title: row.title || section.section || '',
+    note: '',
+  })
+  feedbackVisible.value = true
+}
+
+async function submitKnowledgeFeedback() {
+  if (!feedbackForm.candidate_name.trim()) {
+    ElMessageBox.alert('请输入候选名称')
+    return
+  }
+  try {
+    await suggestionStore.createManual({
+      candidate_type: feedbackForm.candidate_type,
+      candidate_name: feedbackForm.candidate_name.trim(),
+      source_case_id: feedbackForm.source_case_id,
+      source_task_id: feedbackForm.source_task_id,
+      source_case_title: feedbackForm.source_case_title,
+      note: feedbackForm.note.trim(),
+    })
+    feedbackVisible.value = false
+    notifySuccess('知识缺失反馈已提交')
+  } catch {
+    /* 错误已弹窗 */
+  }
+}
 </script>
 
 <template>
@@ -338,6 +384,13 @@ async function submitSection(section) {
             <el-table-column label="步骤数" width="90">
               <template #default="{ row }">{{ (row.custom_steps_separated || []).length }}</template>
             </el-table-column>
+            <el-table-column label="反馈" width="120" align="center">
+              <template #default="{ row }">
+                <el-button size="small" @click="openKnowledgeFeedback(section, row)">
+                  知识缺失
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
 
           <details v-if="section.source_context" class="source-ctx">
@@ -371,6 +424,45 @@ async function submitSection(section) {
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="casesSaving" @click="saveEditor">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="feedbackVisible"
+      title="反馈知识缺失"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="类型">
+          <el-radio-group v-model="feedbackForm.candidate_type">
+            <el-radio value="product">product</el-radio>
+            <el-radio value="module">module</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="候选名称">
+          <el-input v-model="feedbackForm.candidate_name" maxlength="120" show-word-limit />
+        </el-form-item>
+        <el-form-item label="来源用例">
+          <el-input v-model="feedbackForm.source_case_title" disabled />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="feedbackForm.note"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="feedbackVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="suggestionStore.saving"
+          @click="submitKnowledgeFeedback"
+        >提交</el-button>
       </template>
     </el-dialog>
   </section>
