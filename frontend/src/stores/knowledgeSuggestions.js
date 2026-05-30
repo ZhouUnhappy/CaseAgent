@@ -11,6 +11,7 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
     loading: false,
     saving: false,
     statusFilter: 'pending',
+    showAutoExpired: false,
   }),
   actions: {
     async fetch() {
@@ -24,6 +25,9 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
     setStatusFilter(value) {
       this.statusFilter = value
       return this.fetch()
+    },
+    setShowAutoExpired(value) {
+      this.showAutoExpired = value
     },
     async createManual(payload) {
       this.saving = true

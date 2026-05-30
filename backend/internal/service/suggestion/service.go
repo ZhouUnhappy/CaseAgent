@@ -34,6 +34,8 @@ const MissingScoreThreshold = 0.5
 // 大的需求文档把表淹没。
 const MaxCandidatesPerTask = 20
 
+const AutoExpiredDismissedReason = "auto_expired"
+
 type Service struct {
 	db        bun.IDB
 	retrieval *retrievalservice.Service
@@ -298,9 +300,11 @@ func (s *Service) SetStatus(ctx context.Context, id int, target string, resolved
 
 	row.Status = target
 	row.ResolvedKnowledgeID = resolvedKnowledgeID
+	row.DismissedReason = nil
 	row.UpdatedAt = time.Now()
 	q := s.db.NewUpdate().Model(row).
 		Set("status = ?", row.Status).
+		Set("dismissed_reason = ?", nil).
 		Set("updated_at = ?", row.UpdatedAt)
 	if target == models.SuggestionStatusAdopted {
 		q = q.Set("resolved_knowledge_id = ?", row.ResolvedKnowledgeID)
@@ -309,4 +313,25 @@ func (s *Service) SetStatus(ctx context.Context, id int, target string, resolved
 		return nil, false, err
 	}
 	return row, true, nil
+}
+
+func (s *Service) DismissExpiredPending(ctx context.Context, maxAge time.Duration) (int64, error) {
+	if maxAge <= 0 {
+		return 0, nil
+	}
+
+	now := time.Now()
+	result, err := s.db.NewUpdate().
+		Model((*models.KnowledgeUpdateSuggestion)(nil)).
+		Set("status = ?", models.SuggestionStatusDismissed).
+		Set("dismissed_reason = ?", AutoExpiredDismissedReason).
+		Set("updated_at = ?", now).
+		Where("status = ?", models.SuggestionStatusPending).
+		Where("created_at < ?", now.Add(-maxAge)).
+		Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return affected, nil
 }

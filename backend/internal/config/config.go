@@ -8,10 +8,11 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Model    ModelConfig    `mapstructure:"model"`
-	GWS      GWSConfig      `mapstructure:"gws"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Model      ModelConfig      `mapstructure:"model"`
+	Suggestion SuggestionConfig `mapstructure:"suggestion"`
+	GWS        GWSConfig        `mapstructure:"gws"`
 }
 
 type ServerConfig struct {
@@ -59,12 +60,17 @@ type GWSConfig struct {
 	Command string `mapstructure:"command"`
 }
 
+type SuggestionConfig struct {
+	AutoDismissPendingDays int `mapstructure:"auto_dismiss_pending_days"`
+}
+
 var cfg *Config
 
 func Load(configPath string) error {
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("yaml")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetDefault("suggestion.auto_dismiss_pending_days", 30)
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {

@@ -8,7 +8,7 @@ import { notifySuccess } from '../utils/error'
 
 const router = useRouter()
 const store = useKnowledgeSuggestionsStore()
-const { items, loading, saving, statusFilter } = storeToRefs(store)
+const { items, loading, saving, statusFilter, showAutoExpired } = storeToRefs(store)
 
 onMounted(() => store.fetch().catch(() => {}))
 
@@ -30,6 +30,13 @@ const filterOptions = [
 ]
 
 const totalPending = computed(() => items.value.filter((s) => s.status === 'pending').length)
+const visibleItems = computed(() => {
+  if (showAutoExpired.value) return items.value
+  return items.value.filter((s) => s.dismissed_reason !== 'auto_expired')
+})
+const hiddenAutoExpiredCount = computed(
+  () => items.value.length - visibleItems.value.length,
+)
 
 async function adopt(row) {
   // 跳转到知识库页，预填 type + name。保存知识条目后再回填 adopted + knowledge id。
@@ -75,6 +82,10 @@ async function dismiss(row) {
             :value="opt.value"
           >{{ opt.label }}</el-radio-button>
         </el-radio-group>
+        <el-checkbox
+          :model-value="showAutoExpired"
+          @change="(v) => store.setShowAutoExpired(v)"
+        >显示自动过期</el-checkbox>
         <el-button @click="store.fetch()" :loading="loading">刷新</el-button>
       </div>
     </header>
@@ -82,8 +93,11 @@ async function dismiss(row) {
     <p v-if="statusFilter === 'pending'" class="muted small">
       当前待处理：{{ totalPending }} 条
     </p>
+    <p v-else-if="hiddenAutoExpiredCount > 0" class="muted small">
+      已隐藏自动过期：{{ hiddenAutoExpiredCount }} 条
+    </p>
 
-    <el-table :data="items" v-loading="loading" stripe>
+    <el-table :data="visibleItems" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column label="类型" width="100">
         <template #default="{ row }">
@@ -105,6 +119,14 @@ async function dismiss(row) {
       </el-table-column>
       <el-table-column label="状态" width="120">
         <template #default="{ row }"><StatusTag :status="row.status" /></template>
+      </el-table-column>
+      <el-table-column label="忽略原因" width="120">
+        <template #default="{ row }">
+          <el-tag v-if="row.dismissed_reason === 'auto_expired'" size="small" type="info">
+            auto_expired
+          </el-tag>
+          <span v-else class="muted">-</span>
+        </template>
       </el-table-column>
       <el-table-column label="发现时间" width="180">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>

@@ -8,17 +8,20 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"caseagent/internal/api/handler"
 	"caseagent/internal/api/router"
 	"caseagent/internal/config"
 	"caseagent/internal/db"
 	"caseagent/internal/logging"
+	suggestionservice "caseagent/internal/service/suggestion"
 )
 
 func main() {
 	logging.Init()
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	if err := config.Load("configs/config.yaml"); err != nil {
 		slog.Error("failed to load config", "error", err)
@@ -32,6 +35,9 @@ func main() {
 	defer db.Close()
 
 	slog.Info("database initialized")
+	if days := config.Get().Suggestion.AutoDismissPendingDays; days > 0 {
+		suggestionservice.StartExpiredPendingCleanup(ctx, db.DB, time.Duration(days)*24*time.Hour, 24*time.Hour)
+	}
 
 	h := handler.New(db.DB)
 	r := router.SetupRouter(h)
@@ -54,12 +60,12 @@ func main() {
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	<-ctx.Done()
 
 	slog.Info("server shutting down")
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 		os.Exit(1)
 	}

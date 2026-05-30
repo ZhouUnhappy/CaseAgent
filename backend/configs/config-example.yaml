@@ -30,6 +30,9 @@ model:
     base_url: https://ark.cn-beijing.volces.com/api/v3
     region: cn-beijing
 
+suggestion:
+  auto_dismiss_pending_days: 30
+
 gws:
   enabled: true
   command: gws

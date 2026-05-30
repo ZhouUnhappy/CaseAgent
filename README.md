@@ -79,6 +79,7 @@ npm run dev
 - `GET /api/v1/knowledge-suggestions` - 列出知识建议
 - `POST /api/v1/knowledge-suggestions` - 从用例手动反馈知识缺失
 - `PUT /api/v1/knowledge-suggestions/:id` - 采纳/忽略知识建议，可回填 `resolved_knowledge_id`
+- pending 知识建议会按 `suggestion.auto_dismiss_pending_days` 自动过期为 `dismissed`
 - `GET /api/v1/maintenance/vector-health` - 查看向量健康状态
 - `POST /api/v1/maintenance/reindex` - 批量重建异常向量
 

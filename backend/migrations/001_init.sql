@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS knowledge_update_suggestions (
     frequency INTEGER NOT NULL DEFAULT 0,
     source_snippets JSONB,
     status VARCHAR(32) NOT NULL DEFAULT 'pending', -- 'pending' | 'adopted' | 'dismissed'
+    dismissed_reason VARCHAR(64),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -117,6 +118,8 @@ ALTER TABLE knowledge_update_suggestions
     ADD COLUMN IF NOT EXISTS source_case_id INTEGER REFERENCES test_cases(id) ON DELETE SET NULL;
 ALTER TABLE knowledge_update_suggestions
     ADD COLUMN IF NOT EXISTS resolved_knowledge_id INTEGER REFERENCES knowledge_base(id) ON DELETE SET NULL;
+ALTER TABLE knowledge_update_suggestions
+    ADD COLUMN IF NOT EXISTS dismissed_reason VARCHAR(64);
 CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_tenant_id_idx
     ON knowledge_update_suggestions (tenant_id);
 CREATE INDEX IF NOT EXISTS knowledge_update_suggestions_status_idx

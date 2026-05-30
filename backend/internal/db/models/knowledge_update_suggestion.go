@@ -27,6 +27,7 @@ type KnowledgeUpdateSuggestion struct {
 	Frequency           int              `bun:"frequency,notnull,default:0" json:"frequency"`
 	SourceSnippets      []map[string]any `bun:"source_snippets,type:jsonb" json:"source_snippets"`
 	Status              string           `bun:"status,nullzero,default:'pending'" json:"status"`
+	DismissedReason     *string          `bun:"dismissed_reason" json:"dismissed_reason,omitempty"`
 	CreatedAt           time.Time        `bun:"created_at,nullzero,default:current_timestamp" json:"created_at"`
 	UpdatedAt           time.Time        `bun:"updated_at,nullzero,default:current_timestamp" json:"updated_at"`
 }

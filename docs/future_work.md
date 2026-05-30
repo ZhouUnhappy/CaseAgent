@@ -56,23 +56,6 @@
 - Prompt 规范：在 `backend/internal/agent/` 下新增独立 agent 或在现有 agent 中加 prompt 文件；prompt 必须明确"草稿待人工校对"以避免 hallucination 直接落库。
 - 单测：覆盖"无 source_snippets 时不调用 LLM、返回空 draft"的边界。
 
----
-
-## P7：生命周期清理
-
-**价值**：pending 状态会一直堆积，没人理就成了背景噪声。
-
-**Trigger**：上线 1 个月后回头看 pending 是否在堆积（>200 条且最旧 >30 天）。
-
-**DoD**：
-
-- 后端：在 `backend/internal/service/suggestion/` 新增定时任务（启动时一次 + 每天一次），把 `created_at < now() - 30 days` 且 `status='pending'` 的行 update 为 `status='dismissed'`，附 `dismissed_reason='auto_expired'`（schema 加 `dismissed_reason` 字段）。
-- 前端：列表过滤器默认隐藏 `dismissed_reason='auto_expired'`；保留切换显示选项。
-- 配置：阈值（30 天）走 `backend/configs/config-example.yaml`，可环境变量覆盖。
-- 验证：手工把某行 `created_at` 改老，重启后端，确认该行被自动 dismiss。
-
----
-
 ## 备忘：暂不做的事
 
 - 自动 OCR / 图片识别：README 已声明"输入文档中的图片内容已在正文以文字描述覆盖"。除非这个约定被破坏，否则不引入。
