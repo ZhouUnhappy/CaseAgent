@@ -71,7 +71,7 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 	)
 
 	taskID := task.ID
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
 			slog.Error("task analyze failed", "task_id", taskID, "error", err)
 			return err
@@ -184,7 +184,7 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 
 	tenantID, _ := TenantIDFromContext(c)
 	taskID := task.ID
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		if err := taskservice.New(tx).GenerateCases(ctx, taskID); err != nil {
 			slog.Error("task generate failed", "task_id", taskID, "error", err)
 			return err
@@ -232,7 +232,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	if rerunAnalyze {
 		tenantID, _ := TenantIDFromContext(c)
 		taskID := task.ID
-		RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 			if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
 				slog.Error("task retry analyze failed", "task_id", taskID, "error", err)
 				return err

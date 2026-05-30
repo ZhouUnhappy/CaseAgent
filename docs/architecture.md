@@ -131,7 +131,7 @@
 - 知识草稿生成：`backend/internal/agent/knowledge/`、`backend/internal/service/suggestion/draft.go`
 - 生命周期清理：`backend/internal/service/suggestion/cleanup.go`（启动时一次 + 每天一次；阈值见 `backend/configs/config-example.yaml` 的 `suggestion.auto_dismiss_pending_days`）
 - API handler：`backend/internal/api/handler/knowledge_suggestion.go`（`GET/POST/PUT /knowledge-suggestions`、`POST /knowledge-suggestions/:id/draft`）
-- 异步触发：`backend/internal/service/task/service.go` 的 `AnalyzeTask` 末尾 goroutine
+- 异步触发：`backend/internal/api/handler/task.go` 在请求事务提交后触发 `AnalyzeTask`；`AnalyzeTask` 末尾同步记录 suggestion（best-effort，不阻断 analyze）
 - 前端：`frontend/src/views/TaskDetail.vue`（手动反馈）、`frontend/src/views/KnowledgeSuggestions.vue`、`frontend/src/views/KnowledgeBase.vue`（接收 `?type=&name=&from_suggestion_id=` 或兼容 `?create_type=&create_name=` 预填）
 
 **当前能力边界**（写在这里防止误以为是 bug）：

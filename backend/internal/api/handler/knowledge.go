@@ -52,7 +52,7 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 
 	slog.Info("knowledge create accepted", "knowledge_id", kb.ID, "type", kb.Type, "name", kb.Name)
 
-	h.processKnowledgeAsync(tenantID, kb.ID, req.Content)
+	h.processKnowledgeAsync(c, tenantID, kb.ID, req.Content)
 
 	c.JSON(http.StatusCreated, kb)
 }
@@ -127,7 +127,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 
 	if needsReprocess {
 		tenantID, _ := TenantIDFromContext(c)
-		h.processKnowledgeAsync(tenantID, kb.ID, kb.Content)
+		h.processKnowledgeAsync(c, tenantID, kb.ID, kb.Content)
 	}
 
 	slog.Info("knowledge update", "knowledge_id", kb.ID, "name", kb.Name, "reprocess", needsReprocess)
@@ -162,7 +162,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 
 	tenantID, _ := TenantIDFromContext(c)
 	kbID := kb.ID
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		kbService, err := knowledge.New(ctx, tx)
 		if err != nil {
 			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
@@ -190,8 +190,8 @@ func (h *Handler) DeleteKnowledge(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
-func (h *Handler) processKnowledgeAsync(tenantID int, kbID int, content string) {
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+func (h *Handler) processKnowledgeAsync(c *gin.Context, tenantID int, kbID int, content string) {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		kbService, err := knowledge.New(ctx, tx)
 		if err != nil {
 			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)

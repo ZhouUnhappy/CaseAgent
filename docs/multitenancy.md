@@ -61,7 +61,7 @@ COMMIT (or ROLLBACK)
   - `db.RunInTenantTx(ctx, db, fn)` — 开 tx + 注入 SET LOCAL
   - `handler.DBFromContext(c) bun.IDB` — handler 拿到 tx-scoped 连接
   - `handler.TenantIDFromContext(c) (int, bool)` — handler 拿到 tenant id（写 INSERT 时填字段）
-  - `handler.RunAsync(h.DB, tenantID, fn)` — 异步任务（请求结束后的 background 处理）必须用它单独开 tx，不能复用请求事务
+  - `handler.RunAsyncAfterCommit(c, h.DB, tenantID, fn)` — 请求提交后的异步任务必须用它单独开 tx，不能复用请求事务；它会等当前请求事务 commit 后再启动后台 goroutine，避免读不到刚插入/更新的行
 
 - Caveat：gin 在 `c.JSON` 时已经把 response flush 给 client；我们的 tx commit 发生在 handler 返回之后。如果 commit 失败，client 已经看到 success status。日志会记录，但无法回滚 response。验证阶段够用；生产化要换成 buffered ResponseWriter。
 
@@ -100,7 +100,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 1. **schema**：列 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + btree index
 2. **model**：Go struct 加 `TenantID int \`bun:"tenant_id,notnull" json:"tenant_id"\`` + 在 `db/models/all.go` 和 `db/db.go` 的 model 注册列表加入
 3. **RLS**：schema 末尾追加 `ENABLE / FORCE ROW LEVEL SECURITY` + `DROP POLICY IF EXISTS` + `CREATE POLICY` 三行（复用同一模板）
-4. **handler**：所有 INSERT 路径填 `TenantID: handler.TenantIDFromContext(c)`；service.New 接 `bun.IDB`；异步任务用 `handler.RunAsync`
+4. **handler**：所有 INSERT 路径填 `TenantID: handler.TenantIDFromContext(c)`；service.New 接 `bun.IDB`；异步任务用 `handler.RunAsyncAfterCommit`
 5. **测试**：扩展 `db/schema_rls_test.go`（或新建表的隔离测试）证明跨 tenant 不可见
 6. **文档**：更新本文、`scripts/README.md` 和相关回归脚本说明，写清新表的 tenant 归属与验证方式
 

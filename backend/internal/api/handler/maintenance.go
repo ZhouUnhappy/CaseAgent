@@ -47,7 +47,7 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 	}
 
 	tenantID, _ := TenantIDFromContext(c)
-	h.runRepairPlan(tenantID, plan)
+	h.runRepairPlan(c, tenantID, plan)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"queued_documents":  len(plan.DocumentIDs),
@@ -57,11 +57,11 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 	})
 }
 
-func (h *Handler) runRepairPlan(tenantID int, plan *maintenanceservice.RepairPlan) {
+func (h *Handler) runRepairPlan(c *gin.Context, tenantID int, plan *maintenanceservice.RepairPlan) {
 	documentIDs := append([]int(nil), plan.DocumentIDs...)
 	knowledgeIDs := append([]int(nil), plan.KnowledgeIDs...)
 
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		if len(documentIDs) > 0 {
 			docService, err := documentservice.New(ctx, tx)
 			if err != nil {

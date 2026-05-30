@@ -88,7 +88,7 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 	docID := document.ID
 	docContent := content
 	gwsFileID := req.FileID
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		docService, err := documentservice.New(ctx, tx)
 		if err != nil {
 			slog.Error("document service init failed", "document_id", docID, "error", err)
@@ -166,7 +166,7 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 
 	tenantID, _ := TenantIDFromContext(c)
 	docID := document.ID
-	RunAsync(h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		docService, err := documentservice.New(ctx, tx)
 		if err != nil {
 			slog.Error("document service init failed", "document_id", docID, "error", err)

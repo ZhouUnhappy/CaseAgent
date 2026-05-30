@@ -24,6 +24,9 @@ import (
 // validation-phase project; production would need a buffered ResponseWriter.
 func Tx(bunDB *bun.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var afterCommitHooks []func()
+		c.Set(afterCommitHooksKey, &afterCommitHooks)
+
 		runHandler := func(ctx context.Context, tx bun.Tx) error {
 			c.Set("db", tx)
 			c.Request = c.Request.WithContext(ctx)
@@ -43,8 +46,36 @@ func Tx(bunDB *bun.DB) gin.HandlerFunc {
 		}
 		if err != nil && !errors.Is(err, errAbortTx) {
 			slog.Warn("request tx error", "path", c.Request.URL.Path, "error", err)
+			return
+		}
+		if err == nil {
+			for _, hook := range afterCommitHooks {
+				hook()
+			}
 		}
 	}
 }
 
 var errAbortTx = errors.New("handler returned error status, rolling back tx")
+
+const afterCommitHooksKey = "after_commit_hooks"
+
+// AfterCommit queues work to run only after the request transaction commits.
+// It is meant for background jobs that read rows inserted or updated by the
+// request handler.
+func AfterCommit(c *gin.Context, hook func()) {
+	if hook == nil {
+		return
+	}
+	value, ok := c.Get(afterCommitHooksKey)
+	if !ok {
+		hook()
+		return
+	}
+	hooks, ok := value.(*[]func())
+	if !ok {
+		hook()
+		return
+	}
+	*hooks = append(*hooks, hook)
+}
