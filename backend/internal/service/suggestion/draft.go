@@ -31,26 +31,43 @@ func (f draftGeneratorFunc) GenerateDraft(ctx context.Context, input agentknowle
 }
 
 func (s *Service) Draft(ctx context.Context, id int) (*DraftResult, bool, error) {
-	row := &models.KnowledgeUpdateSuggestion{}
-	if err := s.db.NewSelect().Model(row).Where("id = ?", id).Scan(ctx); err != nil {
+	group := &models.KnowledgeUpdateSuggestionGroup{}
+	if err := s.db.NewSelect().Model(group).Where("id = ?", id).Scan(ctx); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
 		}
 		return nil, false, err
 	}
 
-	draft, err := DraftFromSuggestion(ctx, row, s.draftGenerator)
+	occurrences := []models.KnowledgeUpdateSuggestionOccurrence{}
+	if err := s.db.NewSelect().
+		Model(&occurrences).
+		Where("group_id = ?", group.ID).
+		OrderExpr("created_at DESC").
+		OrderExpr("id DESC").
+		Scan(ctx); err != nil {
+		return nil, true, err
+	}
+
+	draft, err := DraftFromSuggestion(ctx, group, occurrences, s.draftGenerator)
 	if err != nil {
 		return nil, true, err
 	}
 	return &DraftResult{DraftContent: draft}, true, nil
 }
 
-func DraftFromSuggestion(ctx context.Context, row *models.KnowledgeUpdateSuggestion, generator DraftGenerator) (string, error) {
-	if row == nil {
-		return "", fmt.Errorf("suggestion is required")
+func DraftFromSuggestion(
+	ctx context.Context,
+	group *models.KnowledgeUpdateSuggestionGroup,
+	occurrences []models.KnowledgeUpdateSuggestionOccurrence,
+	generator DraftGenerator,
+) (string, error) {
+	if group == nil {
+		return "", fmt.Errorf("suggestion group is required")
 	}
-	if len(row.SourceSnippets) == 0 {
+
+	snippets := flattenOccurrenceSnippets(occurrences)
+	if len(snippets) == 0 {
 		return "", nil
 	}
 	if generator == nil {
@@ -58,10 +75,33 @@ func DraftFromSuggestion(ctx context.Context, row *models.KnowledgeUpdateSuggest
 	}
 
 	return generator.GenerateDraft(ctx, agentknowledge.DraftInput{
-		CandidateType:  row.CandidateType,
-		CandidateName:  row.CandidateName,
-		SourceSnippets: row.SourceSnippets,
+		CandidateType:  group.CandidateType,
+		CandidateName:  group.CandidateName,
+		SourceSnippets: snippets,
 	})
+}
+
+func flattenOccurrenceSnippets(occurrences []models.KnowledgeUpdateSuggestionOccurrence) []map[string]any {
+	total := 0
+	for _, occurrence := range occurrences {
+		total += len(occurrence.SourceSnippets)
+	}
+	snippets := make([]map[string]any, 0, total)
+	for _, occurrence := range occurrences {
+		for _, snippet := range occurrence.SourceSnippets {
+			item := make(map[string]any, len(snippet)+3)
+			for key, value := range snippet {
+				item[key] = value
+			}
+			item["source_task_id"] = occurrence.SourceTaskID
+			if occurrence.SourceCaseID != nil {
+				item["source_case_id"] = *occurrence.SourceCaseID
+			}
+			item["frequency"] = occurrence.Frequency
+			snippets = append(snippets, item)
+		}
+	}
+	return snippets
 }
 
 func newConfiguredDraftGenerator(ctx context.Context) (DraftGenerator, error) {

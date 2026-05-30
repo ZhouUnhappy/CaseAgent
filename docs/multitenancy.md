@@ -1,6 +1,6 @@
 # 多租户架构
 
-CaseAgent 的所有业务对象（projects / documents / document_chunks / knowledge_base / case_generation_tasks / test_cases / knowledge_update_suggestions）都强归属于一个 tenant。跨 tenant 数据互不可见，由 PostgreSQL Row-Level Security 在 DB 层兜底强制，应用层即使漏掉 WHERE 也不会泄露。
+CaseAgent 的所有业务对象（projects / documents / document_chunks / knowledge_base / case_generation_tasks / test_cases / knowledge_update_suggestion_groups / knowledge_update_suggestion_occurrences）都强归属于一个 tenant。跨 tenant 数据互不可见，由 PostgreSQL Row-Level Security 在 DB 层兜底强制，应用层即使漏掉 WHERE 也不会泄露。
 
 > 本文维护当前多租户架构约束；历史实施过程以 git log 为准。
 
@@ -15,11 +15,11 @@ tenants
   └─ btree index on tenant_id
 ```
 
-`tenants` 表本身不启用 RLS —— 它是元数据，由 `/api/v1/tenants` 端点公开 list/create。其他 7 张业务表全部启用 `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`。
+`tenants` 表本身不启用 RLS —— 它是元数据，由 `/api/v1/tenants` 端点公开 list/create。其他 8 张业务表全部启用 `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`。
 
 ## RLS Policy 模板
 
-每张业务表挂同一条 policy（schema 文件 `001_init.sql` 末尾统一定义）：
+每张业务表挂同一条 policy（schema 文件在建表迁移中定义）：
 
 ```sql
 ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;

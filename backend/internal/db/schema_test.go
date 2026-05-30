@@ -6,10 +6,23 @@ import (
 )
 
 func TestLoadSchemaSQL(t *testing.T) {
-	schema, err := loadSchemaSQL()
+	files, err := schemaFilePaths()
 	if err != nil {
-		t.Fatalf("loadSchemaSQL() returned error: %v", err)
+		t.Fatalf("schemaFilePaths() returned error: %v", err)
 	}
+	if len(files) < 2 {
+		t.Fatalf("expected at least 2 schema files, got %d", len(files))
+	}
+
+	var schemas []string
+	for _, file := range files {
+		schema, err := loadSchemaSQL(file)
+		if err != nil {
+			t.Fatalf("loadSchemaSQL(%q) returned error: %v", file, err)
+		}
+		schemas = append(schemas, schema)
+	}
+	schema := strings.Join(schemas, "\n")
 
 	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS tenants") {
 		t.Fatalf("expected tenants table definition in schema, got: %s", schema)
@@ -22,5 +35,11 @@ func TestLoadSchemaSQL(t *testing.T) {
 	}
 	if !strings.Contains(schema, "tenant_id INTEGER NOT NULL REFERENCES tenants(id)") {
 		t.Fatalf("expected tenant_id columns referencing tenants(id) in schema, got: %s", schema)
+	}
+	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS knowledge_update_suggestion_groups") {
+		t.Fatalf("expected suggestion group table definition in schema, got: %s", schema)
+	}
+	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS knowledge_update_suggestion_occurrences") {
+		t.Fatalf("expected suggestion occurrence table definition in schema, got: %s", schema)
 	}
 }

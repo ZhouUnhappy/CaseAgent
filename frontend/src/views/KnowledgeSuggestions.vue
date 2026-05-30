@@ -23,6 +23,23 @@ function snippetText(snippet) {
   return snippet.text || JSON.stringify(snippet)
 }
 
+function rowOccurrences(row) {
+  return Array.isArray(row.occurrences) ? row.occurrences : []
+}
+
+function rowTotalFrequency(row) {
+  return row.total_frequency ?? row.frequency ?? 0
+}
+
+function occurrenceSnippets(occurrence) {
+  return Array.isArray(occurrence?.source_snippets) ? occurrence.source_snippets : []
+}
+
+function occurrenceKey(occurrence, idx) {
+  const base = occurrence.id || `${occurrence.source_task_id}-${occurrence.source_case_id || 'task'}`
+  return `${base}-${idx}`
+}
+
 const filterOptions = [
   { value: 'pending', label: '待处理' },
   { value: 'adopted', label: '已采纳' },
@@ -73,8 +90,7 @@ async function dismiss(row) {
       <div>
         <h2>知识建议</h2>
         <p class="hint">
-          analyze 阶段在需求中识别出但当前知识库未覆盖（retrieval top-1 score &lt; 0.5）的候选词。
-          采纳会生成草稿并跳转到知识库页；忽略则把候选标记为 dismissed。
+          按候选聚合，优先处理跨任务反复出现的知识缺口。
         </p>
       </div>
       <div class="actions">
@@ -113,14 +129,18 @@ async function dismiss(row) {
         </template>
       </el-table-column>
       <el-table-column prop="candidate_name" label="候选名称" min-width="180" show-overflow-tooltip />
-      <el-table-column label="频次" width="80">
-        <template #default="{ row }">{{ row.frequency }}</template>
+      <el-table-column label="任务数" width="90">
+        <template #default="{ row }">{{ row.task_count || 0 }}</template>
       </el-table-column>
-      <el-table-column label="来源 task" width="120">
+      <el-table-column label="总频次" width="90">
+        <template #default="{ row }">{{ rowTotalFrequency(row) }}</template>
+      </el-table-column>
+      <el-table-column label="最新来源" width="120">
         <template #default="{ row }">
-          <router-link :to="{ name: 'task-detail', params: { id: row.source_task_id } }">
+          <router-link v-if="row.source_task_id" :to="{ name: 'task-detail', params: { id: row.source_task_id } }">
             #{{ row.source_task_id }}
           </router-link>
+          <span v-else class="muted">-</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="120">
@@ -134,8 +154,8 @@ async function dismiss(row) {
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="发现时间" width="180">
-        <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+      <el-table-column label="最后发现" width="180">
+        <template #default="{ row }">{{ formatDate(row.last_seen_at || row.updated_at || row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="180" align="center">
         <template #default="{ row }">
@@ -150,11 +170,50 @@ async function dismiss(row) {
       </el-table-column>
       <el-table-column type="expand" width="50">
         <template #default="{ row }">
-          <div class="snippet-list">
-            <strong>上下文片段：</strong>
-            <ul v-if="(row.source_snippets || []).length">
-              <li v-for="(s, idx) in row.source_snippets" :key="idx">{{ snippetText(s) }}</li>
-            </ul>
+          <div class="occurrence-panel">
+            <div class="occurrence-header">
+              <strong>出现明细</strong>
+              <span class="muted small">{{ rowOccurrences(row).length }} 条</span>
+            </div>
+            <el-table
+              v-if="rowOccurrences(row).length"
+              :data="rowOccurrences(row)"
+              size="small"
+              border
+            >
+              <el-table-column label="Task" width="110">
+                <template #default="{ row: occurrence }">
+                  <router-link :to="{ name: 'task-detail', params: { id: occurrence.source_task_id } }">
+                    #{{ occurrence.source_task_id }}
+                  </router-link>
+                </template>
+              </el-table-column>
+              <el-table-column label="Case" width="100">
+                <template #default="{ row: occurrence }">
+                  <span v-if="occurrence.source_case_id">#{{ occurrence.source_case_id }}</span>
+                  <span v-else class="muted">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="频次" width="80">
+                <template #default="{ row: occurrence }">{{ occurrence.frequency || 0 }}</template>
+              </el-table-column>
+              <el-table-column label="时间" width="180">
+                <template #default="{ row: occurrence }">{{ formatDate(occurrence.created_at) }}</template>
+              </el-table-column>
+              <el-table-column label="上下文">
+                <template #default="{ row: occurrence }">
+                  <ul v-if="occurrenceSnippets(occurrence).length" class="snippet-list">
+                    <li
+                      v-for="(snippet, idx) in occurrenceSnippets(occurrence)"
+                      :key="occurrenceKey(occurrence, idx)"
+                    >
+                      {{ snippetText(snippet) }}
+                    </li>
+                  </ul>
+                  <span v-else class="muted">-</span>
+                </template>
+              </el-table-column>
+            </el-table>
             <span v-else class="muted">无</span>
           </div>
         </template>
@@ -208,8 +267,17 @@ async function dismiss(row) {
 .small {
   font-size: 12px;
 }
-.snippet-list ul {
-  margin: 4px 0 0 16px;
+.occurrence-panel {
+  padding: 8px 12px 12px;
+}
+.occurrence-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.snippet-list {
+  margin: 0 0 0 16px;
   padding: 0;
   color: #606266;
 }

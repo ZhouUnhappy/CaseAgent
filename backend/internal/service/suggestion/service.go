@@ -2,7 +2,7 @@
 // can review in the workbench. Detection is invoked from taskservice after
 // AnalyzeTask completes: requirement-level identifier candidates that are
 // NOT already covered by an existing knowledge_base entry land in the
-// knowledge_update_suggestions table with status='pending'.
+// knowledge_update_suggestion_groups / occurrences tables with status='pending'.
 //
 // The extraction (extractor.go) is intentionally a pure function with no DB
 // dependency so it can be unit-tested. The DB-bound classification logic
@@ -52,6 +52,36 @@ type ManualSuggestionInput struct {
 	Note            string
 }
 
+type SuggestionOccurrenceView struct {
+	ID             int              `json:"id"`
+	SourceTaskID   int              `json:"source_task_id"`
+	SourceCaseID   *int             `json:"source_case_id,omitempty"`
+	Frequency      int              `json:"frequency"`
+	SourceSnippets []map[string]any `json:"source_snippets"`
+	CreatedAt      time.Time        `json:"created_at"`
+}
+
+type SuggestionGroupView struct {
+	ID                  int                        `json:"id"`
+	TenantID            int                        `json:"tenant_id"`
+	CandidateType       string                     `json:"candidate_type"`
+	CandidateName       string                     `json:"candidate_name"`
+	Frequency           int                        `json:"frequency"`
+	TotalFrequency      int                        `json:"total_frequency"`
+	TaskCount           int                        `json:"task_count"`
+	SourceTaskID        int                        `json:"source_task_id,omitempty"`
+	SourceCaseID        *int                       `json:"source_case_id,omitempty"`
+	ResolvedKnowledgeID *int                       `json:"resolved_knowledge_id,omitempty"`
+	SourceSnippets      []map[string]any           `json:"source_snippets"`
+	Status              string                     `json:"status"`
+	DismissedReason     *string                    `json:"dismissed_reason,omitempty"`
+	FirstSeenAt         time.Time                  `json:"first_seen_at"`
+	LastSeenAt          time.Time                  `json:"last_seen_at"`
+	CreatedAt           time.Time                  `json:"created_at"`
+	UpdatedAt           time.Time                  `json:"updated_at"`
+	Occurrences         []SuggestionOccurrenceView `json:"occurrences,omitempty"`
+}
+
 var ErrInvalidManualSuggestion = errors.New("invalid manual suggestion")
 
 func New(db bun.IDB) *Service {
@@ -96,12 +126,15 @@ func (s *Service) RecordCandidates(
 		if !ok {
 			continue
 		}
-		if err := s.upsert(ctx, taskID, candidateType, c); err != nil {
+		created, err := s.upsert(ctx, taskID, candidateType, c)
+		if err != nil {
 			slog.Warn("knowledge suggestion upsert failed",
 				"task_id", taskID, "candidate", c.Name, "error", err)
 			continue
 		}
-		recorded++
+		if created {
+			recorded++
+		}
 	}
 
 	if recorded > 0 {
@@ -135,40 +168,117 @@ func (s *Service) classify(ctx context.Context, name string) (bool, string, erro
 	return true, candidateType, nil
 }
 
-func (s *Service) upsert(ctx context.Context, taskID int, candidateType string, c CandidateMatch) error {
-	// 同 task + 同 type + 同 name 已存在则跳过（在 task 重跑 analyze 时尤其重要）
-	count, err := s.db.NewSelect().Model((*models.KnowledgeUpdateSuggestion)(nil)).
-		Where("source_task_id = ?", taskID).
-		Where("candidate_type = ?", candidateType).
-		Where("candidate_name = ?", c.Name).
-		Count(ctx)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
+func (s *Service) upsert(ctx context.Context, taskID int, candidateType string, c CandidateMatch) (bool, error) {
 	snippets := make([]map[string]any, 0, len(c.Snippets))
-	for _, s := range c.Snippets {
-		snippets = append(snippets, map[string]any{"text": s})
+	for _, snippet := range c.Snippets {
+		snippets = append(snippets, map[string]any{"text": snippet})
 	}
 
-	tenantID, _ := db.TenantFromContext(ctx)
-	now := time.Now()
-	row := &models.KnowledgeUpdateSuggestion{
-		TenantID:       tenantID,
-		SourceTaskID:   taskID,
+	_, created, err := s.recordOccurrence(ctx, occurrenceInput{
 		CandidateType:  candidateType,
-		CandidateName:  strings.TrimSpace(c.Name),
+		CandidateName:  c.Name,
+		SourceTaskID:   taskID,
 		Frequency:      c.Frequency,
 		SourceSnippets: snippets,
+	})
+	return created, err
+}
+
+type occurrenceInput struct {
+	CandidateType  string
+	CandidateName  string
+	SourceTaskID   int
+	SourceCaseID   *int
+	Frequency      int
+	SourceSnippets []map[string]any
+}
+
+func (s *Service) recordOccurrence(ctx context.Context, input occurrenceInput) (*SuggestionGroupView, bool, error) {
+	tenantID, _ := db.TenantFromContext(ctx)
+	now := time.Now()
+
+	frequency := input.Frequency
+	if frequency <= 0 {
+		frequency = 1
+	}
+
+	group := &models.KnowledgeUpdateSuggestionGroup{
+		TenantID:       tenantID,
+		CandidateType:  input.CandidateType,
+		CandidateName:  strings.TrimSpace(input.CandidateName),
+		TotalFrequency: 0,
+		TaskCount:      0,
 		Status:         models.SuggestionStatusPending,
+		FirstSeenAt:    now,
+		LastSeenAt:     now,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	_, err = s.db.NewInsert().Model(row).Exec(ctx)
-	return err
+	if _, err := s.db.NewInsert().Model(group).
+		On("CONFLICT (tenant_id, candidate_type, candidate_name) DO UPDATE").
+		Set("updated_at = EXCLUDED.updated_at").
+		Returning("*").
+		Exec(ctx); err != nil {
+		return nil, false, err
+	}
+
+	existing := s.db.NewSelect().
+		Model((*models.KnowledgeUpdateSuggestionOccurrence)(nil)).
+		Where("group_id = ?", group.ID).
+		Where("source_task_id = ?", input.SourceTaskID)
+	if input.SourceCaseID == nil {
+		existing = existing.Where("source_case_id IS NULL")
+	} else {
+		existing = existing.Where("source_case_id = ?", *input.SourceCaseID)
+	}
+	count, err := existing.Count(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if count > 0 {
+		view, err := s.getGroupView(ctx, group.ID)
+		return view, false, err
+	}
+
+	taskSeen, err := s.db.NewSelect().
+		Model((*models.KnowledgeUpdateSuggestionOccurrence)(nil)).
+		Where("group_id = ?", group.ID).
+		Where("source_task_id = ?", input.SourceTaskID).
+		Count(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	occurrence := &models.KnowledgeUpdateSuggestionOccurrence{
+		TenantID:       tenantID,
+		GroupID:        group.ID,
+		SourceTaskID:   input.SourceTaskID,
+		SourceCaseID:   input.SourceCaseID,
+		Frequency:      frequency,
+		SourceSnippets: input.SourceSnippets,
+		CreatedAt:      now,
+	}
+	if _, err := s.db.NewInsert().Model(occurrence).Exec(ctx); err != nil {
+		return nil, false, err
+	}
+
+	taskIncrement := 0
+	if taskSeen == 0 {
+		taskIncrement = 1
+	}
+	if _, err := s.db.NewUpdate().
+		Model((*models.KnowledgeUpdateSuggestionGroup)(nil)).
+		Set("total_frequency = total_frequency + ?", frequency).
+		Set("task_count = task_count + ?", taskIncrement).
+		Set("last_seen_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("id = ?", group.ID).
+		Exec(ctx); err != nil {
+		return nil, false, err
+	}
+
+	view, err := s.getGroupView(ctx, group.ID)
+	return view, true, err
 }
 
 func ValidateManualSuggestionInput(input ManualSuggestionInput) error {
@@ -187,7 +297,7 @@ func ValidateManualSuggestionInput(input ManualSuggestionInput) error {
 	return nil
 }
 
-func (s *Service) CreateManual(ctx context.Context, input ManualSuggestionInput) (*models.KnowledgeUpdateSuggestion, error) {
+func (s *Service) CreateManual(ctx context.Context, input ManualSuggestionInput) (*SuggestionGroupView, error) {
 	if err := ValidateManualSuggestionInput(input); err != nil {
 		return nil, err
 	}
@@ -223,22 +333,16 @@ func (s *Service) CreateManual(ctx context.Context, input ManualSuggestionInput)
 		})
 	}
 
-	tenantID, _ := db.TenantFromContext(ctx)
-	now := time.Now()
 	sourceCaseID := input.SourceCaseID
-	row := &models.KnowledgeUpdateSuggestion{
-		TenantID:       tenantID,
+	row, _, err := s.recordOccurrence(ctx, occurrenceInput{
+		CandidateType:  input.CandidateType,
+		CandidateName:  input.CandidateName,
 		SourceTaskID:   input.SourceTaskID,
 		SourceCaseID:   &sourceCaseID,
-		CandidateType:  input.CandidateType,
-		CandidateName:  strings.TrimSpace(input.CandidateName),
 		Frequency:      1,
 		SourceSnippets: snippets,
-		Status:         models.SuggestionStatusPending,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	if _, err := s.db.NewInsert().Model(row).Exec(ctx); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	return row, nil
@@ -255,22 +359,25 @@ func firstCaseTitle(tc *models.TestCase) string {
 	return ""
 }
 
-// List 列出 suggestion；status 为空时返回全部。按 created_at 倒序。
-func (s *Service) List(ctx context.Context, status string) ([]models.KnowledgeUpdateSuggestion, error) {
-	rows := []models.KnowledgeUpdateSuggestion{}
-	q := s.db.NewSelect().Model(&rows).OrderExpr("created_at DESC")
+// List 列出聚合后的 suggestions；status 为空时返回全部。按任务覆盖和频次优先级排序。
+func (s *Service) List(ctx context.Context, status string) ([]SuggestionGroupView, error) {
+	rows := []models.KnowledgeUpdateSuggestionGroup{}
+	q := s.db.NewSelect().Model(&rows).
+		OrderExpr("task_count DESC").
+		OrderExpr("total_frequency DESC").
+		OrderExpr("last_seen_at DESC")
 	if status != "" {
 		q = q.Where("status = ?", status)
 	}
 	if err := q.Scan(ctx); err != nil {
 		return nil, err
 	}
-	return rows, nil
+	return s.groupViews(ctx, rows)
 }
 
-// SetStatus 把 suggestion 从 pending 推进到 adopted/dismissed。其它转换返回
+// SetStatus 把 suggestion group 从 pending 推进到 adopted/dismissed。其它转换返回
 // false（调用方决定 409 还是 silent）。
-func (s *Service) SetStatus(ctx context.Context, id int, target string, resolvedKnowledgeID *int) (*models.KnowledgeUpdateSuggestion, bool, error) {
+func (s *Service) SetStatus(ctx context.Context, id int, target string, resolvedKnowledgeID *int) (*SuggestionGroupView, bool, error) {
 	if target != models.SuggestionStatusAdopted && target != models.SuggestionStatusDismissed {
 		return nil, false, nil
 	}
@@ -292,12 +399,13 @@ func (s *Service) SetStatus(ctx context.Context, id int, target string, resolved
 		}
 	}
 
-	row := &models.KnowledgeUpdateSuggestion{}
+	row := &models.KnowledgeUpdateSuggestionGroup{}
 	if err := s.db.NewSelect().Model(row).Where("id = ?", id).Scan(ctx); err != nil {
 		return nil, false, err
 	}
 	if row.Status != models.SuggestionStatusPending {
-		return row, false, nil
+		view, err := s.getGroupView(ctx, row.ID)
+		return view, false, err
 	}
 
 	row.Status = target
@@ -314,7 +422,8 @@ func (s *Service) SetStatus(ctx context.Context, id int, target string, resolved
 	if _, err := q.Where("id = ?", id).Exec(ctx); err != nil {
 		return nil, false, err
 	}
-	return row, true, nil
+	view, err := s.getGroupView(ctx, row.ID)
+	return view, true, err
 }
 
 func (s *Service) DismissExpiredPending(ctx context.Context, maxAge time.Duration) (int64, error) {
@@ -324,16 +433,93 @@ func (s *Service) DismissExpiredPending(ctx context.Context, maxAge time.Duratio
 
 	now := time.Now()
 	result, err := s.db.NewUpdate().
-		Model((*models.KnowledgeUpdateSuggestion)(nil)).
+		Model((*models.KnowledgeUpdateSuggestionGroup)(nil)).
 		Set("status = ?", models.SuggestionStatusDismissed).
 		Set("dismissed_reason = ?", AutoExpiredDismissedReason).
 		Set("updated_at = ?", now).
 		Where("status = ?", models.SuggestionStatusPending).
-		Where("created_at < ?", now.Add(-maxAge)).
+		Where("first_seen_at < ?", now.Add(-maxAge)).
 		Exec(ctx)
 	if err != nil {
 		return 0, err
 	}
 	affected, _ := result.RowsAffected()
 	return affected, nil
+}
+
+func (s *Service) getGroupView(ctx context.Context, id int) (*SuggestionGroupView, error) {
+	group := &models.KnowledgeUpdateSuggestionGroup{}
+	if err := s.db.NewSelect().Model(group).Where("id = ?", id).Scan(ctx); err != nil {
+		return nil, err
+	}
+	views, err := s.groupViews(ctx, []models.KnowledgeUpdateSuggestionGroup{*group})
+	if err != nil {
+		return nil, err
+	}
+	if len(views) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return &views[0], nil
+}
+
+func (s *Service) groupViews(ctx context.Context, groups []models.KnowledgeUpdateSuggestionGroup) ([]SuggestionGroupView, error) {
+	views := make([]SuggestionGroupView, 0, len(groups))
+	if len(groups) == 0 {
+		return views, nil
+	}
+
+	groupIDs := make([]int, 0, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.ID)
+	}
+
+	occurrences := []models.KnowledgeUpdateSuggestionOccurrence{}
+	if err := s.db.NewSelect().
+		Model(&occurrences).
+		Where("group_id IN (?)", bun.In(groupIDs)).
+		OrderExpr("created_at DESC").
+		OrderExpr("id DESC").
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+
+	occByGroup := make(map[int][]SuggestionOccurrenceView, len(groups))
+	for _, occurrence := range occurrences {
+		occByGroup[occurrence.GroupID] = append(occByGroup[occurrence.GroupID], SuggestionOccurrenceView{
+			ID:             occurrence.ID,
+			SourceTaskID:   occurrence.SourceTaskID,
+			SourceCaseID:   occurrence.SourceCaseID,
+			Frequency:      occurrence.Frequency,
+			SourceSnippets: occurrence.SourceSnippets,
+			CreatedAt:      occurrence.CreatedAt,
+		})
+	}
+
+	for _, group := range groups {
+		view := SuggestionGroupView{
+			ID:                  group.ID,
+			TenantID:            group.TenantID,
+			CandidateType:       group.CandidateType,
+			CandidateName:       group.CandidateName,
+			Frequency:           group.TotalFrequency,
+			TotalFrequency:      group.TotalFrequency,
+			TaskCount:           group.TaskCount,
+			ResolvedKnowledgeID: group.ResolvedKnowledgeID,
+			Status:              group.Status,
+			DismissedReason:     group.DismissedReason,
+			FirstSeenAt:         group.FirstSeenAt,
+			LastSeenAt:          group.LastSeenAt,
+			CreatedAt:           group.CreatedAt,
+			UpdatedAt:           group.UpdatedAt,
+			Occurrences:         occByGroup[group.ID],
+		}
+		if len(view.Occurrences) > 0 {
+			latest := view.Occurrences[0]
+			view.SourceTaskID = latest.SourceTaskID
+			view.SourceCaseID = latest.SourceCaseID
+			view.SourceSnippets = latest.SourceSnippets
+		}
+		views = append(views, view)
+	}
+	return views, nil
 }

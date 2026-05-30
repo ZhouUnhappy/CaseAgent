@@ -6,32 +6,34 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/uptrace/bun"
 )
 
-const schemaFileName = "001_init.sql"
+const schemaFilesPattern = "*.sql"
 
 func applySchema(ctx context.Context, db *bun.DB) error {
-	schemaSQL, err := loadSchemaSQL()
+	files, err := schemaFilePaths()
 	if err != nil {
 		return err
 	}
 
-	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
-		return fmt.Errorf("apply schema %s: %w", schemaFileName, err)
+	for _, file := range files {
+		schemaSQL, err := loadSchemaSQL(file)
+		if err != nil {
+			return err
+		}
+		if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
+			return fmt.Errorf("apply schema %s: %w", filepath.Base(file), err)
+		}
 	}
 
 	return nil
 }
 
-func loadSchemaSQL() (string, error) {
-	path, err := schemaFilePath()
-	if err != nil {
-		return "", err
-	}
-
+func loadSchemaSQL(path string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read schema file %s: %w", path, err)
@@ -45,11 +47,20 @@ func loadSchemaSQL() (string, error) {
 	return schema, nil
 }
 
-func schemaFilePath() (string, error) {
+func schemaFilePaths() ([]string, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return "", fmt.Errorf("resolve schema file path: runtime caller unavailable")
+		return nil, fmt.Errorf("resolve schema file path: runtime caller unavailable")
 	}
 
-	return filepath.Join(filepath.Dir(filename), "..", "..", "migrations", schemaFileName), nil
+	pattern := filepath.Join(filepath.Dir(filename), "..", "..", "migrations", schemaFilesPattern)
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("glob schema files %s: %w", pattern, err)
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no schema files match %s", pattern)
+	}
+	sort.Strings(files)
+	return files, nil
 }

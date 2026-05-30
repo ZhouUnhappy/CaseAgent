@@ -150,7 +150,7 @@ func TestManualSuggestionIntegration(t *testing.T) {
 			t.Fatalf("resolved_knowledge_id: got %#v want %d", updated.ResolvedKnowledgeID, knowledgeID)
 		}
 
-		stored := &models.KnowledgeUpdateSuggestion{}
+		stored := &models.KnowledgeUpdateSuggestionGroup{}
 		if err := tx.NewSelect().Model(stored).Where("id = ?", suggestionID).Scan(ctx); err != nil {
 			return err
 		}
@@ -179,15 +179,15 @@ func TestExpiredPendingCleanupIntegration(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		oldPendingA, err = insertSuggestionRow(ctx, tx, tenantA, taskID, models.SuggestionStatusPending, time.Now().Add(-31*24*time.Hour))
+		oldPendingA, err = insertSuggestionGroup(ctx, tx, tenantA, taskID, models.SuggestionStatusPending, time.Now().Add(-31*24*time.Hour))
 		if err != nil {
 			return err
 		}
-		freshPendingA, err = insertSuggestionRow(ctx, tx, tenantA, taskID, models.SuggestionStatusPending, time.Now().Add(-29*24*time.Hour))
+		freshPendingA, err = insertSuggestionGroup(ctx, tx, tenantA, taskID, models.SuggestionStatusPending, time.Now().Add(-29*24*time.Hour))
 		if err != nil {
 			return err
 		}
-		oldAdoptedA, err = insertSuggestionRow(ctx, tx, tenantA, taskID, models.SuggestionStatusAdopted, time.Now().Add(-60*24*time.Hour))
+		oldAdoptedA, err = insertSuggestionGroup(ctx, tx, tenantA, taskID, models.SuggestionStatusAdopted, time.Now().Add(-60*24*time.Hour))
 		return err
 	})
 	mustTenantTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
@@ -195,7 +195,7 @@ func TestExpiredPendingCleanupIntegration(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		oldPendingB, err = insertSuggestionRow(ctx, tx, tenantB, taskID, models.SuggestionStatusPending, time.Now().Add(-45*24*time.Hour))
+		oldPendingB, err = insertSuggestionGroup(ctx, tx, tenantB, taskID, models.SuggestionStatusPending, time.Now().Add(-45*24*time.Hour))
 		return err
 	})
 
@@ -211,6 +211,113 @@ func TestExpiredPendingCleanupIntegration(t *testing.T) {
 	})
 	mustTenantTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
 		assertSuggestionState(t, ctx, tx, oldPendingB, models.SuggestionStatusDismissed, AutoExpiredDismissedReason)
+		return nil
+	})
+}
+
+func TestSuggestionGroupAggregationIntegration(t *testing.T) {
+	bunDB := openIntegrationDB(t)
+	ctx := context.Background()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenantA := insertTenant(t, ctx, bunDB, "aggregation-a-"+suffix)
+	tenantB := insertTenant(t, ctx, bunDB, "aggregation-b-"+suffix)
+	t.Cleanup(func() { cleanupTenants(ctx, bunDB, tenantA, tenantB) })
+
+	mustTenantTx(t, ctx, bunDB, tenantA, func(ctx context.Context, tx bun.Tx) error {
+		task1, err := insertSuggestionFixtureTask(ctx, tx, tenantA)
+		if err != nil {
+			return err
+		}
+		task2, err := insertSuggestionFixtureTask(ctx, tx, tenantA)
+		if err != nil {
+			return err
+		}
+
+		service := New(tx)
+		first, created, err := service.recordOccurrence(ctx, occurrenceInput{
+			CandidateType:  models.SuggestionCandidateModule,
+			CandidateName:  "Billing-Core",
+			SourceTaskID:   task1,
+			Frequency:      2,
+			SourceSnippets: []map[string]any{{"text": "first task"}},
+		})
+		if err != nil {
+			return err
+		}
+		if !created || first.TotalFrequency != 2 || first.TaskCount != 1 {
+			t.Fatalf("first occurrence: created=%v view=%+v", created, first)
+		}
+
+		duplicate, created, err := service.recordOccurrence(ctx, occurrenceInput{
+			CandidateType:  models.SuggestionCandidateModule,
+			CandidateName:  "Billing-Core",
+			SourceTaskID:   task1,
+			Frequency:      7,
+			SourceSnippets: []map[string]any{{"text": "duplicate"}},
+		})
+		if err != nil {
+			return err
+		}
+		if created || duplicate.TotalFrequency != 2 || duplicate.TaskCount != 1 {
+			t.Fatalf("duplicate occurrence should not change counters: created=%v view=%+v", created, duplicate)
+		}
+
+		second, created, err := service.recordOccurrence(ctx, occurrenceInput{
+			CandidateType:  models.SuggestionCandidateModule,
+			CandidateName:  "Billing-Core",
+			SourceTaskID:   task2,
+			Frequency:      3,
+			SourceSnippets: []map[string]any{{"text": "second task"}},
+		})
+		if err != nil {
+			return err
+		}
+		if !created || second.ID != first.ID || second.TotalFrequency != 5 || second.TaskCount != 2 {
+			t.Fatalf("second occurrence should aggregate into same group: created=%v first=%+v second=%+v", created, first, second)
+		}
+		if len(second.Occurrences) != 2 {
+			t.Fatalf("occurrences: got %d want 2", len(second.Occurrences))
+		}
+
+		_, created, err = service.recordOccurrence(ctx, occurrenceInput{
+			CandidateType:  models.SuggestionCandidateModule,
+			CandidateName:  "One-Off",
+			SourceTaskID:   task1,
+			Frequency:      9,
+			SourceSnippets: []map[string]any{{"text": "high frequency single task"}},
+		})
+		if err != nil {
+			return err
+		}
+		if !created {
+			t.Fatal("one-off occurrence should be created")
+		}
+
+		rows, err := service.List(ctx, models.SuggestionStatusPending)
+		if err != nil {
+			return err
+		}
+		if len(rows) < 2 {
+			t.Fatalf("suggestion rows: got %d want at least 2", len(rows))
+		}
+		if rows[0].CandidateName != "Billing-Core" {
+			t.Fatalf("task_count should outrank total_frequency: first row=%+v", rows[0])
+		}
+		if rows[0].SourceTaskID != task2 {
+			t.Fatalf("latest occurrence should populate source_task_id: got %d want %d", rows[0].SourceTaskID, task2)
+		}
+		return nil
+	})
+
+	mustTenantTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		rows, err := New(tx).List(ctx, models.SuggestionStatusPending)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 0 {
+			t.Fatalf("tenant B saw tenant A aggregation rows: %+v", rows)
+		}
 		return nil
 	})
 }
@@ -286,18 +393,30 @@ func insertSuggestionFixtureTask(ctx context.Context, tx bun.Tx, tenantID int) (
 	return task.ID, nil
 }
 
-func insertSuggestionRow(ctx context.Context, tx bun.Tx, tenantID int, taskID int, status string, createdAt time.Time) (int, error) {
-	row := &models.KnowledgeUpdateSuggestion{
-		TenantID:      tenantID,
-		SourceTaskID:  taskID,
-		CandidateType: models.SuggestionCandidateModule,
-		CandidateName: fmt.Sprintf("expiry-candidate-%d", createdAt.UnixNano()),
-		Frequency:     1,
-		Status:        status,
-		CreatedAt:     createdAt,
-		UpdatedAt:     createdAt,
+func insertSuggestionGroup(ctx context.Context, tx bun.Tx, tenantID int, taskID int, status string, createdAt time.Time) (int, error) {
+	row := &models.KnowledgeUpdateSuggestionGroup{
+		TenantID:       tenantID,
+		CandidateType:  models.SuggestionCandidateModule,
+		CandidateName:  fmt.Sprintf("expiry-candidate-%d", createdAt.UnixNano()),
+		TotalFrequency: 1,
+		TaskCount:      1,
+		Status:         status,
+		FirstSeenAt:    createdAt,
+		LastSeenAt:     createdAt,
+		CreatedAt:      createdAt,
+		UpdatedAt:      createdAt,
 	}
 	if _, err := tx.NewInsert().Model(row).Returning("id").Exec(ctx); err != nil {
+		return 0, err
+	}
+	occurrence := &models.KnowledgeUpdateSuggestionOccurrence{
+		TenantID:     tenantID,
+		GroupID:      row.ID,
+		SourceTaskID: taskID,
+		Frequency:    1,
+		CreatedAt:    createdAt,
+	}
+	if _, err := tx.NewInsert().Model(occurrence).Exec(ctx); err != nil {
 		return 0, err
 	}
 	return row.ID, nil
@@ -305,7 +424,7 @@ func insertSuggestionRow(ctx context.Context, tx bun.Tx, tenantID int, taskID in
 
 func assertSuggestionState(t *testing.T, ctx context.Context, tx bun.Tx, id int, status string, dismissedReason string) {
 	t.Helper()
-	row := &models.KnowledgeUpdateSuggestion{}
+	row := &models.KnowledgeUpdateSuggestionGroup{}
 	if err := tx.NewSelect().Model(row).Where("id = ?", id).Scan(ctx); err != nil {
 		t.Fatalf("load suggestion %d: %v", id, err)
 	}

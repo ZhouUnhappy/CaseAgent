@@ -21,27 +21,11 @@
 
 **DoD**：
 
-- 业务类型：`knowledge_update_suggestions.candidate_type` 允许值新增 `context_gap`（当前 DB 列是 `VARCHAR(32)`；同步 handler/service/frontend 的类型判断，不引入数据库 enum）。
+- 业务类型：`knowledge_update_suggestion_groups.candidate_type` 允许值新增 `context_gap`（当前 DB 列是 `VARCHAR(32)`；同步 handler/service/frontend 的类型判断，不引入数据库 enum）。
 - 注入点：`backend/internal/service/agent/service.go` 的 fallback / parse 失败分支，调用 suggestion service 写入一条 `candidate_type='context_gap'` 的 suggestion，`source_snippets` 含当前 task 的 `affected_products` / `affected_modules` / 命中的 `knowledge_id` 列表 + 失败阶段标识。
 - 前端：`frontend/src/views/KnowledgeSuggestions.vue` 列表能展示 `context_gap` 类型（与 `product` / `module` 区分颜色或图标），「采纳」对该类型禁用或改为"补充关联知识"流程。
 - 单测：`backend/internal/service/agent/` 新增覆盖"agent 失败 → suggestion 写入"路径。
 - 验证：手动模拟一次生成失败，确认表里出现 `candidate_type='context_gap'` 行。
-
----
-
-## P4：跨任务聚合 + 优先级
-
-**价值**：现在按 `(task_id, candidate_type, candidate_name)` 去重，同一个 `Billing-Core` 在 5 个 task 里都未被覆盖会产生 5 条独立 suggestion。审核体验差。
-
-**Trigger**：suggestion 表行数 > 1000，或前端列表里出现「同一名字多副本」干扰审核。
-
-**DoD**：
-
-- Schema：新建聚合表 `knowledge_update_suggestion_groups`（主键按 tenant + `candidate_type + candidate_name`，含 `total_frequency` / `task_count` / `first_seen_at` / `last_seen_at`）和明细表 `knowledge_update_suggestion_occurrences`（记每次出现的 `source_task_id` / `source_snippets`）。现有 `knowledge_update_suggestions` 保留为兼容视图或过渡表，直到前端切换完成。
-- 迁移：写 `002_*.sql`，把现有行按 `(tenant_id, candidate_type, candidate_name)` 聚合到 groups，detail 写入 occurrences。
-- 服务层：`backend/internal/service/suggestion/service.go` 写入逻辑改为"先 upsert group，再 append occurrence"。
-- 前端：`KnowledgeSuggestions.vue` 列表按 `task_count desc, total_frequency desc` 排序；点开某行展示 occurrences 子表。
-- 验证：`scripts/i2_generation_e2e.sh` 多跑几次，确认主表行数稳定、子表行数累加。
 
 ## 备忘：暂不做的事
 

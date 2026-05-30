@@ -35,7 +35,10 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
       this.saving = true
       try {
         const created = await createKnowledgeSuggestion(payload)
-        if (!this.statusFilter || created.status === this.statusFilter) {
+        const idx = this.items.findIndex((s) => s.id === created.id)
+        if (idx >= 0) {
+          this.items.splice(idx, 1, created)
+        } else if (!this.statusFilter || created.status === this.statusFilter) {
           this.items = [created, ...this.items]
         }
         return created
