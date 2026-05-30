@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,10 +24,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := config.Load("configs/config.yaml"); err != nil {
+	configPath := resolveConfigPath()
+	if err := config.Load(configPath); err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("config loaded", "path", configPath)
 
 	if err := db.Init(ctx); err != nil {
 		slog.Error("failed to initialize database", "error", err)
@@ -70,4 +73,16 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+func resolveConfigPath() string {
+	if path := strings.TrimSpace(os.Getenv("CASEAGENT_CONFIG")); path != "" {
+		return path
+	}
+
+	if _, err := os.Stat("configs/.config.yaml"); err == nil {
+		return "configs/.config.yaml"
+	}
+
+	return "configs/config.yaml"
 }

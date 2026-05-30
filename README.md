@@ -43,6 +43,8 @@ CaseAgent/
 ```bash
 cd backend
 go mod tidy
+# 本地私有配置优先读取 configs/.config.yaml；也可用 CASEAGENT_CONFIG 指定其他路径。
+# cp configs/config-example.yaml configs/.config.yaml
 go run cmd/server/main.go
 ```
 
