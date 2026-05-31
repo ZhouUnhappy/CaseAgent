@@ -1,9 +1,11 @@
 package task
 
 import (
+	"errors"
 	"testing"
 
 	"caseagent/internal/db/models"
+	agentservice "caseagent/internal/service/agent"
 	retrievalservice "caseagent/internal/service/retrieval"
 )
 
@@ -267,5 +269,32 @@ func TestBuildSourceContext(t *testing.T) {
 	shippedNames, ok := ctx["knowledge_shipped_names"].([]string)
 	if !ok || len(shippedNames) != 3 || shippedNames[0] != "Product-A" {
 		t.Fatalf("unexpected knowledge_shipped_names: %#v", ctx["knowledge_shipped_names"])
+	}
+}
+
+func TestGenerationFailureStageAndContextGapEligibility(t *testing.T) {
+	parseErr := generationFailure(GenerationStageParseCases, "bad response: %w", errors.New("not json"))
+	if GenerationFailureStage(parseErr) != GenerationStageParseCases {
+		t.Fatalf("GenerationFailureStage() = %q", GenerationFailureStage(parseErr))
+	}
+	if !ShouldRecordContextGap(parseErr) {
+		t.Fatal("parse failures should record context_gap")
+	}
+
+	initErr := generationFailure(GenerationStageInitializeAgent, "bad config")
+	if ShouldRecordContextGap(initErr) {
+		t.Fatal("initialize failures should not record context_gap")
+	}
+
+	agentErr := generationFailure(
+		agentservice.GenerationStageDeepAgentFallback,
+		"failed to generate cases: %w",
+		errors.New("provider rejected request"),
+	)
+	if GenerationFailureStage(agentErr) != agentservice.GenerationStageDeepAgentFallback {
+		t.Fatalf("agent stage not preserved: %q", GenerationFailureStage(agentErr))
+	}
+	if !ShouldRecordContextGap(agentErr) {
+		t.Fatal("deep agent fallback failures should record context_gap")
 	}
 }

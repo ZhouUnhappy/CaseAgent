@@ -128,6 +128,10 @@ func (h *Handler) DraftKnowledgeSuggestion(c *gin.Context) {
 
 	result, found, err := suggestionservice.New(DBFromContext(c)).Draft(c, id)
 	if err != nil {
+		if errors.Is(err, suggestionservice.ErrInvalidManualSuggestion) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": strings.TrimPrefix(err.Error(), suggestionservice.ErrInvalidManualSuggestion.Error()+": ")})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

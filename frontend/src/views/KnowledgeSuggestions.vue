@@ -20,7 +20,31 @@ function formatDate(value) {
 function snippetText(snippet) {
   if (!snippet) return ''
   if (typeof snippet === 'string') return snippet
+  if (snippet.type === 'failure') {
+    return `失败阶段：${snippet.stage || '-'}；错误：${snippet.error || '-'}`
+  }
+  if (snippet.type === 'affected_scope') {
+    const products = Array.isArray(snippet.affected_products) ? snippet.affected_products.join(', ') : ''
+    const modules = Array.isArray(snippet.affected_modules) ? snippet.affected_modules.join(', ') : ''
+    const documents = Array.isArray(snippet.document_ids) ? snippet.document_ids.join(', ') : ''
+    return `影响范围：products=${products || '-'}；modules=${modules || '-'}；documents=${documents || '-'}`
+  }
+  if (snippet.type === 'knowledge_context') {
+    const ids = Array.isArray(snippet.knowledge_ids) ? snippet.knowledge_ids.join(', ') : ''
+    const names = Array.isArray(snippet.knowledge_names) ? snippet.knowledge_names.join(', ') : ''
+    return `相关知识：ids=${ids || '-'}；names=${names || '-'}`
+  }
   return snippet.text || JSON.stringify(snippet)
+}
+
+function candidateTagType(type) {
+  if (type === 'product') return 'warning'
+  if (type === 'context_gap') return 'danger'
+  return 'info'
+}
+
+function isContextGap(row) {
+  return row?.candidate_type === 'context_gap'
 }
 
 function rowOccurrences(row) {
@@ -57,6 +81,7 @@ const hiddenAutoExpiredCount = computed(
 )
 
 async function adopt(row) {
+  if (isContextGap(row)) return
   try {
     const draft = await store.draft(row.id)
     writeSuggestionDraft(row.id, draft?.draft_content || '')
@@ -123,7 +148,7 @@ async function dismiss(row) {
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column label="类型" width="100">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.candidate_type === 'product' ? 'warning' : 'info'">
+          <el-tag size="small" :type="candidateTagType(row.candidate_type)">
             {{ row.candidate_type }}
           </el-tag>
         </template>
@@ -160,7 +185,22 @@ async function dismiss(row) {
       <el-table-column label="操作" width="180" align="center">
         <template #default="{ row }">
           <div v-if="row.status === 'pending'" class="op-buttons">
-            <el-button size="small" type="primary" :loading="draftingId === row.id" @click="adopt(row)">
+            <el-tooltip
+              v-if="isContextGap(row)"
+              content="context_gap 需要先排查失败上下文，暂不自动生成知识草稿"
+              placement="top"
+            >
+              <span>
+                <el-button size="small" type="primary" disabled>采纳</el-button>
+              </span>
+            </el-tooltip>
+            <el-button
+              v-else
+              size="small"
+              type="primary"
+              :loading="draftingId === row.id"
+              @click="adopt(row)"
+            >
               采纳
             </el-button>
             <el-button size="small" :loading="saving" @click="dismiss(row)">忽略</el-button>

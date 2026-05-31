@@ -25,6 +25,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -51,6 +52,42 @@ type Service struct {
 
 type Config struct {
 	ChatModel model.BaseChatModel // Optional, if not provided will initialize from config
+}
+
+const GenerationStageDeepAgentFallback = "deep_agent_fallback"
+
+type GenerationError struct {
+	Stage string
+	Err   error
+}
+
+func (e *GenerationError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s: %v", e.Stage, e.Err)
+}
+
+func (e *GenerationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func FailureStage(err error) string {
+	var generationErr *GenerationError
+	if errors.As(err, &generationErr) {
+		return strings.TrimSpace(generationErr.Stage)
+	}
+	return ""
+}
+
+func generationError(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &GenerationError{Stage: stage, Err: err}
 }
 
 func New(ctx context.Context, cfg *Config) (*Service, error) {
@@ -152,19 +189,19 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 	if len(sections) == 0 {
 		slog.Warn("all sub-agents produced no usable output; falling back to DeepAgent.GenerateCases",
 			"sub_agent_count", len(generators))
-		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+		return s.generateFallback(ctx, requirements, knowledge)
 	}
 
 	normalized := dedupeGeneratedSections(sections)
 	if len(normalized) == 0 {
 		slog.Warn("dedupe collapsed all sub-agent sections; falling back to DeepAgent.GenerateCases")
-		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+		return s.generateFallback(ctx, requirements, knowledge)
 	}
 
 	payload, err := json.Marshal(normalized)
 	if err != nil {
 		slog.Warn("failed to marshal dedup'd sections; falling back to DeepAgent.GenerateCases", "error", err)
-		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+		return s.generateFallback(ctx, requirements, knowledge)
 	}
 
 	refined, err := s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
@@ -182,6 +219,14 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 		return string(payload), nil
 	}
 	return refined, nil
+}
+
+func (s *Service) generateFallback(ctx context.Context, requirements string, knowledge string) (string, error) {
+	result, err := s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+	if err != nil {
+		return "", generationError(GenerationStageDeepAgentFallback, err)
+	}
+	return result, nil
 }
 
 // runSubAgentWithRetry invokes fn once and, on error, retries exactly one

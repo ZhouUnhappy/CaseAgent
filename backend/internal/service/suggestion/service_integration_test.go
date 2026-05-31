@@ -322,6 +322,110 @@ func TestSuggestionGroupAggregationIntegration(t *testing.T) {
 	})
 }
 
+func TestContextGapSuggestionIntegration(t *testing.T) {
+	bunDB := openIntegrationDB(t)
+	ctx := context.Background()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenantA := insertTenant(t, ctx, bunDB, "context-gap-a-"+suffix)
+	tenantB := insertTenant(t, ctx, bunDB, "context-gap-b-"+suffix)
+	t.Cleanup(func() { cleanupTenants(ctx, bunDB, tenantA, tenantB) })
+
+	var groupID int
+	mustTenantTx(t, ctx, bunDB, tenantA, func(ctx context.Context, tx bun.Tx) error {
+		task1, err := insertSuggestionFixtureTask(ctx, tx, tenantA)
+		if err != nil {
+			return err
+		}
+		task2, err := insertSuggestionFixtureTask(ctx, tx, tenantA)
+		if err != nil {
+			return err
+		}
+
+		service := New(tx)
+		first, err := service.RecordContextGap(ctx, ContextGapInput{
+			SourceTaskID:     task1,
+			FailureStage:     "deep_agent_fallback",
+			ErrorSummary:     strings.Repeat("x", 700),
+			AffectedProducts: []string{"Product-A"},
+			AffectedModules:  []string{"Module-B", "Module-B"},
+			DocumentIDs:      []int{10, 10},
+			KnowledgeIDs:     []int{11, 22, 22},
+			KnowledgeNames:   []string{"Product-A", "Module-B"},
+		})
+		if err != nil {
+			return err
+		}
+		groupID = first.ID
+		if first.CandidateType != models.SuggestionCandidateContextGap {
+			t.Fatalf("candidate_type: got %q", first.CandidateType)
+		}
+		if first.CandidateName != "生成失败：Product-A, Module-B" {
+			t.Fatalf("candidate_name: got %q", first.CandidateName)
+		}
+		if first.TotalFrequency != 1 || first.TaskCount != 1 {
+			t.Fatalf("first counters: %+v", first)
+		}
+		if len(first.SourceSnippets) != 3 {
+			t.Fatalf("source snippets: %+v", first.SourceSnippets)
+		}
+		if first.SourceSnippets[0]["stage"] != "deep_agent_fallback" {
+			t.Fatalf("failure stage not stored: %+v", first.SourceSnippets[0])
+		}
+		if got := first.SourceSnippets[0]["error"].(string); len([]rune(got)) > maxContextGapErrorRunes+3 {
+			t.Fatalf("error summary was not compacted: len=%d", len([]rune(got)))
+		}
+
+		duplicate, err := service.RecordContextGap(ctx, ContextGapInput{
+			SourceTaskID:     task1,
+			FailureStage:     "parse_generated_cases",
+			ErrorSummary:     "same task should not increment",
+			AffectedProducts: []string{"Product-A"},
+			AffectedModules:  []string{"Module-B"},
+		})
+		if err != nil {
+			return err
+		}
+		if duplicate.TotalFrequency != 1 || duplicate.TaskCount != 1 {
+			t.Fatalf("duplicate should not increment counters: %+v", duplicate)
+		}
+
+		second, err := service.RecordContextGap(ctx, ContextGapInput{
+			SourceTaskID:     task2,
+			FailureStage:     "parse_generated_cases",
+			ErrorSummary:     "invalid json",
+			AffectedProducts: []string{"Product-A"},
+			AffectedModules:  []string{"Module-B"},
+		})
+		if err != nil {
+			return err
+		}
+		if second.ID != groupID || second.TotalFrequency != 2 || second.TaskCount != 2 {
+			t.Fatalf("second task should aggregate: %+v", second)
+		}
+		_, _, err = service.SetStatus(ctx, groupID, models.SuggestionStatusAdopted, nil)
+		if !errors.Is(err, ErrInvalidManualSuggestion) || !strings.Contains(err.Error(), "context_gap suggestions cannot be adopted automatically") {
+			t.Fatalf("expected context_gap adoption to be rejected, got %v", err)
+		}
+		_, found, err := service.Draft(ctx, groupID)
+		if !found || !errors.Is(err, ErrInvalidManualSuggestion) || !strings.Contains(err.Error(), "context_gap suggestions cannot generate knowledge drafts automatically") {
+			t.Fatalf("expected context_gap draft to be rejected, found=%v err=%v", found, err)
+		}
+		return nil
+	})
+
+	mustTenantTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		rows, err := New(tx).List(ctx, models.SuggestionStatusPending)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 0 {
+			t.Fatalf("tenant B saw tenant A context gaps: %+v", rows)
+		}
+		return nil
+	})
+}
+
 func openIntegrationDB(t *testing.T) *bun.DB {
 	t.Helper()
 	dsn := os.Getenv("CASEAGENT_TEST_DSN")

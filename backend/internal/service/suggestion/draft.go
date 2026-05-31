@@ -38,6 +38,9 @@ func (s *Service) Draft(ctx context.Context, id int) (*DraftResult, bool, error)
 		}
 		return nil, false, err
 	}
+	if group.CandidateType == models.SuggestionCandidateContextGap {
+		return nil, true, fmt.Errorf("%w: context_gap suggestions cannot generate knowledge drafts automatically", ErrInvalidManualSuggestion)
+	}
 
 	occurrences := []models.KnowledgeUpdateSuggestionOccurrence{}
 	if err := s.db.NewSelect().

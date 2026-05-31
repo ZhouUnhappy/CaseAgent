@@ -36,6 +36,8 @@ const MaxCandidatesPerTask = 20
 
 const AutoExpiredDismissedReason = "auto_expired"
 
+const maxContextGapErrorRunes = 500
+
 type Service struct {
 	db             bun.IDB
 	retrieval      *retrievalservice.Service
@@ -50,6 +52,17 @@ type ManualSuggestionInput struct {
 	SourceCaseID    int
 	SourceCaseTitle string
 	Note            string
+}
+
+type ContextGapInput struct {
+	SourceTaskID     int
+	FailureStage     string
+	ErrorSummary     string
+	AffectedProducts []string
+	AffectedModules  []string
+	DocumentIDs      []int
+	KnowledgeIDs     []int
+	KnowledgeNames   []string
 }
 
 type SuggestionOccurrenceView struct {
@@ -184,6 +197,21 @@ func (s *Service) upsert(ctx context.Context, taskID int, candidateType string, 
 	return created, err
 }
 
+func (s *Service) RecordContextGap(ctx context.Context, input ContextGapInput) (*SuggestionGroupView, error) {
+	if input.SourceTaskID <= 0 {
+		return nil, fmt.Errorf("%w: source_task_id is required", ErrInvalidManualSuggestion)
+	}
+
+	row, _, err := s.recordOccurrence(ctx, occurrenceInput{
+		CandidateType:  models.SuggestionCandidateContextGap,
+		CandidateName:  contextGapCandidateName(input),
+		SourceTaskID:   input.SourceTaskID,
+		Frequency:      1,
+		SourceSnippets: contextGapSnippets(input),
+	})
+	return row, err
+}
+
 type occurrenceInput struct {
 	CandidateType  string
 	CandidateName  string
@@ -297,6 +325,99 @@ func ValidateManualSuggestionInput(input ManualSuggestionInput) error {
 	return nil
 }
 
+func contextGapCandidateName(input ContextGapInput) string {
+	scope := append([]string{}, input.AffectedProducts...)
+	scope = append(scope, input.AffectedModules...)
+	scope = dedupeTrimmedStrings(scope)
+	if len(scope) == 0 {
+		return "生成失败：未识别影响范围"
+	}
+
+	const maxScopeItems = 3
+	if len(scope) > maxScopeItems {
+		scope = append(scope[:maxScopeItems], fmt.Sprintf("+%d", len(scope)-maxScopeItems))
+	}
+	return "生成失败：" + strings.Join(scope, ", ")
+}
+
+func contextGapSnippets(input ContextGapInput) []map[string]any {
+	stage := strings.TrimSpace(input.FailureStage)
+	if stage == "" {
+		stage = "generation"
+	}
+	errSummary := compactContextGapError(input.ErrorSummary)
+
+	snippets := []map[string]any{{
+		"type":  "failure",
+		"stage": stage,
+		"error": errSummary,
+		"text":  fmt.Sprintf("生成阶段失败（%s）：%s", stage, errSummary),
+	}, {
+		"type":              "affected_scope",
+		"affected_products": dedupeTrimmedStrings(input.AffectedProducts),
+		"affected_modules":  dedupeTrimmedStrings(input.AffectedModules),
+		"document_ids":      dedupePositiveInts(input.DocumentIDs),
+	}}
+
+	knowledgeIDs := dedupePositiveInts(input.KnowledgeIDs)
+	knowledgeNames := dedupeTrimmedStrings(input.KnowledgeNames)
+	if len(knowledgeIDs) > 0 || len(knowledgeNames) > 0 {
+		snippets = append(snippets, map[string]any{
+			"type":            "knowledge_context",
+			"knowledge_ids":   knowledgeIDs,
+			"knowledge_names": knowledgeNames,
+		})
+	}
+	return snippets
+}
+
+func compactContextGapError(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "unknown generation failure"
+	}
+
+	runes := []rune(trimmed)
+	if len(runes) <= maxContextGapErrorRunes {
+		return trimmed
+	}
+	return string(runes[:maxContextGapErrorRunes]) + "..."
+}
+
+func dedupeTrimmedStrings(values []string) []string {
+	deduped := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, trimmed)
+	}
+	return deduped
+}
+
+func dedupePositiveInts(values []int) []int {
+	deduped := make([]int, 0, len(values))
+	seen := make(map[int]struct{}, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		deduped = append(deduped, value)
+	}
+	return deduped
+}
+
 func (s *Service) CreateManual(ctx context.Context, input ManualSuggestionInput) (*SuggestionGroupView, error) {
 	if err := ValidateManualSuggestionInput(input); err != nil {
 		return nil, err
@@ -402,6 +523,9 @@ func (s *Service) SetStatus(ctx context.Context, id int, target string, resolved
 	row := &models.KnowledgeUpdateSuggestionGroup{}
 	if err := s.db.NewSelect().Model(row).Where("id = ?", id).Scan(ctx); err != nil {
 		return nil, false, err
+	}
+	if target == models.SuggestionStatusAdopted && row.CandidateType == models.SuggestionCandidateContextGap {
+		return nil, false, fmt.Errorf("%w: context_gap suggestions cannot be adopted automatically", ErrInvalidManualSuggestion)
 	}
 	if row.Status != models.SuggestionStatusPending {
 		view, err := s.getGroupView(ctx, row.ID)

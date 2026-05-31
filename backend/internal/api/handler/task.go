@@ -71,12 +71,14 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 	)
 
 	taskID := task.ID
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommitWithFailure(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
 			slog.Error("task analyze failed", "task_id", taskID, "error", err)
 			return err
 		}
 		return nil
+	}, func(ctx context.Context, tx bun.Tx, cause error) error {
+		return taskservice.New(tx).MarkTaskFailed(ctx, taskID)
 	})
 
 	c.JSON(http.StatusCreated, task)
@@ -184,9 +186,15 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 
 	tenantID, _ := TenantIDFromContext(c)
 	taskID := task.ID
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+	RunAsyncAfterCommitWithFailure(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		if err := taskservice.New(tx).GenerateCases(ctx, taskID); err != nil {
 			slog.Error("task generate failed", "task_id", taskID, "error", err)
+			return err
+		}
+		return nil
+	}, func(ctx context.Context, tx bun.Tx, cause error) error {
+		if err := taskservice.New(tx).MarkGenerationFailed(ctx, taskID, cause); err != nil {
+			slog.Error("task generate failure handling failed", "task_id", taskID, "error", err)
 			return err
 		}
 		return nil
@@ -232,12 +240,14 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	if rerunAnalyze {
 		tenantID, _ := TenantIDFromContext(c)
 		taskID := task.ID
-		RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		RunAsyncAfterCommitWithFailure(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
 			if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
 				slog.Error("task retry analyze failed", "task_id", taskID, "error", err)
 				return err
 			}
 			return nil
+		}, func(ctx context.Context, tx bun.Tx, cause error) error {
+			return taskservice.New(tx).MarkTaskFailed(ctx, taskID)
 		})
 	}
 

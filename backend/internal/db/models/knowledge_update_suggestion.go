@@ -5,6 +5,7 @@ const (
 	SuggestionStatusAdopted   = "adopted"
 	SuggestionStatusDismissed = "dismissed"
 
-	SuggestionCandidateProduct = "product"
-	SuggestionCandidateModule  = "module"
+	SuggestionCandidateProduct    = "product"
+	SuggestionCandidateModule     = "module"
+	SuggestionCandidateContextGap = "context_gap"
 )

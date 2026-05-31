@@ -112,3 +112,17 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 		}
 	})
 }
+
+func TestGenerationErrorCarriesFailureStage(t *testing.T) {
+	cause := errors.New("provider rejected request")
+	err := generationError(GenerationStageDeepAgentFallback, cause)
+	if err == nil {
+		t.Fatal("expected generation error")
+	}
+	if FailureStage(err) != GenerationStageDeepAgentFallback {
+		t.Fatalf("FailureStage() = %q, want %q", FailureStage(err), GenerationStageDeepAgentFallback)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("generation error should unwrap original cause")
+	}
+}
