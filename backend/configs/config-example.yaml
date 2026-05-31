@@ -24,6 +24,10 @@ model:
     secret_key: ""
     base_url: https://ark.cn-beijing.volces.com/api/v3
     region: cn-beijing
+    # Per LLM request timeout used by generation agents.
+    # Long-running calls fail fast so async tasks can enter failed state and
+    # record a context_gap instead of staying in generating forever.
+    request_timeout_seconds: 60
     # DeepSeek example:
     # provider: deepseek
     # model: deepseek-v4-pro

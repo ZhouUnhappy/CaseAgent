@@ -35,13 +35,14 @@ type ModelConfig struct {
 }
 
 type ChatModelConfig struct {
-	Provider  string `mapstructure:"provider"`
-	Model     string `mapstructure:"model"`
-	APIKey    string `mapstructure:"api_key"`
-	AccessKey string `mapstructure:"access_key"`
-	SecretKey string `mapstructure:"secret_key"`
-	BaseURL   string `mapstructure:"base_url"`
-	Region    string `mapstructure:"region"`
+	Provider              string `mapstructure:"provider"`
+	Model                 string `mapstructure:"model"`
+	APIKey                string `mapstructure:"api_key"`
+	AccessKey             string `mapstructure:"access_key"`
+	SecretKey             string `mapstructure:"secret_key"`
+	BaseURL               string `mapstructure:"base_url"`
+	Region                string `mapstructure:"region"`
+	RequestTimeoutSeconds int    `mapstructure:"request_timeout_seconds"`
 }
 
 type EmbeddingModelConfig struct {
@@ -70,6 +71,7 @@ func Load(configPath string) error {
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("yaml")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetDefault("model.chat.request_timeout_seconds", 60)
 	viper.SetDefault("suggestion.auto_dismiss_pending_days", 30)
 	viper.AutomaticEnv()
 

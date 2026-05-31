@@ -22,6 +22,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
 REPORT="${CASEAGENT_I2_E2E_REPORT:-$ROOT_DIR/.dev/i2_generation_e2e.md}"
+TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-apache-dubbo}"
 
 # shellcheck source=lib/tenant.sh
 . "$ROOT_DIR/scripts/lib/tenant.sh"
@@ -48,7 +49,7 @@ resolve_project_id() {
         printf '%s' "$CASEAGENT_I2_E2E_PROJECT_ID"
         return
     fi
-    psql "$CASEAGENT_PSQL_DSN" -At -c "
+    psql_tenant "$TENANT_SLUG" "
         SELECT id FROM projects
         WHERE name LIKE 'I1 public corpus %'
         ORDER BY id DESC LIMIT 1
@@ -61,7 +62,7 @@ resolve_document_id() {
         printf '%s' "$CASEAGENT_I2_E2E_DOCUMENT_ID"
         return
     fi
-    psql "$CASEAGENT_PSQL_DSN" -At -c "
+    psql_tenant "$TENANT_SLUG" "
         SELECT id FROM documents
         WHERE project_id = $pid AND status = 'completed'
         ORDER BY id DESC LIMIT 1
@@ -76,12 +77,6 @@ fi
 DOCUMENT_ID="$(resolve_document_id "$PROJECT_ID")"
 if [ -z "$DOCUMENT_ID" ]; then
     echo "no completed documents in project $PROJECT_ID" >&2
-    exit 1
-fi
-
-TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-$(tenant_slug_for_project "$PROJECT_ID")}"
-if [ -z "$TENANT_SLUG" ]; then
-    echo "could not resolve tenant for project $PROJECT_ID (override via CASEAGENT_TENANT_SLUG)" >&2
     exit 1
 fi
 

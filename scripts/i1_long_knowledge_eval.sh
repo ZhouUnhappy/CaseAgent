@@ -154,7 +154,7 @@ assert_embedding_written() {
     require_command psql
 
     local missing
-    missing="$(psql "$CASEAGENT_PSQL_DSN" -Atc "SELECT count(*) FROM knowledge_base WHERE id = $LONG_KNOWLEDGE_ID AND embedding IS NULL")"
+    missing="$(psql_tenant "$TENANT_SLUG" "SELECT count(*) FROM knowledge_base WHERE id = $LONG_KNOWLEDGE_ID AND embedding IS NULL")"
     if [ "$missing" -gt 0 ]; then
         echo "knowledge $LONG_KNOWLEDGE_ID has NULL embedding" >&2
         exit 1

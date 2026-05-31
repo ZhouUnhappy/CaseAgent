@@ -11,11 +11,11 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 | `i1_retrieval_smoke.sh` | `i1-smoke` | 仓库内简化 fixture |
 | `i1_public_corpus_eval.sh` | `apache-dubbo` | 全部 fixture 来自 apache/dubbo-website |
 | `i1_private_corpus_eval.sh` | `CASEAGENT_I1_PRIVATE_TENANT_SLUG` 必填，不给直接 exit | 防止私有数据误入默认 tenant |
-| `i2_generation_e2e.sh` | 自动从复用项目回查（`tenant_slug_for_project`） | 跟随被复用 project |
+| `i2_generation_e2e.sh` | `apache-dubbo` | 默认复用最新 public-corpus project；复用其他 project 时同时设置 `CASEAGENT_TENANT_SLUG` |
 | `multitenancy_isolation.sh` | 一次性创建 `iso-a-*` / `iso-b-*` 两个临时 tenant | 验证私有 vs 私有隔离 |
 | `i1_retrieval_cleanup.sh` | **绕过** RLS（用 `CASEAGENT_PSQL_DSN` superuser 直接 DELETE） | design intent |
 
-**`scripts/lib/tenant.sh`** 提供共享 helper：`ensure_tenant`（若不存在则 POST 创建），`tenant_slug_for_document` / `tenant_slug_for_project`（从 doc/project id 回查 slug，供 determinism / e2e 脚本使用）。
+**`scripts/lib/tenant.sh`** 提供共享 helper：`ensure_tenant`（若不存在则 POST 创建）、`psql_tenant`（为 app role 的直连 SQL 注入 `SET LOCAL app.tenant_id`）、`tenant_slug_for_document` / `tenant_slug_for_project`（从 doc/project id 回查 slug，供少量兼容路径使用）。
 
 **新增脚本约定**：必须在文档（README + 脚本头注释）里说明默认 `TENANT_SLUG` 及理由；如果脚本面向多个独立来源的语料，必须为每份语料声明独立的 tenant slug，不能塞进同一个 tenant。
 

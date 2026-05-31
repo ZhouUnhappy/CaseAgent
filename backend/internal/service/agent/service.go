@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"caseagent/internal/agent/boundary"
 	"caseagent/internal/agent/deep"
@@ -48,13 +49,17 @@ type Service struct {
 	opsAgent        *ops.Agent
 	failureAgent    *failure.Agent
 	boundaryAgent   *boundary.Agent
+	chatCallTimeout time.Duration
 }
 
 type Config struct {
-	ChatModel model.BaseChatModel // Optional, if not provided will initialize from config
+	ChatModel       model.BaseChatModel // Optional, if not provided will initialize from config
+	ChatCallTimeout time.Duration       // Optional, defaults to model.chat.request_timeout_seconds
 }
 
 const GenerationStageDeepAgentFallback = "deep_agent_fallback"
+
+const defaultChatCallTimeout = 60 * time.Second
 
 type GenerationError struct {
 	Stage string
@@ -91,8 +96,13 @@ func generationError(stage string, err error) error {
 }
 
 func New(ctx context.Context, cfg *Config) (*Service, error) {
+	if cfg == nil {
+		cfg = &Config{}
+	}
+
 	var chatModel model.BaseChatModel
 	var err error
+	callTimeout := cfg.ChatCallTimeout
 
 	// If ChatModel is provided, use it; otherwise initialize from config
 	if cfg.ChatModel != nil {
@@ -104,6 +114,9 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize chat model: %w", err)
 		}
+	}
+	if callTimeout == 0 {
+		callTimeout = configuredChatCallTimeout(config.Get())
 	}
 
 	// Create sub-agents
@@ -145,7 +158,15 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		opsAgent:        opsAgent,
 		failureAgent:    failureAgent,
 		boundaryAgent:   boundaryAgent,
+		chatCallTimeout: callTimeout,
 	}, nil
+}
+
+func configuredChatCallTimeout(appCfg *config.Config) time.Duration {
+	if appCfg == nil || appCfg.Model.Chat.RequestTimeoutSeconds <= 0 {
+		return defaultChatCallTimeout
+	}
+	return time.Duration(appCfg.Model.Chat.RequestTimeoutSeconds) * time.Second
 }
 
 // GenerateCases runs each sub-agent (with retry-once on transient failure),
@@ -168,7 +189,7 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 
 	sections := make([]generatedSection, 0, len(generators))
 	for _, g := range generators {
-		output, err := runSubAgentWithRetry(ctx, g.name, func(ctx context.Context) (string, error) {
+		output, err := runSubAgentWithRetry(ctx, g.name, s.chatCallTimeout, func(ctx context.Context) (string, error) {
 			return g.run(ctx, requirements, knowledge)
 		})
 		if err != nil {
@@ -204,7 +225,9 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 		return s.generateFallback(ctx, requirements, knowledge)
 	}
 
-	refined, err := s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
+	refined, err := runTimedAgentCall(ctx, "deep_refine", "initial", s.chatCallTimeout, func(ctx context.Context) (string, error) {
+		return s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
+	})
 	if err != nil || strings.TrimSpace(refined) == "" {
 		if err != nil {
 			slog.Warn("DeepAgent.RefineCases failed; returning unrefined dedup'd payload", "error", err)
@@ -222,7 +245,9 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 }
 
 func (s *Service) generateFallback(ctx context.Context, requirements string, knowledge string) (string, error) {
-	result, err := s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+	result, err := runTimedAgentCall(ctx, "deep_fallback", "initial", s.chatCallTimeout, func(ctx context.Context) (string, error) {
+		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
+	})
 	if err != nil {
 		return "", generationError(GenerationStageDeepAgentFallback, err)
 	}
@@ -232,13 +257,61 @@ func (s *Service) generateFallback(ctx context.Context, requirements string, kno
 // runSubAgentWithRetry invokes fn once and, on error, retries exactly one
 // more time. It logs the first-attempt error so that intermittent provider
 // failures (rate limits, transient 5xx) are visible in operator logs.
-func runSubAgentWithRetry(ctx context.Context, name string, fn func(context.Context) (string, error)) (string, error) {
-	output, err := fn(ctx)
+func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duration, fn func(context.Context) (string, error)) (string, error) {
+	output, err := runTimedAgentCall(ctx, name, "initial", timeout, fn)
 	if err == nil {
 		return output, nil
 	}
+	if isContextError(err) {
+		return "", err
+	}
 	slog.Warn("sub-agent first attempt failed; retrying once", "agent", name, "error", err)
-	return fn(ctx)
+	return runTimedAgentCall(ctx, name, "retry", timeout, fn)
+}
+
+func runTimedAgentCall(
+	ctx context.Context,
+	name string,
+	attempt string,
+	timeout time.Duration,
+	fn func(context.Context) (string, error),
+) (string, error) {
+	callCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	started := time.Now()
+	slog.Info("agent call started",
+		"agent", name,
+		"attempt", attempt,
+		"timeout", timeout.String())
+
+	output, err := fn(callCtx)
+	elapsed := time.Since(started)
+	if err == nil {
+		slog.Info("agent call completed",
+			"agent", name,
+			"attempt", attempt,
+			"elapsed_ms", elapsed.Milliseconds(),
+			"output_bytes", len(output))
+		return output, nil
+	}
+	if callCtx.Err() != nil {
+		err = callCtx.Err()
+	}
+	slog.Warn("agent call failed",
+		"agent", name,
+		"attempt", attempt,
+		"elapsed_ms", elapsed.Milliseconds(),
+		"error", err)
+	return "", err
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 type generatedSection struct {

@@ -302,7 +302,7 @@ assert_db_counts() {
     knowledge_ids="$(join_by_comma "${KNOWLEDGE_IDS[@]}")"
 
     local doc_counts
-    doc_counts="$(psql "$CASEAGENT_PSQL_DSN" -At -F $'\t' -c "SELECT count(*), count(*) FILTER (WHERE embedding IS NOT NULL), count(*) FILTER (WHERE embedding IS NULL) FROM document_chunks WHERE document_id IN ($doc_ids)")"
+    doc_counts="$(psql_tenant "$TENANT_SLUG" "SELECT count(*), count(*) FILTER (WHERE embedding IS NOT NULL), count(*) FILTER (WHERE embedding IS NULL) FROM document_chunks WHERE document_id IN ($doc_ids)" -F $'\t')"
     DOCUMENT_CHUNK_COUNT="$(cut -f1 <<<"$doc_counts")"
     DOCUMENT_EMBEDDING_COUNT="$(cut -f2 <<<"$doc_counts")"
     local missing_doc_embeddings
@@ -318,7 +318,7 @@ assert_db_counts() {
     fi
 
     local knowledge_counts
-    knowledge_counts="$(psql "$CASEAGENT_PSQL_DSN" -At -F $'\t' -c "SELECT count(*), count(*) FILTER (WHERE embedding IS NOT NULL), count(*) FILTER (WHERE embedding IS NULL) FROM knowledge_base WHERE id IN ($knowledge_ids)")"
+    knowledge_counts="$(psql_tenant "$TENANT_SLUG" "SELECT count(*), count(*) FILTER (WHERE embedding IS NOT NULL), count(*) FILTER (WHERE embedding IS NULL) FROM knowledge_base WHERE id IN ($knowledge_ids)" -F $'\t')"
     local knowledge_count
     knowledge_count="$(cut -f1 <<<"$knowledge_counts")"
     KNOWLEDGE_EMBEDDING_COUNT="$(cut -f2 <<<"$knowledge_counts")"

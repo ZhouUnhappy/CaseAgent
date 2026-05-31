@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"caseagent/internal/config"
 )
 
 func TestParseGeneratedSections(t *testing.T) {
@@ -63,7 +66,7 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 
 	t.Run("success on first try makes only one call", func(t *testing.T) {
 		calls := 0
-		out, err := runSubAgentWithRetry(ctx, "ok", func(_ context.Context) (string, error) {
+		out, err := runSubAgentWithRetry(ctx, "ok", time.Second, func(_ context.Context) (string, error) {
 			calls++
 			return "payload", nil
 		})
@@ -80,7 +83,7 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 
 	t.Run("transient failure recovered on retry", func(t *testing.T) {
 		calls := 0
-		out, err := runSubAgentWithRetry(ctx, "transient", func(_ context.Context) (string, error) {
+		out, err := runSubAgentWithRetry(ctx, "transient", time.Second, func(_ context.Context) (string, error) {
 			calls++
 			if calls == 1 {
 				return "", errors.New("rate limited")
@@ -100,7 +103,7 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 
 	t.Run("persistent failure surfaces after exactly one retry", func(t *testing.T) {
 		calls := 0
-		_, err := runSubAgentWithRetry(ctx, "persistent", func(_ context.Context) (string, error) {
+		_, err := runSubAgentWithRetry(ctx, "persistent", time.Second, func(_ context.Context) (string, error) {
 			calls++
 			return "", errors.New("hard fail")
 		})
@@ -111,6 +114,35 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 			t.Fatalf("expected exactly 2 calls (try + 1 retry) before giving up, got %d", calls)
 		}
 	})
+
+	t.Run("deadline exceeded is not retried", func(t *testing.T) {
+		calls := 0
+		_, err := runSubAgentWithRetry(ctx, "timeout", time.Nanosecond, func(ctx context.Context) (string, error) {
+			calls++
+			<-ctx.Done()
+			return "", ctx.Err()
+		})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected deadline exceeded, got %v", err)
+		}
+		if calls != 1 {
+			t.Fatalf("expected no retry for deadline exceeded, got %d calls", calls)
+		}
+	})
+}
+
+func TestConfiguredChatCallTimeout(t *testing.T) {
+	if got := configuredChatCallTimeout(nil); got != defaultChatCallTimeout {
+		t.Fatalf("nil config timeout = %s, want %s", got, defaultChatCallTimeout)
+	}
+	cfg := &config.Config{}
+	if got := configuredChatCallTimeout(cfg); got != defaultChatCallTimeout {
+		t.Fatalf("zero config timeout = %s, want %s", got, defaultChatCallTimeout)
+	}
+	cfg.Model.Chat.RequestTimeoutSeconds = 7
+	if got := configuredChatCallTimeout(cfg); got != 7*time.Second {
+		t.Fatalf("configured timeout = %s, want 7s", got)
+	}
 }
 
 func TestGenerationErrorCarriesFailureStage(t *testing.T) {

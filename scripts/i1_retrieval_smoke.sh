@@ -237,14 +237,14 @@ assert_document_chunk_count() {
     require_command psql
 
     local count
-    count="$(psql "$CASEAGENT_PSQL_DSN" -Atc "SELECT count(*) FROM document_chunks WHERE document_id = $DOCUMENT_ID")"
+    count="$(psql_tenant "$TENANT_SLUG" "SELECT count(*) FROM document_chunks WHERE document_id = $DOCUMENT_ID")"
     if [ "$count" -lt 1 ]; then
         echo "expected document_chunks rows for document $DOCUMENT_ID, got $count" >&2
         exit 1
     fi
 
     local missing
-    missing="$(psql "$CASEAGENT_PSQL_DSN" -Atc "SELECT count(*) FROM document_chunks WHERE document_id = $DOCUMENT_ID AND embedding IS NULL")"
+    missing="$(psql_tenant "$TENANT_SLUG" "SELECT count(*) FROM document_chunks WHERE document_id = $DOCUMENT_ID AND embedding IS NULL")"
     if [ "$missing" -gt 0 ]; then
         echo "document $DOCUMENT_ID has $missing chunks with NULL embedding" >&2
         exit 1
@@ -261,7 +261,7 @@ assert_knowledge_embedding() {
     require_command psql
 
     local missing
-    missing="$(psql "$CASEAGENT_PSQL_DSN" -Atc "SELECT count(*) FROM knowledge_base WHERE id IN ($PRODUCT_KNOWLEDGE_ID, $MODULE_KNOWLEDGE_ID) AND embedding IS NULL")"
+    missing="$(psql_tenant "$TENANT_SLUG" "SELECT count(*) FROM knowledge_base WHERE id IN ($PRODUCT_KNOWLEDGE_ID, $MODULE_KNOWLEDGE_ID) AND embedding IS NULL")"
     if [ "$missing" -gt 0 ]; then
         echo "$missing knowledge entries (of {$PRODUCT_KNOWLEDGE_ID, $MODULE_KNOWLEDGE_ID}) have NULL embedding" >&2
         exit 1

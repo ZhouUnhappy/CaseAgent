@@ -70,6 +70,7 @@
 **关键入口**：
 
 - Agent Service（编排）：`backend/internal/service/agent/service.go`
+  - 每次 LLM 调用使用 `model.chat.request_timeout_seconds` 做单次超时，并输出 agent start/end/failure 日志，避免真实 provider 慢调用让 task 长期停在 `generating`
 - DeepAgent（协调）：`backend/internal/agent/deep/`
 - 子 Agent：`backend/internal/agent/{functional,ops,failure,boundary}/`
 - 任务服务（解析、去重、source_context 拼装）：`backend/internal/service/task/service.go`

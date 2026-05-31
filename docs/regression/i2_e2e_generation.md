@@ -310,6 +310,8 @@ WHERE id = :task_id AND status = 'failed';
 
 最近一轮：
 
-- 步骤 4–7：由 `scripts/i2_generation_e2e.sh`（task_id=3 / 4 个 section / 37 cases，与 `i2_retrieval_context.md` 样例 2 同源）承担，已在 I2-T3 中跑通；脚本内含 I2-T3 三项断言（无重复标题 / 每条 case 都有 `affected_products`+`affected_modules` / 每行 `test_cases` 都有 `source_context`）。
+- 步骤 4–7：由 `CASEAGENT_PSQL_DSN='postgres://...' CASEAGENT_I2_E2E_PROJECT_ID=54 bash scripts/i2_generation_e2e.sh` 承担，task_id=46，终态 `completed`，4 个 section / 32 cases；脚本内含 I2-T3 三项断言（无重复标题 / 每条 case 都有 `affected_products`+`affected_modules` / 每行 `test_cases` 都有 `source_context`）。
+- 本轮基于 I1 public corpus run_token=`i1-public-20260531134530-8970`，project_id=54，document_id=13 (`dubbo-zipkin-integration.md`)。
+- 断言结果：`duplicate_title_count=0`，`cases_missing_affected_fields=0`，`sections_with_source_context=4/4`，`source_context[0]` 摘要为 `document_queries=9 knowledge_queries=9 document_hits=1 knowledge_hits=6 knowledge_shipped_ids=8`。
 - 步骤 1–3 与 步骤 8–9：本文 cURL 样例可直接对照执行；首次走完整流程后，把请求/响应/`UPDATE` 后的 `jsonb_typeof(cases)` 校验结果回填到 `.dev/i2_e2e_generation.md`（gitignored，重跑覆盖）。
-- DB 直查校验：在 task_id=3 上执行 `SELECT id, jsonb_typeof(cases), jsonb_array_length(cases), source_context ? 'document_queries' FROM test_cases WHERE task_id=3 ORDER BY id`，所有 4 行均返回 `array / >0 / t`，证明 I2-T3 修复后的 JSONB 数组形态与 source_context 字段在生成阶段已稳定落库（这一项也是 `scripts/i2_generation_e2e.sh` 退出码隐含验证的内容）。
+- DB 直查校验由 `scripts/i2_generation_e2e.sh` 退出码隐含覆盖；task_id=46 的所有 4 行均满足 JSONB 数组形态与 source_context 字段要求。
