@@ -44,7 +44,7 @@ func main() {
 	}
 	jobRunner := jobservice.NewRunner(
 		jobservice.NewBunStore(db.DB),
-		jobservice.NewTaskExecutor(),
+		jobservice.NewTaskExecutor(db.DB),
 		jobRunnerOptions(config.Get().JobRunner),
 	)
 	jobRunner.Start(ctx)

@@ -9,14 +9,21 @@ import (
 	documentservice "caseagent/internal/service/document"
 	knowledgeservice "caseagent/internal/service/knowledge"
 	taskservice "caseagent/internal/service/task"
+	workflowservice "caseagent/internal/service/workflow"
 
 	"github.com/uptrace/bun"
 )
 
-type TaskExecutor struct{}
+type TaskExecutor struct {
+	traceDB *bun.DB
+}
 
-func NewTaskExecutor() *TaskExecutor {
-	return &TaskExecutor{}
+func NewTaskExecutor(traceDB ...*bun.DB) *TaskExecutor {
+	executor := &TaskExecutor{}
+	if len(traceDB) > 0 {
+		executor.traceDB = traceDB[0]
+	}
+	return executor
 }
 
 func (e *TaskExecutor) Execute(ctx context.Context, tx bun.Tx, job *models.BackgroundJob) error {
@@ -26,13 +33,13 @@ func (e *TaskExecutor) Execute(ctx context.Context, tx bun.Tx, job *models.Backg
 		if err != nil {
 			return err
 		}
-		return taskservice.New(tx).AnalyzeTask(ctx, taskID)
+		return e.taskService(tx).AnalyzeTask(ctx, taskID)
 	case models.JobTypeGenerate:
 		taskID, err := requiredResourceID(job.TaskID, "task_id")
 		if err != nil {
 			return err
 		}
-		return taskservice.New(tx).GenerateCases(ctx, taskID)
+		return e.taskService(tx).GenerateCases(ctx, taskID)
 	case models.JobTypeDocumentProcess, models.JobTypeDocumentReprocess:
 		docID, err := requiredResourceID(job.DocumentID, "document_id")
 		if err != nil {
@@ -65,13 +72,13 @@ func (e *TaskExecutor) HandleFailure(ctx context.Context, tx bun.Tx, job *models
 		if err != nil {
 			return err
 		}
-		return taskservice.New(tx).MarkTaskFailed(ctx, taskID)
+		return e.taskService(tx).MarkTaskFailed(ctx, taskID)
 	case models.JobTypeGenerate:
 		taskID, err := requiredResourceID(job.TaskID, "task_id")
 		if err != nil {
 			return err
 		}
-		return taskservice.New(tx).MarkGenerationFailed(ctx, taskID, cause)
+		return e.taskService(tx).MarkGenerationFailed(ctx, taskID, cause)
 	case models.JobTypeDocumentProcess, models.JobTypeDocumentReprocess:
 		docID, err := requiredResourceID(job.DocumentID, "document_id")
 		if err != nil {
@@ -97,6 +104,14 @@ func (e *TaskExecutor) HandleFailure(ctx context.Context, tx bun.Tx, job *models
 	default:
 		return fmt.Errorf("unsupported background job type %q", job.JobType)
 	}
+}
+
+func (e *TaskExecutor) taskService(tx bun.Tx) *taskservice.Service {
+	service := taskservice.New(tx)
+	if e.traceDB != nil {
+		service.WithTraceRecorder(workflowservice.NewTenantRecorder(e.traceDB))
+	}
+	return service
 }
 
 func requiredResourceID(id *int, field string) (int, error) {

@@ -10,7 +10,6 @@ import (
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"github.com/uptrace/bun"
 )
 
 type modelTraceContextKey string
@@ -24,18 +23,18 @@ type modelTraceInfo struct {
 
 type tracedChatModel struct {
 	base      einomodel.BaseChatModel
-	db        bun.IDB
+	recorder  workflowservice.ModelCallRecorder
 	provider  string
 	modelName string
 }
 
-func traceChatModel(base einomodel.BaseChatModel, db bun.IDB, provider string, modelName string) einomodel.BaseChatModel {
-	if base == nil || db == nil {
+func traceChatModel(base einomodel.BaseChatModel, recorder workflowservice.ModelCallRecorder, provider string, modelName string) einomodel.BaseChatModel {
+	if base == nil || recorder == nil {
 		return base
 	}
 	return &tracedChatModel{
 		base:      base,
-		db:        db,
+		recorder:  recorder,
 		provider:  provider,
 		modelName: modelName,
 	}
@@ -84,8 +83,9 @@ func (m *tracedChatModel) record(ctx context.Context, input []*schema.Message, o
 		}
 	}
 
-	if _, err := workflowservice.New(m.db).RecordModelCall(ctx, workflowservice.ModelCallInput{
+	if _, err := m.recorder.RecordModelCall(ctx, workflowservice.ModelCallInput{
 		WorkflowRunID: workflowservice.RunIDPointerFromContext(ctx),
+		AgentRunID:    workflowservice.AgentRunIDPointerFromContext(ctx),
 		Provider:      m.provider,
 		Model:         m.modelName,
 		Status:        status,

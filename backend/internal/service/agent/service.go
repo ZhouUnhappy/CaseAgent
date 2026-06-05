@@ -38,6 +38,8 @@ import (
 	"caseagent/internal/agent/ops"
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
+	"caseagent/internal/db/models"
+	workflowservice "caseagent/internal/service/workflow"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -51,14 +53,16 @@ type Service struct {
 	failureAgent    *failure.Agent
 	boundaryAgent   *boundary.Agent
 	chatCallTimeout time.Duration
+	traceRecorder   workflowservice.AgentTraceRecorder
 }
 
 type Config struct {
 	ChatModel       model.BaseChatModel // Optional, if not provided will initialize from config
 	ChatCallTimeout time.Duration       // Optional, defaults to model.chat.request_timeout_seconds
 	TraceDB         bun.IDB             // Optional, records workflow model_calls when a workflow run is in context
-	ChatProvider    string              // Optional, used for model_call trace rows when ChatModel is provided
-	ChatModelName   string              // Optional, used for model_call trace rows when ChatModel is provided
+	TraceRecorder   workflowservice.AgentTraceRecorder
+	ChatProvider    string // Optional, used for model_call trace rows when ChatModel is provided
+	ChatModelName   string // Optional, used for model_call trace rows when ChatModel is provided
 }
 
 const GenerationStageDeepAgentFallback = "deep_agent_fallback"
@@ -133,7 +137,11 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	if callTimeout == 0 {
 		callTimeout = configuredChatCallTimeout(config.Get())
 	}
-	chatModel = traceChatModel(chatModel, cfg.TraceDB, provider, modelName)
+	traceRecorder := cfg.TraceRecorder
+	if traceRecorder == nil && cfg.TraceDB != nil {
+		traceRecorder = workflowservice.NewRecorder(cfg.TraceDB)
+	}
+	chatModel = traceChatModel(chatModel, traceRecorder, provider, modelName)
 
 	// Create sub-agents
 	functionalAgent, err := functional.New(ctx, &functional.Config{ChatModel: chatModel})
@@ -175,6 +183,7 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		failureAgent:    failureAgent,
 		boundaryAgent:   boundaryAgent,
 		chatCallTimeout: callTimeout,
+		traceRecorder:   traceRecorder,
 	}, nil
 }
 
@@ -205,7 +214,7 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 
 	sections := make([]generatedSection, 0, len(generators))
 	for _, g := range generators {
-		output, err := runSubAgentWithRetry(ctx, g.name, s.chatCallTimeout, func(ctx context.Context) (string, error) {
+		output, err := runSubAgentWithRetry(ctx, g.name, s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
 			return g.run(ctx, requirements, knowledge)
 		})
 		if err != nil {
@@ -241,7 +250,7 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 		return s.generateFallback(ctx, requirements, knowledge)
 	}
 
-	refined, err := runTimedAgentCall(ctx, "deep_refine", "initial", s.chatCallTimeout, func(ctx context.Context) (string, error) {
+	refined, err := runTimedAgentCall(ctx, "deep_refine", "initial", s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
 		return s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
 	})
 	if err != nil || strings.TrimSpace(refined) == "" {
@@ -261,7 +270,7 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 }
 
 func (s *Service) generateFallback(ctx context.Context, requirements string, knowledge string) (string, error) {
-	result, err := runTimedAgentCall(ctx, "deep_fallback", "initial", s.chatCallTimeout, func(ctx context.Context) (string, error) {
+	result, err := runTimedAgentCall(ctx, "deep_fallback", "initial", s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
 	})
 	if err != nil {
@@ -273,8 +282,8 @@ func (s *Service) generateFallback(ctx context.Context, requirements string, kno
 // runSubAgentWithRetry invokes fn once and, on error, retries exactly one
 // more time. It logs the first-attempt error so that intermittent provider
 // failures (rate limits, transient 5xx) are visible in operator logs.
-func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duration, fn func(context.Context) (string, error)) (string, error) {
-	output, err := runTimedAgentCall(ctx, name, "initial", timeout, fn)
+func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duration, recorder workflowservice.AgentTraceRecorder, fn func(context.Context) (string, error)) (string, error) {
+	output, err := runTimedAgentCall(ctx, name, "initial", timeout, recorder, fn)
 	if err == nil {
 		return output, nil
 	}
@@ -282,7 +291,7 @@ func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duratio
 		return "", err
 	}
 	slog.Warn("sub-agent first attempt failed; retrying once", "agent", name, "error", err)
-	return runTimedAgentCall(ctx, name, "retry", timeout, fn)
+	return runTimedAgentCall(ctx, name, "retry", timeout, recorder, fn)
 }
 
 func runTimedAgentCall(
@@ -290,6 +299,7 @@ func runTimedAgentCall(
 	name string,
 	attempt string,
 	timeout time.Duration,
+	recorder workflowservice.AgentTraceRecorder,
 	fn func(context.Context) (string, error),
 ) (string, error) {
 	callCtx := ctx
@@ -305,9 +315,16 @@ func runTimedAgentCall(
 		"attempt", attempt,
 		"timeout", timeout.String())
 
-	output, err := fn(withModelTrace(callCtx, name, attempt))
+	agentRunID := startTracedAgentRun(ctx, recorder, name, attempt)
+	tracedCtx := withModelTrace(callCtx, name, attempt)
+	if agentRunID > 0 {
+		tracedCtx = workflowservice.WithAgentRunID(tracedCtx, agentRunID)
+	}
+
+	output, err := fn(tracedCtx)
 	elapsed := time.Since(started)
 	if err == nil {
+		finishTracedAgentRun(ctx, recorder, agentRunID, models.WorkflowStatusSucceeded, output, nil, elapsed)
 		slog.Info("agent call completed",
 			"agent", name,
 			"attempt", attempt,
@@ -318,12 +335,52 @@ func runTimedAgentCall(
 	if callCtx.Err() != nil {
 		err = callCtx.Err()
 	}
+	finishTracedAgentRun(ctx, recorder, agentRunID, models.WorkflowStatusFailed, "", err, elapsed)
 	slog.Warn("agent call failed",
 		"agent", name,
 		"attempt", attempt,
 		"elapsed_ms", elapsed.Milliseconds(),
 		"error", err)
 	return "", err
+}
+
+func startTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTraceRecorder, name string, attempt string) int {
+	if recorder == nil {
+		return 0
+	}
+	row, err := recorder.StartAgentRun(ctx, workflowservice.StartAgentRunInput{
+		WorkflowRunID: workflowservice.RunIDPointerFromContext(ctx),
+		AgentName:     name,
+		Stage:         attempt,
+		Metadata: map[string]any{
+			"attempt": attempt,
+		},
+	})
+	if err != nil {
+		slog.Warn("agent run trace start failed", "agent", name, "attempt", attempt, "error", err)
+		return 0
+	}
+	return row.ID
+}
+
+func finishTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTraceRecorder, agentRunID int, status string, output string, cause error, elapsed time.Duration) {
+	if recorder == nil || agentRunID <= 0 {
+		return
+	}
+	lastErr := ""
+	if cause != nil {
+		lastErr = cause.Error()
+	}
+	if err := recorder.FinishAgentRun(ctx, agentRunID, workflowservice.FinishAgentRunInput{
+		Status:        status,
+		OutputSummary: output,
+		LastError:     lastErr,
+		Metadata: map[string]any{
+			"elapsed_ms": elapsed.Milliseconds(),
+		},
+	}); err != nil {
+		slog.Warn("agent run trace finish failed", "agent_run_id", agentRunID, "status", status, "error", err)
+	}
 }
 
 func isContextError(err error) bool {

@@ -6,6 +6,7 @@ import (
 	agentservice "caseagent/internal/service/agent"
 	retrievalservice "caseagent/internal/service/retrieval"
 	suggestionservice "caseagent/internal/service/suggestion"
+	workflowservice "caseagent/internal/service/workflow"
 )
 
 type CaseGenerator interface {
@@ -24,7 +25,7 @@ type SuggestionRecorder interface {
 
 func (s *Service) caseGenerator(ctx context.Context) (CaseGenerator, error) {
 	if s.newCaseGenerator == nil {
-		return agentservice.New(ctx, &agentservice.Config{TraceDB: s.db})
+		return agentservice.New(ctx, &agentservice.Config{TraceRecorder: s.workflowRecorder()})
 	}
 	return s.newCaseGenerator(ctx)
 }
@@ -41,4 +42,11 @@ func (s *Service) suggestionRecorder() SuggestionRecorder {
 		return suggestionservice.New(s.db)
 	}
 	return s.newSuggestionRecorder()
+}
+
+func (s *Service) workflowRecorder() *workflowservice.Recorder {
+	if s.traceRecorder != nil {
+		return s.traceRecorder
+	}
+	return workflowservice.NewRecorder(s.db)
 }

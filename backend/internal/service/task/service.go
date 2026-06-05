@@ -15,6 +15,7 @@ import (
 
 type Service struct {
 	db                    bun.IDB
+	traceRecorder         *workflowservice.Recorder
 	newCaseGenerator      func(ctx context.Context) (CaseGenerator, error)
 	newRetriever          func() Retriever
 	newSuggestionRecorder func() SuggestionRecorder
@@ -22,6 +23,11 @@ type Service struct {
 
 func New(db bun.IDB) *Service {
 	return &Service{db: db}
+}
+
+func (s *Service) WithTraceRecorder(recorder *workflowservice.Recorder) *Service {
+	s.traceRecorder = recorder
+	return s
 }
 
 func (s *Service) AnalyzeTask(ctx context.Context, taskID int) (err error) {
@@ -97,7 +103,7 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, knowledgeResultsToBaseEntries(retrievedHits))
 	requirementsContext, documentHits := buildRequirementsContext(ctx, retriever, requirements, task.DocumentIDs, task.AffectedProducts, task.AffectedModules)
 	runID := workflowservice.RunIDPointerFromContext(ctx)
-	recordRetrievalTrace(ctx, s.db, taskID, runID,
+	recordRetrievalTrace(ctx, s.workflowRecorder(), taskID, runID,
 		buildDocumentQueries(requirements, task.AffectedProducts, task.AffectedModules),
 		documentHits,
 		buildKnowledgeQueries(requirements, task.AffectedProducts, task.AffectedModules),
@@ -111,7 +117,7 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 
 	knowledgeContext := formatKnowledgeContext(knowledgeEntries)
 	rawCases, err := agentSvc.GenerateCases(ctx, requirementsContext, knowledgeContext)
-	recordAgentTrace(ctx, s.db, taskID, runID, requirementsContext, knowledgeContext, rawCases, err)
+	recordAgentTrace(ctx, s.workflowRecorder(), taskID, runID, requirementsContext, knowledgeContext, rawCases, err)
 	if err != nil {
 		stage := agentservice.FailureStage(err)
 		if stage == "" {
@@ -142,14 +148,14 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	if err = s.persistGeneratedCases(ctx, taskID, sections, sourceContext); err != nil {
 		return err
 	}
-	recordGeneratedCasesArtifact(ctx, s.db, taskID, runID, sections, sourceContext)
+	recordGeneratedCasesArtifact(ctx, s.workflowRecorder(), taskID, runID, sections, sourceContext)
 
 	return s.updateTaskStatus(ctx, taskID, models.TaskStatusCompleted)
 }
 
 func recordRetrievalTrace(
 	ctx context.Context,
-	db bun.IDB,
+	recorder *workflowservice.Recorder,
 	taskID int,
 	runID *int,
 	documentQueries []string,
@@ -158,7 +164,6 @@ func recordRetrievalTrace(
 	knowledgeHits []retrievalservice.KnowledgeResult,
 ) {
 	taskIDPtr := &taskID
-	recorder := workflowservice.New(db)
 	if _, err := recorder.RecordRetrievalRun(ctx, workflowservice.RetrievalRunInput{
 		WorkflowRunID: runID,
 		TaskID:        taskIDPtr,
@@ -185,7 +190,7 @@ func recordRetrievalTrace(
 	}
 }
 
-func recordAgentTrace(ctx context.Context, db bun.IDB, taskID int, runID *int, requirements string, knowledge string, output string, cause error) {
+func recordAgentTrace(ctx context.Context, recorder *workflowservice.Recorder, taskID int, runID *int, requirements string, knowledge string, output string, cause error) {
 	status := models.WorkflowStatusSucceeded
 	lastErr := ""
 	if cause != nil {
@@ -193,7 +198,7 @@ func recordAgentTrace(ctx context.Context, db bun.IDB, taskID int, runID *int, r
 		lastErr = cause.Error()
 	}
 	taskIDPtr := &taskID
-	if _, err := workflowservice.New(db).RecordAgentRun(ctx, workflowservice.AgentRunInput{
+	if _, err := recorder.RecordAgentRun(ctx, workflowservice.AgentRunInput{
 		WorkflowRunID: runID,
 		TaskID:        taskIDPtr,
 		AgentName:     "case_generation",
@@ -212,14 +217,14 @@ func recordAgentTrace(ctx context.Context, db bun.IDB, taskID int, runID *int, r
 	}
 }
 
-func recordGeneratedCasesArtifact(ctx context.Context, db bun.IDB, taskID int, runID *int, sections []generatedSection, sourceContext map[string]any) {
+func recordGeneratedCasesArtifact(ctx context.Context, recorder *workflowservice.Recorder, taskID int, runID *int, sections []generatedSection, sourceContext map[string]any) {
 	payload, err := json.Marshal(sections)
 	if err != nil {
 		slog.Warn("generated cases artifact marshal failed", "task_id", taskID, "error", err)
 		return
 	}
 	taskIDPtr := &taskID
-	if _, err := workflowservice.New(db).RecordArtifact(ctx, workflowservice.ArtifactInput{
+	if _, err := recorder.RecordArtifact(ctx, workflowservice.ArtifactInput{
 		WorkflowRunID: runID,
 		ArtifactType:  models.ArtifactTypeGeneratedCases,
 		ResourceType:  "task",

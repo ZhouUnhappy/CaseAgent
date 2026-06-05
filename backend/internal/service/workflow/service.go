@@ -15,6 +15,7 @@ import (
 type contextKey string
 
 const runIDContextKey contextKey = "workflow_run_id"
+const agentRunIDContextKey contextKey = "agent_run_id"
 
 type Service struct {
 	db bun.IDB
@@ -36,6 +37,22 @@ type AgentRunInput struct {
 	Stage         string
 	Status        string
 	InputSummary  string
+	OutputSummary string
+	LastError     string
+	Metadata      map[string]any
+}
+
+type StartAgentRunInput struct {
+	WorkflowRunID *int
+	TaskID        *int
+	AgentName     string
+	Stage         string
+	InputSummary  string
+	Metadata      map[string]any
+}
+
+type FinishAgentRunInput struct {
+	Status        string
 	OutputSummary string
 	LastError     string
 	Metadata      map[string]any
@@ -91,6 +108,25 @@ func RunIDFromContext(ctx context.Context) (int, bool) {
 
 func RunIDPointerFromContext(ctx context.Context) *int {
 	if id, ok := RunIDFromContext(ctx); ok {
+		return &id
+	}
+	return nil
+}
+
+func WithAgentRunID(ctx context.Context, agentRunID int) context.Context {
+	if agentRunID <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, agentRunIDContextKey, agentRunID)
+}
+
+func AgentRunIDFromContext(ctx context.Context) (int, bool) {
+	value, ok := ctx.Value(agentRunIDContextKey).(int)
+	return value, ok && value > 0
+}
+
+func AgentRunIDPointerFromContext(ctx context.Context) *int {
+	if id, ok := AgentRunIDFromContext(ctx); ok {
 		return &id
 	}
 	return nil
@@ -240,6 +276,51 @@ func (s *Service) RecordAgentRun(ctx context.Context, input AgentRunInput) (*mod
 		return nil, err
 	}
 	return row, nil
+}
+
+func (s *Service) StartAgentRun(ctx context.Context, input StartAgentRunInput) (*models.AgentRun, error) {
+	tenantID, ok := tenantdb.TenantFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("start agent run: no tenant in context")
+	}
+	now := time.Now()
+	startedAt := now
+	row := &models.AgentRun{
+		TenantID:      tenantID,
+		WorkflowRunID: input.WorkflowRunID,
+		TaskID:        input.TaskID,
+		AgentName:     input.AgentName,
+		Stage:         input.Stage,
+		Status:        models.WorkflowStatusRunning,
+		InputSummary:  truncate(input.InputSummary, 2000),
+		Metadata:      defaultMap(input.Metadata),
+		StartedAt:     &startedAt,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if _, err := s.db.NewInsert().Model(row).Exec(ctx); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+func (s *Service) FinishAgentRun(ctx context.Context, agentRunID int, input FinishAgentRunInput) error {
+	if agentRunID <= 0 {
+		return nil
+	}
+	now := time.Now()
+	status := normalizeStatus(input.Status)
+	_, err := s.db.NewUpdate().
+		Model((*models.AgentRun)(nil)).
+		Set("status = ?", status).
+		Set("output_summary = ?", truncate(input.OutputSummary, 2000)).
+		Set("last_error = ?", truncate(input.LastError, 2000)).
+		Set("metadata = ?", defaultMap(input.Metadata)).
+		Set("finished_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("id = ?", agentRunID).
+		Exec(ctx)
+	return err
 }
 
 func (s *Service) RecordRetrievalRun(ctx context.Context, input RetrievalRunInput) (*models.RetrievalRun, error) {

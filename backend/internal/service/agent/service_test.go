@@ -9,7 +9,10 @@ import (
 
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
+	"caseagent/internal/db/models"
+	workflowservice "caseagent/internal/service/workflow"
 
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -79,12 +82,43 @@ func TestMessageCharsCountsPromptAndReasoningContent(t *testing.T) {
 	}
 }
 
+func TestRunTimedAgentCallLinksModelCallsToAgentRun(t *testing.T) {
+	recorder := &fakeAgentTraceRecorder{nextAgentRunID: 77}
+	chatModel := traceChatModel(&stubChatModel{content: "ok"}, recorder, "fake", "trace")
+
+	output, err := runTimedAgentCall(context.Background(), "functional", "initial", time.Second, recorder, func(ctx context.Context) (string, error) {
+		result, err := chatModel.Generate(ctx, []*schema.Message{schema.UserMessage("prompt")})
+		if err != nil {
+			return "", err
+		}
+		return result.Content, nil
+	})
+	if err != nil {
+		t.Fatalf("runTimedAgentCall() returned error: %v", err)
+	}
+	if output != "ok" {
+		t.Fatalf("output = %q, want ok", output)
+	}
+	if len(recorder.startedAgents) != 1 || recorder.startedAgents[0].AgentName != "functional" {
+		t.Fatalf("started agents = %#v", recorder.startedAgents)
+	}
+	if len(recorder.modelCalls) != 1 {
+		t.Fatalf("model calls = %#v, want one", recorder.modelCalls)
+	}
+	if recorder.modelCalls[0].AgentRunID == nil || *recorder.modelCalls[0].AgentRunID != 77 {
+		t.Fatalf("model call agent_run_id = %#v, want 77", recorder.modelCalls[0].AgentRunID)
+	}
+	if len(recorder.finishedAgents) != 1 || recorder.finishedAgents[0].Status != models.WorkflowStatusSucceeded {
+		t.Fatalf("finished agents = %#v", recorder.finishedAgents)
+	}
+}
+
 func TestRunSubAgentWithRetry(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("success on first try makes only one call", func(t *testing.T) {
 		calls := 0
-		out, err := runSubAgentWithRetry(ctx, "ok", time.Second, func(_ context.Context) (string, error) {
+		out, err := runSubAgentWithRetry(ctx, "ok", time.Second, nil, func(_ context.Context) (string, error) {
 			calls++
 			return "payload", nil
 		})
@@ -101,7 +135,7 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 
 	t.Run("transient failure recovered on retry", func(t *testing.T) {
 		calls := 0
-		out, err := runSubAgentWithRetry(ctx, "transient", time.Second, func(_ context.Context) (string, error) {
+		out, err := runSubAgentWithRetry(ctx, "transient", time.Second, nil, func(_ context.Context) (string, error) {
 			calls++
 			if calls == 1 {
 				return "", errors.New("rate limited")
@@ -121,7 +155,7 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 
 	t.Run("persistent failure surfaces after exactly one retry", func(t *testing.T) {
 		calls := 0
-		_, err := runSubAgentWithRetry(ctx, "persistent", time.Second, func(_ context.Context) (string, error) {
+		_, err := runSubAgentWithRetry(ctx, "persistent", time.Second, nil, func(_ context.Context) (string, error) {
 			calls++
 			return "", errors.New("hard fail")
 		})
@@ -135,7 +169,7 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 
 	t.Run("deadline exceeded is not retried", func(t *testing.T) {
 		calls := 0
-		_, err := runSubAgentWithRetry(ctx, "timeout", time.Nanosecond, func(ctx context.Context) (string, error) {
+		_, err := runSubAgentWithRetry(ctx, "timeout", time.Nanosecond, nil, func(ctx context.Context) (string, error) {
 			calls++
 			<-ctx.Done()
 			return "", ctx.Err()
@@ -147,6 +181,48 @@ func TestRunSubAgentWithRetry(t *testing.T) {
 			t.Fatalf("expected no retry for deadline exceeded, got %d calls", calls)
 		}
 	})
+}
+
+type fakeAgentTraceRecorder struct {
+	nextAgentRunID int
+	startedAgents  []workflowservice.StartAgentRunInput
+	finishedAgents []workflowservice.FinishAgentRunInput
+	modelCalls     []workflowservice.ModelCallInput
+}
+
+func (r *fakeAgentTraceRecorder) StartAgentRun(ctx context.Context, input workflowservice.StartAgentRunInput) (*models.AgentRun, error) {
+	r.startedAgents = append(r.startedAgents, input)
+	id := r.nextAgentRunID
+	if id <= 0 {
+		id = len(r.startedAgents)
+	}
+	return &models.AgentRun{ID: id}, nil
+}
+
+func (r *fakeAgentTraceRecorder) FinishAgentRun(ctx context.Context, agentRunID int, input workflowservice.FinishAgentRunInput) error {
+	r.finishedAgents = append(r.finishedAgents, input)
+	return nil
+}
+
+func (r *fakeAgentTraceRecorder) RecordModelCall(ctx context.Context, input workflowservice.ModelCallInput) (*models.ModelCall, error) {
+	r.modelCalls = append(r.modelCalls, input)
+	return &models.ModelCall{ID: len(r.modelCalls)}, nil
+}
+
+type stubChatModel struct {
+	content string
+	err     error
+}
+
+func (m *stubChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return schema.AssistantMessage(m.content, nil), nil
+}
+
+func (m *stubChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("stream not implemented")
 }
 
 func TestConfiguredChatCallTimeout(t *testing.T) {
