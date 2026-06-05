@@ -13,6 +13,7 @@
 #   CASEAGENT_I2_FIELD_COMPLETE_MIN       default 1.0
 #   CASEAGENT_I2_SOURCE_CONTEXT_MIN       default 1.0
 #   CASEAGENT_I2_DUPLICATE_TITLE_MAX      default 0
+#   CASEAGENT_I2_MODEL_CALL_MIN           default 1
 
 set -euo pipefail
 
@@ -24,6 +25,7 @@ E2E_REPORT="${CASEAGENT_I2_QUALITY_E2E_REPORT:-$ROOT_DIR/.dev/i2_generation_qual
 FIELD_COMPLETE_MIN="${CASEAGENT_I2_FIELD_COMPLETE_MIN:-1.0}"
 SOURCE_CONTEXT_MIN="${CASEAGENT_I2_SOURCE_CONTEXT_MIN:-1.0}"
 DUPLICATE_TITLE_MAX="${CASEAGENT_I2_DUPLICATE_TITLE_MAX:-0}"
+MODEL_CALL_MIN="${CASEAGENT_I2_MODEL_CALL_MIN:-1}"
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -57,13 +59,26 @@ get_json() {
 cases_response="$(get_json "/tasks/$TASK_ID/cases")"
 jobs_response="$(get_json "/jobs?task_id=$TASK_ID")"
 task_response="$(get_json "/tasks/$TASK_ID")"
+trace_response="$(get_json "/tasks/$TASK_ID/trace")"
 
 metrics="$(jq -n \
     --argjson cases "$cases_response" \
     --argjson jobs "$jobs_response" \
-    --argjson task "$task_response" '
+    --argjson task "$task_response" \
+    --argjson trace "$trace_response" '
     def all_cases: [$cases[] | (.cases // [])[]];
     def rate($num; $den): if $den == 0 then 0 else (($num * 1000 / $den) | floor / 1000) end;
+    def number_or_zero: if type == "number" then . else 0 end;
+    def usage_value($usage; $snake; $camel):
+      if ($usage | type) == "object" then
+        (($usage[$snake] // $usage[$camel] // 0) | number_or_zero)
+      else 0 end;
+    def status_counts($rows):
+      ($rows | group_by(.status // "unknown")
+        | map({status: (.[0].status // "unknown"), count: length}));
+    def stage_from_error:
+      if . == null or . == "" then empty
+      else (try capture("^(?<stage>[A-Za-z0-9_\\-]+):").stage catch "unknown") end;
 
     (all_cases) as $case_rows
     | ($cases | length) as $section_count
@@ -82,7 +97,20 @@ metrics="$(jq -n \
     | ([ $case_rows[] | select(((.affected_products // []) | length) > 0) ] | length) as $product_hit_count
     | ([ $case_rows[] | select(((.affected_modules // []) | length) > 0) ] | length) as $module_hit_count
     | ([ $cases[] | select(.source_context != null and (.source_context | type) == "object") ] | length) as $sections_with_source_context
-    | ([ $jobs[] | select((.last_error // "") != "") | .last_error ] | group_by(.) | map({reason: .[0], count: length})) as $failure_reasons
+    | ($trace.model_calls // []) as $model_calls
+    | ([ $model_calls[] | (.prompt_chars // 0) ] | add // 0) as $model_prompt_chars
+    | ([ $model_calls[] | (.response_chars // 0) ] | add // 0) as $model_response_chars
+    | ([ $model_calls[] | usage_value(.metadata.usage; "prompt_tokens"; "PromptTokens") ] | add // 0) as $prompt_tokens
+    | ([ $model_calls[] | usage_value(.metadata.usage; "completion_tokens"; "CompletionTokens") ] | add // 0) as $completion_tokens
+    | ([ $model_calls[] | usage_value(.metadata.usage; "total_tokens"; "TotalTokens") ] | add // 0) as $total_tokens
+    | ([
+        ($jobs[]? | (.last_error // empty)),
+        ($trace.workflow_runs[]? | (.last_error // empty)),
+        ($trace.agent_runs[]? | (.last_error // empty)),
+        ($trace.model_calls[]? | (.last_error // empty))
+      ] | map(select(. != ""))) as $failure_errors
+    | ($failure_errors | map(stage_from_error) | group_by(.) | map({stage: .[0], count: length})) as $failure_stages
+    | ($failure_errors | group_by(.) | map({reason: .[0], count: length})) as $failure_reasons
     | {
         task_id: $task.id,
         terminal_status: $task.status,
@@ -93,6 +121,34 @@ metrics="$(jq -n \
         product_hit_rate: rate($product_hit_count; $case_count),
         module_hit_rate: rate($module_hit_count; $case_count),
         source_context_coverage: rate($sections_with_source_context; $section_count),
+        trace_counts: {
+          workflow_runs: (($trace.workflow_runs // []) | length),
+          steps: (($trace.steps // []) | length),
+          agent_runs: (($trace.agent_runs // []) | length),
+          model_calls: ($model_calls | length),
+          retrieval_runs: (($trace.retrieval_runs // []) | length),
+          artifacts: (($trace.artifacts // []) | length)
+        },
+        model_call_count: ($model_calls | length),
+        model_call_status_counts: status_counts($model_calls),
+        model_call_prompt_chars: $model_prompt_chars,
+        model_call_response_chars: $model_response_chars,
+        model_call_usage: {
+          prompt_tokens: $prompt_tokens,
+          completion_tokens: $completion_tokens,
+          total_tokens: $total_tokens
+        },
+        prompt_version_distribution: (
+          [ $model_calls[]
+            | {
+                prompt_id: (.metadata.prompt_id // "unknown"),
+                prompt_version: (.metadata.prompt_version // "unknown")
+              }
+          ]
+          | group_by(.prompt_id + "@" + .prompt_version)
+          | map({prompt_id: .[0].prompt_id, prompt_version: .[0].prompt_version, count: length})
+        ),
+        failure_stage_distribution: $failure_stages,
         failure_reason_distribution: $failure_reasons
       }
 ')"
@@ -100,6 +156,7 @@ metrics="$(jq -n \
 duplicate_title_count="$(jq -r '.duplicate_title_count' <<<"$metrics")"
 field_complete_rate="$(jq -r '.field_complete_rate' <<<"$metrics")"
 source_context_coverage="$(jq -r '.source_context_coverage' <<<"$metrics")"
+model_call_count="$(jq -r '.model_call_count' <<<"$metrics")"
 
 {
     printf '# I2 Generation Quality Eval\n\n'
@@ -110,6 +167,7 @@ source_context_coverage="$(jq -r '.source_context_coverage' <<<"$metrics")"
     printf '  - duplicate_title_count <= `%s`\n' "$DUPLICATE_TITLE_MAX"
     printf '  - field_complete_rate >= `%s`\n' "$FIELD_COMPLETE_MIN"
     printf '  - source_context_coverage >= `%s`\n' "$SOURCE_CONTEXT_MIN"
+    printf '  - model_call_count >= `%s`\n' "$MODEL_CALL_MIN"
     printf '\n## Metrics\n\n'
     printf '```json\n%s\n```\n' "$(jq '.' <<<"$metrics")"
 } > "$REPORT"
@@ -126,6 +184,10 @@ awk -v got="$field_complete_rate" -v min="$FIELD_COMPLETE_MIN" 'BEGIN { exit !(g
 }
 awk -v got="$source_context_coverage" -v min="$SOURCE_CONTEXT_MIN" 'BEGIN { exit !(got >= min) }' || {
     echo "quality threshold failed: source_context_coverage=$source_context_coverage min=$SOURCE_CONTEXT_MIN" >&2
+    exit 1
+}
+awk -v got="$model_call_count" -v min="$MODEL_CALL_MIN" 'BEGIN { exit !(got >= min) }' || {
+    echo "quality threshold failed: model_call_count=$model_call_count min=$MODEL_CALL_MIN" >&2
     exit 1
 }
 
