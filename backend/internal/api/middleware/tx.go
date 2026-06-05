@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 
 	"caseagent/internal/db"
 
@@ -17,15 +19,17 @@ import (
 //
 // The tx is stashed in gin.Context under "db" and reachable via
 // handler.DBFromContext. Handlers returning status >= 400 trigger rollback.
-//
-// Caveat: gin flushes the response as c.JSON runs, so a commit failure
-// happens after the client already saw success. We log it but cannot
-// retroactively turn the response into a 5xx. Acceptable for the
-// validation-phase project; production would need a buffered ResponseWriter.
 func Tx(bunDB *bun.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var afterCommitHooks []func()
 		c.Set(afterCommitHooksKey, &afterCommitHooks)
+
+		originalWriter := c.Writer
+		bufferedWriter := newBufferedResponseWriter(originalWriter)
+		c.Writer = bufferedWriter
+		defer func() {
+			c.Writer = originalWriter
+		}()
 
 		runHandler := func(ctx context.Context, tx bun.Tx) error {
 			c.Set("db", tx)
@@ -46,6 +50,9 @@ func Tx(bunDB *bun.DB) gin.HandlerFunc {
 		}
 		if err != nil && !errors.Is(err, errAbortTx) {
 			slog.Warn("request tx error", "path", c.Request.URL.Path, "error", err)
+			originalWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+			originalWriter.WriteHeader(http.StatusInternalServerError)
+			_, _ = originalWriter.Write([]byte(`{"error":"request transaction failed"}`))
 			return
 		}
 		if err == nil {
@@ -53,6 +60,7 @@ func Tx(bunDB *bun.DB) gin.HandlerFunc {
 				hook()
 			}
 		}
+		bufferedWriter.FlushTo(originalWriter)
 	}
 }
 
@@ -78,4 +86,102 @@ func AfterCommit(c *gin.Context, hook func()) {
 		return
 	}
 	*hooks = append(*hooks, hook)
+}
+
+type bufferedResponseWriter struct {
+	gin.ResponseWriter
+	header     http.Header
+	body       bytes.Buffer
+	status     int
+	size       int
+	wrote      bool
+	wroteFinal bool
+}
+
+func newBufferedResponseWriter(w gin.ResponseWriter) *bufferedResponseWriter {
+	header := make(http.Header, len(w.Header()))
+	for key, values := range w.Header() {
+		header[key] = append([]string{}, values...)
+	}
+	return &bufferedResponseWriter{
+		ResponseWriter: w,
+		header:         header,
+		status:         http.StatusOK,
+		size:           -1,
+	}
+}
+
+func (w *bufferedResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *bufferedResponseWriter) WriteHeader(statusCode int) {
+	if w.wrote {
+		return
+	}
+	w.status = statusCode
+	w.wrote = true
+	w.size = 0
+}
+
+func (w *bufferedResponseWriter) WriteHeaderNow() {
+	if !w.wrote {
+		w.WriteHeader(w.status)
+	}
+}
+
+func (w *bufferedResponseWriter) Write(data []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.body.Write(data)
+	w.size += n
+	return n, err
+}
+
+func (w *bufferedResponseWriter) WriteString(value string) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.body.WriteString(value)
+	w.size += n
+	return n, err
+}
+
+func (w *bufferedResponseWriter) Status() int {
+	return w.status
+}
+
+func (w *bufferedResponseWriter) Size() int {
+	return w.size
+}
+
+func (w *bufferedResponseWriter) Written() bool {
+	return w.wrote
+}
+
+func (w *bufferedResponseWriter) Flush() {
+	w.WriteHeaderNow()
+}
+
+func (w *bufferedResponseWriter) FlushTo(dst gin.ResponseWriter) {
+	if w.wroteFinal {
+		return
+	}
+	w.wroteFinal = true
+	for key := range dst.Header() {
+		dst.Header().Del(key)
+	}
+	for key, values := range w.header {
+		for _, value := range values {
+			dst.Header().Add(key, value)
+		}
+	}
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	dst.WriteHeader(w.status)
+	if w.body.Len() > 0 {
+		_, _ = dst.Write(w.body.Bytes())
+	}
 }
