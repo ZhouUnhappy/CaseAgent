@@ -5,12 +5,14 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Check, Download, Plus, Refresh, Upload, VideoPlay, View } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
+import { listJobs } from '../api/jobs'
 import { useProjectsStore } from '../stores/projects'
 import { useDocumentsStore } from '../stores/documents'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { notifySuccess } from '../utils/error'
+import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +35,8 @@ const selectedDocumentIds = ref([])
 const polling = ref(null)
 const generating = ref(false)
 const retrying = ref(false)
+const taskJobs = ref({})
+const selectedTaskJobs = ref([])
 
 const createProjectDialog = ref(false)
 const projectForm = reactive({ name: '', description: '' })
@@ -65,8 +69,12 @@ const totalCaseCount = computed(() =>
 )
 const taskStatusText = computed(() => {
   if (!task.value) return '未创建任务'
+  const job = latestSelectedJob.value
+  if (job) return `${jobTypeLabel(job.job_type)} ${jobStatusLabel(job.status)}`
   return task.value.status
 })
+const latestSelectedJob = computed(() => latestJob(selectedTaskJobs.value))
+const selectedJobError = computed(() => compactJobError(findSelectedJobWithError()))
 const selectedDocumentCount = computed(() => selectedDocumentIds.value.length)
 const primaryAction = computed(() => {
   if (!selectedProjectId.value) {
@@ -212,6 +220,8 @@ watch(selectedProjectId, async (projectID) => {
   stopPolling()
   selectedTaskId.value = null
   selectedDocumentIds.value = []
+  selectedTaskJobs.value = []
+  taskJobs.value = {}
   casesStore.clear()
 
   if (!projectID) return
@@ -219,6 +229,7 @@ watch(selectedProjectId, async (projectID) => {
     documentsStore.fetch(projectID).catch(() => {}),
     tasksStore.fetch(projectID).catch(() => {}),
   ])
+  loadTaskJobs().catch(() => {})
 
   selectedDocumentIds.value = completedDocuments.value.map((doc) => doc.id)
 
@@ -251,6 +262,7 @@ async function refreshProjectData() {
     documentsStore.fetch(selectedProjectId.value).catch(() => {}),
     tasksStore.fetch(selectedProjectId.value).catch(() => {}),
   ])
+  loadTaskJobs().catch(() => {})
 }
 
 function openCreateProject() {
@@ -332,6 +344,7 @@ async function createTaskFromDocuments() {
 
 async function selectTask(row) {
   selectedTaskId.value = row.id
+  loadSelectedTaskJobs(row.id).catch(() => {})
   try {
     const loaded = await tasksStore.load(row.id)
     reviewForm.products = [...(loaded.affected_products || [])]
@@ -421,6 +434,7 @@ function ensurePolling() {
   if (polling.value || !selectedTaskId.value) return
   polling.value = setInterval(() => {
     tasksStore.load(selectedTaskId.value).catch(() => {})
+    loadSelectedTaskJobs(selectedTaskId.value).catch(() => {})
   }, 3000)
 }
 
@@ -460,6 +474,33 @@ function formatDate(value) {
 
 function priorityLabel(id) {
   return { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' }[id] || `P${id}`
+}
+
+async function loadTaskJobs() {
+  const entries = await Promise.all(
+    tasks.value.map(async (row) => [row.id, latestJob(await listJobs({ task_id: row.id }))]),
+  )
+  taskJobs.value = Object.fromEntries(entries.filter(([, job]) => job))
+}
+
+async function loadSelectedTaskJobs(taskID) {
+  if (!taskID) return
+  selectedTaskJobs.value = await listJobs({ task_id: taskID })
+  taskJobs.value = {
+    ...taskJobs.value,
+    [taskID]: latestJob(selectedTaskJobs.value),
+  }
+}
+
+function latestTaskJob(row) {
+  return taskJobs.value[row.id] || null
+}
+
+function findSelectedJobWithError() {
+  for (let i = selectedTaskJobs.value.length - 1; i >= 0; i -= 1) {
+    if (selectedTaskJobs.value[i].last_error) return selectedTaskJobs.value[i]
+  }
+  return null
 }
 </script>
 
@@ -611,12 +652,35 @@ function priorityLabel(id) {
             :class="{ active: item.id === selectedTaskId }"
             @click="selectTask(item)"
           >
-            <span>任务 #{{ item.id }}</span>
-            <StatusTag :status="item.status" />
+            <div class="task-row-main">
+              <span>任务 #{{ item.id }}</span>
+              <small v-if="latestTaskJob(item)">
+                {{ jobTypeLabel(latestTaskJob(item).job_type) }}
+                {{ jobStatusLabel(latestTaskJob(item).status) }}
+              </small>
+            </div>
+            <StatusTag v-if="!latestTaskJob(item)" :status="item.status" />
+            <el-tag v-else size="small" :type="jobStatusType(latestTaskJob(item).status)">
+              {{ jobStatusLabel(latestTaskJob(item).status) }}
+            </el-tag>
           </button>
         </div>
 
         <el-empty v-if="!tasks.length && !tasksLoading" description="暂无生成任务" />
+
+        <div v-if="task && latestSelectedJob" class="job-summary">
+          <div class="job-summary-main">
+            <strong>{{ jobTypeLabel(latestSelectedJob.job_type) }}</strong>
+            <el-tag size="small" :type="jobStatusType(latestSelectedJob.status)">
+              {{ jobStatusLabel(latestSelectedJob.status) }}
+            </el-tag>
+            <span>retry {{ latestSelectedJob.retry_count }}/{{ latestSelectedJob.max_retries }}</span>
+            <span v-if="latestSelectedJob.status === 'retrying'">
+              next {{ formatDate(latestSelectedJob.run_after) }}
+            </span>
+          </div>
+          <p v-if="selectedJobError" class="job-error">{{ selectedJobError }}</p>
+        </div>
 
         <el-form v-if="task" label-position="top" class="review-form">
           <el-form-item label="受影响产品">
@@ -1070,12 +1134,48 @@ function priorityLabel(id) {
 .task-row {
   display: flex;
   justify-content: space-between;
+  gap: 10px;
   color: #111827;
   cursor: pointer;
+}
+.task-row-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.task-row-main small {
+  color: #64748b;
+  font-size: 12px;
 }
 .task-row.active {
   border-color: #93c5fd;
   background: #f0f7ff;
+}
+.job-summary {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.job-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #475569;
+  font-size: 13px;
+}
+.job-summary-main strong {
+  color: #111827;
+}
+.job-error {
+  margin: 6px 0 0;
+  color: #f56c6c;
+  font-size: 12px;
+  word-break: break-word;
 }
 .panel-footer {
   display: flex;

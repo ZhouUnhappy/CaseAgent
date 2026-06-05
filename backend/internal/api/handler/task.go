@@ -52,7 +52,7 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
 		TaskID:     task.ID,
 		JobType:    models.JobTypeAnalyze,
-		MaxRetries: configuredJobMaxRetries(),
+		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeAnalyze),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -132,7 +132,7 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
 		TaskID:     taskID,
 		JobType:    models.JobTypeGenerate,
-		MaxRetries: configuredJobMaxRetries(),
+		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeGenerate),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -159,7 +159,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
 			TaskID:     taskID,
 			JobType:    models.JobTypeAnalyze,
-			MaxRetries: configuredJobMaxRetries(),
+			MaxRetries: configuredJobMaxRetriesFor(models.JobTypeAnalyze),
 		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -174,9 +174,15 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	c.JSON(http.StatusAccepted, decision.Task)
 }
 
-func configuredJobMaxRetries() int {
+func configuredJobMaxRetriesFor(jobType string) int {
 	cfg := config.Get()
-	if cfg == nil || cfg.JobRunner.MaxRetries < 0 {
+	if cfg == nil {
+		return 2
+	}
+	if typeOptions, ok := cfg.JobRunner.Types[jobType]; ok && typeOptions.MaxRetries >= 0 {
+		return typeOptions.MaxRetries
+	}
+	if cfg.JobRunner.MaxRetries < 0 {
 		return 2
 	}
 	return cfg.JobRunner.MaxRetries

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,10 +8,9 @@ import (
 	"time"
 
 	"caseagent/internal/db/models"
-	documentservice "caseagent/internal/service/document"
+	jobservice "caseagent/internal/service/job"
 
 	"github.com/gin-gonic/gin"
-	"github.com/uptrace/bun"
 )
 
 type UploadDocumentRequest struct {
@@ -85,22 +83,14 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		"source", document.Source,
 	)
 
-	docID := document.ID
-	docContent := content
-	gwsFileID := req.FileID
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		docService, err := documentservice.New(ctx, tx)
-		if err != nil {
-			slog.Error("document service init failed", "document_id", docID, "error", err)
-			markDocumentFailed(ctx, tx, docID)
-			return err
-		}
-		if err := docService.ProcessDocument(ctx, docID, docContent, gwsFileID); err != nil {
-			slog.Error("document process failed", "document_id", docID, "error", err)
-			return err
-		}
-		return nil
-	})
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		DocumentID: document.ID,
+		JobType:    models.JobTypeDocumentProcess,
+		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentProcess),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusCreated, document)
 }
@@ -164,29 +154,14 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 
 	slog.Info("document reprocess accepted", "document_id", document.ID, "name", document.Name)
 
-	tenantID, _ := TenantIDFromContext(c)
-	docID := document.ID
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		docService, err := documentservice.New(ctx, tx)
-		if err != nil {
-			slog.Error("document service init failed", "document_id", docID, "error", err)
-			markDocumentFailed(ctx, tx, docID)
-			return err
-		}
-		if err := docService.ReprocessDocument(ctx, docID); err != nil {
-			slog.Error("document reprocess failed", "document_id", docID, "error", err)
-			return err
-		}
-		return nil
-	})
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		DocumentID: document.ID,
+		JobType:    models.JobTypeDocumentReprocess,
+		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentReprocess),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusAccepted, document)
-}
-
-func markDocumentFailed(ctx context.Context, db bun.IDB, docID int) {
-	_, _ = db.NewUpdate().Model(&models.Document{}).
-		Set("status = ?", "failed").
-		Set("updated_at = ?", time.Now()).
-		Where("id = ?", docID).
-		Exec(ctx)
 }

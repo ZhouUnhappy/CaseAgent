@@ -1,16 +1,14 @@
 package handler
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"caseagent/internal/db/models"
-	"caseagent/internal/service/knowledge"
+	jobservice "caseagent/internal/service/job"
 
 	"github.com/gin-gonic/gin"
-	"github.com/uptrace/bun"
 )
 
 type UploadKnowledgeRequest struct {
@@ -52,7 +50,14 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 
 	slog.Info("knowledge create accepted", "knowledge_id", kb.ID, "type", kb.Type, "name", kb.Name)
 
-	h.processKnowledgeAsync(c, tenantID, kb.ID, req.Content)
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		KnowledgeID: kb.ID,
+		JobType:     models.JobTypeKnowledgeProcess,
+		MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeProcess),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusCreated, kb)
 }
@@ -126,8 +131,14 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 	}
 
 	if needsReprocess {
-		tenantID, _ := TenantIDFromContext(c)
-		h.processKnowledgeAsync(c, tenantID, kb.ID, kb.Content)
+		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+			KnowledgeID: kb.ID,
+			JobType:     models.JobTypeKnowledgeReprocess,
+			MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	slog.Info("knowledge update", "knowledge_id", kb.ID, "name", kb.Name, "reprocess", needsReprocess)
@@ -160,21 +171,14 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 
 	slog.Info("knowledge reprocess accepted", "knowledge_id", kb.ID, "name", kb.Name)
 
-	tenantID, _ := TenantIDFromContext(c)
-	kbID := kb.ID
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		kbService, err := knowledge.New(ctx, tx)
-		if err != nil {
-			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
-			markKnowledgeFailedSingle(ctx, tx, kbID)
-			return err
-		}
-		if err := kbService.ReprocessKnowledge(ctx, kbID); err != nil {
-			slog.Error("knowledge reprocess failed", "knowledge_id", kbID, "error", err)
-			return err
-		}
-		return nil
-	})
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		KnowledgeID: kb.ID,
+		JobType:     models.JobTypeKnowledgeReprocess,
+		MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusAccepted, kb)
 }
@@ -188,30 +192,6 @@ func (h *Handler) DeleteKnowledge(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusNoContent, nil)
-}
-
-func (h *Handler) processKnowledgeAsync(c *gin.Context, tenantID int, kbID int, content string) {
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		kbService, err := knowledge.New(ctx, tx)
-		if err != nil {
-			slog.Error("knowledge service init failed", "knowledge_id", kbID, "error", err)
-			markKnowledgeFailedSingle(ctx, tx, kbID)
-			return err
-		}
-		if err := kbService.ProcessKnowledge(ctx, kbID, content); err != nil {
-			slog.Error("knowledge process failed", "knowledge_id", kbID, "error", err)
-			return err
-		}
-		return nil
-	})
-}
-
-func markKnowledgeFailedSingle(ctx context.Context, db bun.IDB, kbID int) {
-	_, _ = db.NewUpdate().Model(&models.KnowledgeBase{}).
-		Set("status = ?", models.KnowledgeStatusFailed).
-		Set("updated_at = ?", time.Now()).
-		Where("id = ?", kbID).
-		Exec(ctx)
 }
 
 func applyKnowledgeUpdate(kb *models.KnowledgeBase, req UpdateKnowledgeRequest) bool {

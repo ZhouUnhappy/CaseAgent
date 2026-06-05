@@ -67,12 +67,18 @@ type SuggestionConfig struct {
 }
 
 type JobRunnerConfig struct {
-	MaxConcurrency            int `mapstructure:"max_concurrency"`
-	MaxRetries                int `mapstructure:"max_retries"`
-	RetryBackoffSeconds       int `mapstructure:"retry_backoff_seconds"`
-	PollIntervalSeconds       int `mapstructure:"poll_interval_seconds"`
-	RunningTimeoutSeconds     int `mapstructure:"running_timeout_seconds"`
-	StateUpdateTimeoutSeconds int `mapstructure:"state_update_timeout_seconds"`
+	MaxConcurrency            int                            `mapstructure:"max_concurrency"`
+	MaxRetries                int                            `mapstructure:"max_retries"`
+	RetryBackoffSeconds       int                            `mapstructure:"retry_backoff_seconds"`
+	PollIntervalSeconds       int                            `mapstructure:"poll_interval_seconds"`
+	RunningTimeoutSeconds     int                            `mapstructure:"running_timeout_seconds"`
+	StateUpdateTimeoutSeconds int                            `mapstructure:"state_update_timeout_seconds"`
+	Types                     map[string]JobTypeRunnerConfig `mapstructure:"types"`
+}
+
+type JobTypeRunnerConfig struct {
+	MaxConcurrency int `mapstructure:"max_concurrency"`
+	MaxRetries     int `mapstructure:"max_retries"`
 }
 
 var cfg *Config

@@ -13,31 +13,6 @@
 
 不在本文维护"做了哪些"——已发生的事实由 git log 与 `docs/regression/` 承载。完成的项请直接从本文删除。
 
-## 统一后台任务体系
-
-**Trigger** —— 文档处理、知识库处理、向量重建也需要和生成任务一样具备进程重启恢复、可配置重试、失败原因追踪，或 after-commit goroutine 的分散实现开始影响排查。
-
-**DoD** —— 将非生成类后台 work 也迁入统一 job runner：
-
-- 扩展现有 job 表或新增通用后台 job 表，能记录 job 类型、tenant、关联资源、payload、状态、重试次数、最后错误和时间戳。
-- document process / reprocess、knowledge process / reprocess、maintenance reindex 的 handler 只提交 job。
-- worker 统一 dispatch 各类 job，并使用 tenant-scoped tx，保留当前 RLS 隔离语义。
-- 进程启动时能恢复 pending / running 超时 job；不同 job 类型支持独立并发和重试配置。
-- 覆盖 enqueue、worker 执行、失败重试、进程重启恢复、tenant 隔离测试。
-- `go test ./...` 通过；相关 smoke 脚本至少覆盖一次文档/知识库处理链路。
-
-## 任务可观测性
-
-**Trigger** —— 用户或开发者需要在前端/API 中定位后台任务卡住、失败或重试原因，而不是直接查数据库或日志。
-
-**DoD** —— 暴露 job 状态并接入任务详情页：
-
-- 新增 job 查询 API，支持按 task_id / document_id / knowledge_id / status 过滤，返回 job_type、status、retry_count、max_retries、last_error、run_after、started_at、finished_at。
-- TaskDetail 展示 analyze / generate job 时间线，包含 pending / running / retrying / failed / succeeded 状态。
-- 文档和知识库列表的失败行能展示最近一次 job 的错误摘要和重试次数。
-- API 层继续遵守 tenant RLS；跨 tenant 查询不可见。
-- 覆盖 handler 测试、job 查询 tenant 隔离测试；`npm run build` 通过。
-
 ## 生成质量评估
 
 **Trigger** —— 生成逻辑、prompt、retrieval context 或模型配置发生变化，需要用固定样例判断输出质量是否退化。

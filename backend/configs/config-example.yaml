@@ -56,6 +56,10 @@ job_runner:
   poll_interval_seconds: 2
   running_timeout_seconds: 900
   state_update_timeout_seconds: 10
+  # Optional per job type overrides. Supported keys:
+  # analyze, generate, document_process, document_reprocess,
+  # knowledge_process, knowledge_reprocess.
+  types: {}
 
 gws:
   enabled: true

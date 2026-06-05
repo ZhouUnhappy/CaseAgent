@@ -48,4 +48,9 @@ func TestLoadSchemaSQL(t *testing.T) {
 	if !strings.Contains(schema, "case_generation_jobs_tenant_isolation") {
 		t.Fatalf("expected case generation jobs RLS policy in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "ADD COLUMN IF NOT EXISTS document_id") ||
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS knowledge_id") ||
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS payload JSONB") {
+		t.Fatalf("expected generic background job columns in schema, got: %s", schema)
+	}
 }

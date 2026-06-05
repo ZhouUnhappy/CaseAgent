@@ -95,6 +95,13 @@ func resolveConfigPath() string {
 }
 
 func jobRunnerOptions(cfg config.JobRunnerConfig) jobservice.Options {
+	jobTypes := make(map[string]jobservice.JobTypeOptions, len(cfg.Types))
+	for jobType, options := range cfg.Types {
+		jobTypes[jobType] = jobservice.JobTypeOptions{
+			MaxConcurrency: options.MaxConcurrency,
+			MaxRetries:     options.MaxRetries,
+		}
+	}
 	return jobservice.Options{
 		MaxConcurrency:     cfg.MaxConcurrency,
 		MaxRetries:         cfg.MaxRetries,
@@ -102,5 +109,6 @@ func jobRunnerOptions(cfg config.JobRunnerConfig) jobservice.Options {
 		PollInterval:       time.Duration(cfg.PollIntervalSeconds) * time.Second,
 		RunningJobTimeout:  time.Duration(cfg.RunningTimeoutSeconds) * time.Second,
 		StateUpdateTimeout: time.Duration(cfg.StateUpdateTimeoutSeconds) * time.Second,
+		JobTypes:           jobTypes,
 	}
 }

@@ -5,11 +5,13 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Check, Download, EditPen, Refresh } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
+import { listJobs } from '../api/jobs'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
 import { notifySuccess } from '../utils/error'
+import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel } from '../utils/jobs'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +30,8 @@ const reviewForm = reactive({ products: [], modules: [] })
 const polling = ref(null)
 const generating = ref(false)
 const retrying = ref(false)
+const jobs = ref([])
+const jobsLoading = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
@@ -75,6 +79,50 @@ const caseOutputEmptyDescription = computed(() => {
       return '暂无用例'
   }
 })
+const jobTimeline = computed(() => {
+  if (!task.value) return []
+
+  const rows = [
+    {
+      key: 'created',
+      label: 'Created',
+      status: 'succeeded',
+      time: task.value.created_at,
+    },
+  ]
+
+  for (const job of jobs.value) {
+    rows.push({
+      key: `job-${job.id}`,
+      label: jobTypeLabel(job.job_type),
+      status: job.status,
+      time: job.started_at || job.run_after || job.created_at,
+      retry: `${job.retry_count}/${job.max_retries}`,
+      error: compactJobError(job),
+      nextRun: job.status === 'retrying' ? job.run_after : '',
+    })
+  }
+
+  if (['awaiting_review', 'ready_to_generate'].includes(task.value.status)) {
+    rows.push({
+      key: 'review',
+      label: 'Review',
+      status: task.value.status === 'awaiting_review' ? 'running' : 'succeeded',
+      time: task.value.updated_at,
+    })
+  }
+  if (['completed', 'failed'].includes(task.value.status)) {
+    rows.push({
+      key: 'final',
+      label: task.value.status === 'completed' ? 'Completed' : 'Failed',
+      status: task.value.status === 'completed' ? 'succeeded' : 'failed',
+      time: task.value.updated_at,
+      error: lastJobError.value,
+    })
+  }
+  return rows
+})
+const lastJobError = computed(() => compactJobError(findLastJobWithError()))
 
 onMounted(async () => {
   await loadTask()
@@ -110,6 +158,7 @@ watch(
 async function loadTask() {
   try {
     const t = await tasksStore.load(taskId.value)
+    loadJobs().catch(() => {})
     reviewForm.products = [...(t.affected_products || [])]
     reviewForm.modules = [...(t.affected_modules || [])]
     if (['completed', 'failed'].includes(t.status)) {
@@ -122,6 +171,15 @@ async function loadTask() {
   }
 }
 
+async function loadJobs() {
+  jobsLoading.value = true
+  try {
+    jobs.value = await listJobs({ task_id: taskId.value })
+  } finally {
+    jobsLoading.value = false
+  }
+}
+
 async function refreshCases() {
   await casesStore.fetch(taskId.value)
 }
@@ -130,6 +188,7 @@ function ensurePolling() {
   if (polling.value) return
   polling.value = setInterval(() => {
     tasksStore.load(taskId.value).catch(() => {})
+    loadJobs().catch(() => {})
   }, 3000)
 }
 function stopPolling() {
@@ -183,6 +242,13 @@ async function retryTask() {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '-'
+}
+
+function findLastJobWithError() {
+  for (let i = jobs.value.length - 1; i >= 0; i -= 1) {
+    if (jobs.value[i].last_error) return jobs.value[i]
+  }
+  return null
 }
 
 function priorityLabel(id) {
@@ -323,6 +389,36 @@ async function submitKnowledgeFeedback() {
         请确认根因（后端日志关键字 <code>agent</code> / <code>document</code>）已修复后再"开始生成"。
       </p>
     </header>
+
+    <el-card shadow="never" class="card">
+      <template #header>
+        <div class="card-header">
+          <span>后台任务</span>
+          <el-button size="small" :loading="jobsLoading" @click="loadJobs">刷新</el-button>
+        </div>
+      </template>
+      <el-timeline class="job-timeline">
+        <el-timeline-item
+          v-for="item in jobTimeline"
+          :key="item.key"
+          :type="jobStatusType(item.status)"
+          :timestamp="formatDate(item.time)"
+          placement="top"
+        >
+          <div class="job-row">
+            <div class="job-row-main">
+              <span class="job-label">{{ item.label }}</span>
+              <el-tag size="small" :type="jobStatusType(item.status)">
+                {{ jobStatusLabel(item.status) }}
+              </el-tag>
+              <span v-if="item.retry" class="muted small">retry {{ item.retry }}</span>
+              <span v-if="item.nextRun" class="muted small">next {{ formatDate(item.nextRun) }}</span>
+            </div>
+            <p v-if="item.error" class="muted danger job-error">{{ item.error }}</p>
+          </div>
+        </el-timeline-item>
+      </el-timeline>
+    </el-card>
 
     <el-card shadow="never" class="card">
       <template #header><span>影响范围审核</span></template>
@@ -596,6 +692,26 @@ async function submitKnowledgeFeedback() {
 }
 .card {
   border-radius: 8px;
+}
+.job-timeline {
+  padding: 4px 0 0;
+}
+.job-row {
+  min-width: 0;
+}
+.job-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.job-label {
+  color: #303133;
+  font-weight: 600;
+}
+.job-error {
+  margin: 6px 0 0;
+  word-break: break-word;
 }
 .card-header {
   display: flex;

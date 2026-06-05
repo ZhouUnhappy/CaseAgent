@@ -15,7 +15,7 @@ import (
 type Store interface {
 	ListTenantIDs(ctx context.Context) ([]int, error)
 	RecoverStale(ctx context.Context, timeout time.Duration) (int, error)
-	ClaimNext(ctx context.Context, tenantID int) (*models.CaseGenerationJob, error)
+	ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.CaseGenerationJob, error)
 	RunInTenantTx(ctx context.Context, tenantID int, fn func(context.Context, bun.Tx) error) error
 	MarkSucceeded(ctx context.Context, tenantID int, jobID int) error
 	MarkRetry(ctx context.Context, tenantID int, job *models.CaseGenerationJob, lastErr error, runAfter time.Time) error
@@ -79,7 +79,7 @@ func (s *BunStore) RecoverStale(ctx context.Context, timeout time.Duration) (int
 	return recovered, nil
 }
 
-func (s *BunStore) ClaimNext(ctx context.Context, tenantID int) (*models.CaseGenerationJob, error) {
+func (s *BunStore) ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.CaseGenerationJob, error) {
 	var claimed *models.CaseGenerationJob
 	if err := s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		job := new(models.CaseGenerationJob)
@@ -87,7 +87,9 @@ func (s *BunStore) ClaimNext(ctx context.Context, tenantID int) (*models.CaseGen
 WITH next_job AS (
     SELECT id
     FROM case_generation_jobs
-    WHERE status = ? AND run_after <= CURRENT_TIMESTAMP
+    WHERE status = ?
+      AND run_after <= CURRENT_TIMESTAMP
+      AND (? = '' OR job_type = ?)
     ORDER BY run_after ASC, id ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -100,7 +102,7 @@ SET status = ?,
 FROM next_job
 WHERE j.id = next_job.id
 RETURNING j.*
-`, models.JobStatusPending, models.JobStatusRunning).Scan(ctx, job)
+`, models.JobStatusPending, jobType, jobType, models.JobStatusRunning).Scan(ctx, job)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

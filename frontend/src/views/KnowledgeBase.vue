@@ -4,10 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import StatusTag from '../components/StatusTag.vue'
+import { listJobs } from '../api/jobs'
 import { updateKnowledgeSuggestion } from '../api/knowledgeSuggestions'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { readAndClearSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
 import { notifySuccess } from '../utils/error'
+import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +20,7 @@ const dialogVisible = ref(false)
 const editing = ref(null)
 const form = reactive({ type: 'product', name: '', content: '', metadata: '' })
 const formRef = ref(null)
+const knowledgeJobs = ref({})
 
 const rules = {
   type: [{ required: true, message: '请选择类型', trigger: 'change' }],
@@ -26,7 +29,7 @@ const rules = {
 }
 
 onMounted(() => {
-  store.fetch().catch(() => {})
+  refreshKnowledge().catch(() => {})
 
   // Knowledge-suggestion adopt flow: prefill the create dialog from the
   // query string so the operator only needs to fill in content.
@@ -51,6 +54,16 @@ onMounted(() => {
     dialogVisible.value = true
   }
 })
+
+async function refreshKnowledge() {
+  await store.fetch()
+  loadKnowledgeJobs().catch(() => {})
+}
+
+async function changeTypeFilter(value) {
+  await store.setTypeFilter(value)
+  loadKnowledgeJobs().catch(() => {})
+}
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '-'
@@ -109,6 +122,7 @@ async function submit() {
       saved = await store.create(payload)
       notifySuccess('知识条目已创建，后台正在向量化')
     }
+    loadKnowledgeJobs().catch(() => {})
     try {
       await markSourceSuggestionAdopted(saved.id)
     } catch {
@@ -133,6 +147,7 @@ async function reprocess(row) {
   try {
     await store.reprocess(row.id)
     notifySuccess(`知识 ${row.name} 重新向量化已触发`)
+    loadKnowledgeJobs().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -157,9 +172,23 @@ async function remove(row) {
   try {
     await store.remove(row.id)
     notifySuccess('已删除')
+    const next = { ...knowledgeJobs.value }
+    delete next[row.id]
+    knowledgeJobs.value = next
   } catch {
     /* 错误已弹窗 */
   }
+}
+
+async function loadKnowledgeJobs() {
+  const entries = await Promise.all(
+    items.value.map(async (row) => [row.id, latestJob(await listJobs({ knowledge_id: row.id }))]),
+  )
+  knowledgeJobs.value = Object.fromEntries(entries.filter(([, job]) => job))
+}
+
+function latestKnowledgeJob(row) {
+  return knowledgeJobs.value[row.id] || null
 }
 </script>
 
@@ -173,13 +202,13 @@ async function remove(row) {
       <div class="actions">
         <el-radio-group
           :model-value="typeFilter"
-          @change="(v) => store.setTypeFilter(v).catch(() => {})"
+          @change="(v) => changeTypeFilter(v).catch(() => {})"
         >
           <el-radio-button value="">全部</el-radio-button>
           <el-radio-button value="product">product</el-radio-button>
           <el-radio-button value="module">module</el-radio-button>
         </el-radio-group>
-        <el-button @click="store.fetch()" :loading="loading">刷新</el-button>
+        <el-button @click="refreshKnowledge" :loading="loading">刷新</el-button>
         <el-button type="primary" @click="openCreate">新建</el-button>
       </div>
     </header>
@@ -190,6 +219,26 @@ async function remove(row) {
       <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
       <el-table-column label="状态" width="140">
         <template #default="{ row }"><StatusTag :status="row.status" /></template>
+      </el-table-column>
+      <el-table-column label="最近任务" min-width="260">
+        <template #default="{ row }">
+          <div v-if="latestKnowledgeJob(row)" class="job-cell">
+            <div class="job-line">
+              <span>{{ jobTypeLabel(latestKnowledgeJob(row).job_type) }}</span>
+              <el-tag size="small" :type="jobStatusType(latestKnowledgeJob(row).status)">
+                {{ jobStatusLabel(latestKnowledgeJob(row).status) }}
+              </el-tag>
+              <span class="muted small">
+                {{ latestKnowledgeJob(row).retry_count }}/{{ latestKnowledgeJob(row).max_retries }}
+              </span>
+            </div>
+            <span
+              v-if="row.status === 'failed' && latestKnowledgeJob(row).last_error"
+              class="muted danger small"
+            >{{ compactJobError(latestKnowledgeJob(row)) }}</span>
+          </div>
+          <span v-else class="muted">-</span>
+        </template>
       </el-table-column>
       <el-table-column label="更新时间" width="180">
         <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
@@ -276,8 +325,27 @@ async function remove(row) {
   gap: 8px;
   align-items: center;
 }
+.job-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.job-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.job-cell .small {
+  margin: 0;
+}
 .muted {
   color: #909399;
+}
+.danger {
+  color: #f56c6c;
+  word-break: break-word;
 }
 .small {
   font-size: 12px;

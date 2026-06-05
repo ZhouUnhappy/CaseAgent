@@ -3,13 +3,11 @@ package handler
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"caseagent/internal/db/models"
-	documentservice "caseagent/internal/service/document"
-	knowledgeservice "caseagent/internal/service/knowledge"
+	jobservice "caseagent/internal/service/job"
 	maintenanceservice "caseagent/internal/service/maintenance"
 
 	"github.com/gin-gonic/gin"
@@ -46,8 +44,10 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 		return
 	}
 
-	tenantID, _ := TenantIDFromContext(c)
-	h.runRepairPlan(c, tenantID, plan)
+	if err := enqueueRepairPlan(c, plan); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"queued_documents":  len(plan.DocumentIDs),
@@ -57,40 +57,27 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 	})
 }
 
-func (h *Handler) runRepairPlan(c *gin.Context, tenantID int, plan *maintenanceservice.RepairPlan) {
-	documentIDs := append([]int(nil), plan.DocumentIDs...)
-	knowledgeIDs := append([]int(nil), plan.KnowledgeIDs...)
-
-	RunAsyncAfterCommit(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		if len(documentIDs) > 0 {
-			docService, err := documentservice.New(ctx, tx)
-			if err != nil {
-				slog.Error("document service init failed for batch reindex", "error", err)
-				_ = markDocumentsFailed(ctx, tx, documentIDs, time.Now())
-			} else {
-				for _, id := range documentIDs {
-					if err := docService.ReprocessDocument(ctx, id); err != nil {
-						slog.Error("batch reindex document failed", "document_id", id, "error", err)
-					}
-				}
-			}
+func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan) error {
+	jobs := jobservice.New(DBFromContext(c))
+	for _, id := range plan.DocumentIDs {
+		if _, err := jobs.Enqueue(c, jobservice.EnqueueInput{
+			DocumentID: id,
+			JobType:    models.JobTypeDocumentReprocess,
+			MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentReprocess),
+		}); err != nil {
+			return fmt.Errorf("enqueue document reindex job %d: %w", id, err)
 		}
-
-		if len(knowledgeIDs) > 0 {
-			knowledgeService, err := knowledgeservice.New(ctx, tx)
-			if err != nil {
-				slog.Error("knowledge service init failed for batch reindex", "error", err)
-				_ = markKnowledgeFailed(ctx, tx, knowledgeIDs, time.Now())
-				return nil
-			}
-			for _, id := range knowledgeIDs {
-				if err := knowledgeService.ReprocessKnowledge(ctx, id); err != nil {
-					slog.Error("batch reindex knowledge failed", "knowledge_id", id, "error", err)
-				}
-			}
+	}
+	for _, id := range plan.KnowledgeIDs {
+		if _, err := jobs.Enqueue(c, jobservice.EnqueueInput{
+			KnowledgeID: id,
+			JobType:     models.JobTypeKnowledgeReprocess,
+			MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),
+		}); err != nil {
+			return fmt.Errorf("enqueue knowledge reindex job %d: %w", id, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func markDocumentsProcessing(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
@@ -120,36 +107,6 @@ func markKnowledgeProcessing(ctx context.Context, db bun.IDB, ids []int, updated
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("mark knowledge processing: %w", err)
-	}
-	return nil
-}
-
-func markDocumentsFailed(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	_, err := db.NewUpdate().Model(&models.Document{}).
-		Set("status = ?", "failed").
-		Set("updated_at = ?", updatedAt).
-		Where("id IN (?)", bun.In(ids)).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("mark documents failed: %w", err)
-	}
-	return nil
-}
-
-func markKnowledgeFailed(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	_, err := db.NewUpdate().Model(&models.KnowledgeBase{}).
-		Set("status = ?", models.KnowledgeStatusFailed).
-		Set("updated_at = ?", updatedAt).
-		Where("id IN (?)", bun.In(ids)).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("mark knowledge failed: %w", err)
 	}
 	return nil
 }

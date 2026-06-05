@@ -60,7 +60,7 @@ func TestRLSIsolation(t *testing.T) {
 
 		_, err := tx.NewInsert().Model(&models.CaseGenerationJob{
 			TenantID:   tenantA,
-			TaskID:     taskID,
+			TaskID:     intPointer(taskID),
 			JobType:    models.JobTypeGenerate,
 			Status:     models.JobStatusPending,
 			MaxRetries: 1,
@@ -98,7 +98,7 @@ func TestRLSIsolation(t *testing.T) {
 	crossJobErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewInsert().Model(&models.CaseGenerationJob{
 			TenantID:   tenantA,
-			TaskID:     taskID,
+			TaskID:     intPointer(taskID),
 			JobType:    models.JobTypeGenerate,
 			Status:     models.JobStatusPending,
 			MaxRetries: 1,
@@ -120,6 +120,10 @@ func userBypassesRLS(ctx context.Context, db *bun.DB) (bool, error) {
 		return false, err
 	}
 	return row.IsSuperuser || row.BypassRLS, nil
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 func insertTestTenant(t *testing.T, ctx context.Context, bunDB *bun.DB, slug string) int {

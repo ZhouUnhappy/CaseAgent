@@ -18,7 +18,7 @@ func TestRunOneRetriesThenSucceeds(t *testing.T) {
 		{
 			ID:         10,
 			TenantID:   1,
-			TaskID:     100,
+			TaskID:     testID(100),
 			JobType:    models.JobTypeAnalyze,
 			Status:     models.JobStatusPending,
 			MaxRetries: 2,
@@ -55,7 +55,7 @@ func TestRunOneExhaustsRetriesAndCallsFailureHandler(t *testing.T) {
 		{
 			ID:         20,
 			TenantID:   7,
-			TaskID:     200,
+			TaskID:     testID(200),
 			JobType:    models.JobTypeGenerate,
 			Status:     models.JobStatusPending,
 			MaxRetries: 1,
@@ -121,7 +121,7 @@ func TestStartHonorsMaxConcurrency(t *testing.T) {
 		jobs = append(jobs, &models.CaseGenerationJob{
 			ID:         i,
 			TenantID:   1,
-			TaskID:     i,
+			TaskID:     testID(i),
 			JobType:    models.JobTypeAnalyze,
 			Status:     models.JobStatusPending,
 			MaxRetries: 0,
@@ -145,6 +145,63 @@ func TestStartHonorsMaxConcurrency(t *testing.T) {
 	}
 	if got := store.runningCount(); got != 2 {
 		t.Fatalf("running jobs = %d, want 2", got)
+	}
+
+	cancel()
+	executor.releaseAll()
+}
+
+func TestStartHonorsJobTypeConcurrency(t *testing.T) {
+	jobs := []*models.CaseGenerationJob{
+		{
+			ID:         1,
+			TenantID:   1,
+			TaskID:     testID(1),
+			JobType:    models.JobTypeAnalyze,
+			Status:     models.JobStatusPending,
+			MaxRetries: 0,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+		{
+			ID:         2,
+			TenantID:   1,
+			TaskID:     testID(2),
+			JobType:    models.JobTypeAnalyze,
+			Status:     models.JobStatusPending,
+			MaxRetries: 0,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+		{
+			ID:         3,
+			TenantID:   1,
+			DocumentID: testID(3),
+			JobType:    models.JobTypeDocumentReprocess,
+			Status:     models.JobStatusPending,
+			MaxRetries: 0,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+	}
+	store := newFakeStore([]int{1}, jobs)
+	executor := newBlockingExecutor()
+	runner := NewRunner(store, executor, Options{
+		MaxConcurrency: 1,
+		PollInterval:   10 * time.Millisecond,
+		JobTypes: map[string]JobTypeOptions{
+			models.JobTypeAnalyze:           {MaxConcurrency: 1},
+			models.JobTypeDocumentReprocess: {MaxConcurrency: 1},
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	executor.waitStarted(t, 2)
+	time.Sleep(30 * time.Millisecond)
+	if got := store.runningCountByType(models.JobTypeAnalyze); got != 1 {
+		t.Fatalf("running analyze jobs = %d, want 1", got)
+	}
+	if got := store.runningCountByType(models.JobTypeDocumentReprocess); got != 1 {
+		t.Fatalf("running document jobs = %d, want 1", got)
 	}
 
 	cancel()
@@ -192,12 +249,15 @@ func (s *fakeStore) RecoverStale(ctx context.Context, timeout time.Duration) (in
 	return count, nil
 }
 
-func (s *fakeStore) ClaimNext(ctx context.Context, tenantID int) (*models.CaseGenerationJob, error) {
+func (s *fakeStore) ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.CaseGenerationJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
 	for _, job := range s.jobs {
 		if job.TenantID != tenantID || job.Status != models.JobStatusPending {
+			continue
+		}
+		if jobType != "" && job.JobType != jobType {
 			continue
 		}
 		if !job.RunAfter.IsZero() && job.RunAfter.After(now) {
@@ -272,6 +332,18 @@ func (s *fakeStore) runningCount() int {
 	return count
 }
 
+func (s *fakeStore) runningCountByType(jobType string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, job := range s.jobs {
+		if job.JobType == jobType && job.Status == models.JobStatusRunning {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *fakeStore) recoverCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -293,6 +365,10 @@ func cloneJob(job *models.CaseGenerationJob) *models.CaseGenerationJob {
 	}
 	cloned := *job
 	return &cloned
+}
+
+func testID(id int) *int {
+	return &id
 }
 
 type scriptedExecutor struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"time"
 
 	"caseagent/internal/db/models"
@@ -32,6 +33,12 @@ type Options struct {
 	RetryBackoff       time.Duration
 	RunningJobTimeout  time.Duration
 	StateUpdateTimeout time.Duration
+	JobTypes           map[string]JobTypeOptions
+}
+
+type JobTypeOptions struct {
+	MaxConcurrency int
+	MaxRetries     int
 }
 
 type Runner struct {
@@ -55,14 +62,51 @@ func (r *Runner) Start(ctx context.Context) {
 		slog.Info("case generation jobs recovered", "count", recovered)
 	}
 
-	for i := 0; i < r.options.MaxConcurrency; i++ {
-		workerID := i + 1
-		go r.worker(ctx, workerID)
+	workerTypes := r.workerTypes()
+	if len(workerTypes) == 0 {
+		for i := 0; i < r.options.MaxConcurrency; i++ {
+			workerID := i + 1
+			go r.worker(ctx, workerID, "")
+		}
+		return
+	}
+
+	workerID := 0
+	for _, jobType := range workerTypes {
+		maxConcurrency := r.options.MaxConcurrency
+		if typeOptions, ok := r.options.JobTypes[jobType]; ok && typeOptions.MaxConcurrency > 0 {
+			maxConcurrency = typeOptions.MaxConcurrency
+		}
+		for i := 0; i < maxConcurrency; i++ {
+			workerID++
+			go r.worker(ctx, workerID, jobType)
+		}
 	}
 }
 
+func (r *Runner) workerTypes() []string {
+	hasTypeConcurrency := false
+	for _, typeOptions := range r.options.JobTypes {
+		if typeOptions.MaxConcurrency > 0 {
+			hasTypeConcurrency = true
+			break
+		}
+	}
+	if !hasTypeConcurrency {
+		return nil
+	}
+
+	types := append([]string(nil), models.AllJobTypes...)
+	sort.Strings(types)
+	return types
+}
+
 func (r *Runner) RunOne(ctx context.Context) (bool, error) {
-	job, err := r.claimNext(ctx)
+	return r.runOne(ctx, "")
+}
+
+func (r *Runner) runOne(ctx context.Context, jobType string) (bool, error) {
+	job, err := r.claimNext(ctx, jobType)
 	if err != nil || job == nil {
 		return false, err
 	}
@@ -71,15 +115,16 @@ func (r *Runner) RunOne(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (r *Runner) worker(ctx context.Context, workerID int) {
+func (r *Runner) worker(ctx context.Context, workerID int, jobType string) {
 	ticker := time.NewTicker(r.options.PollInterval)
 	defer ticker.Stop()
 
 	for {
-		ran, err := r.RunOne(ctx)
+		ran, err := r.runOne(ctx, jobType)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			slog.Error("case generation worker failed",
+			slog.Error("background job worker failed",
 				"worker_id", workerID,
+				"job_type", jobType,
 				"error", err,
 			)
 		}
@@ -95,14 +140,14 @@ func (r *Runner) worker(ctx context.Context, workerID int) {
 	}
 }
 
-func (r *Runner) claimNext(ctx context.Context) (*models.CaseGenerationJob, error) {
+func (r *Runner) claimNext(ctx context.Context, jobType string) (*models.CaseGenerationJob, error) {
 	tenantIDs, err := r.store.ListTenantIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, tenantID := range tenantIDs {
-		job, err := r.store.ClaimNext(ctx, tenantID)
+		job, err := r.store.ClaimNext(ctx, tenantID, jobType)
 		if err != nil {
 			return nil, err
 		}
@@ -114,11 +159,13 @@ func (r *Runner) claimNext(ctx context.Context) (*models.CaseGenerationJob, erro
 }
 
 func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
-	slog.Info("case generation job started",
+	slog.Info("background job started",
 		"job_id", job.ID,
 		"job_type", job.JobType,
 		"tenant_id", job.TenantID,
-		"task_id", job.TaskID,
+		"task_id", optionalLogID(job.TaskID),
+		"document_id", optionalLogID(job.DocumentID),
+		"knowledge_id", optionalLogID(job.KnowledgeID),
 		"retry_count", job.RetryCount,
 		"max_retries", job.MaxRetries,
 	)
@@ -128,7 +175,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 	})
 	if err == nil {
 		if markErr := r.markSucceeded(job); markErr != nil {
-			slog.Error("case generation job success mark failed",
+			slog.Error("background job success mark failed",
 				"job_id", job.ID,
 				"tenant_id", job.TenantID,
 				"error", markErr,
@@ -137,7 +184,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 		return
 	}
 	if ctx.Err() != nil {
-		slog.Warn("case generation job interrupted",
+		slog.Warn("background job interrupted",
 			"job_id", job.ID,
 			"tenant_id", job.TenantID,
 			"error", err,
@@ -148,7 +195,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 	if job.RetryCount < job.MaxRetries {
 		nextRun := time.Now().Add(r.options.RetryBackoff)
 		if markErr := r.markRetry(job, err, nextRun); markErr != nil {
-			slog.Error("case generation job retry mark failed",
+			slog.Error("background job retry mark failed",
 				"job_id", job.ID,
 				"tenant_id", job.TenantID,
 				"cause", err,
@@ -159,7 +206,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 	}
 
 	if failureErr := r.handleExhaustedFailure(job, err); failureErr != nil {
-		slog.Error("case generation job failure handler failed",
+		slog.Error("background job failure handler failed",
 			"job_id", job.ID,
 			"tenant_id", job.TenantID,
 			"cause", err,
@@ -167,13 +214,45 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 		)
 	}
 	if markErr := r.markFailed(job, err); markErr != nil {
-		slog.Error("case generation job failed mark failed",
+		slog.Error("background job failed mark failed",
 			"job_id", job.ID,
 			"tenant_id", job.TenantID,
 			"cause", err,
 			"error", markErr,
 		)
 	}
+}
+
+func optionalLogID(id *int) any {
+	if id == nil {
+		return nil
+	}
+	return *id
+}
+
+func normalizeOptions(options Options) Options {
+	if options.MaxConcurrency <= 0 {
+		options.MaxConcurrency = defaultMaxConcurrency
+	}
+	if options.MaxRetries < 0 {
+		options.MaxRetries = defaultMaxRetries
+	}
+	if options.PollInterval <= 0 {
+		options.PollInterval = defaultPollInterval
+	}
+	if options.RetryBackoff < 0 {
+		options.RetryBackoff = defaultRetryBackoff
+	}
+	if options.RunningJobTimeout <= 0 {
+		options.RunningJobTimeout = defaultRunningJobTimeout
+	}
+	if options.StateUpdateTimeout <= 0 {
+		options.StateUpdateTimeout = defaultStateUpdateTimeout
+	}
+	if options.JobTypes == nil {
+		options.JobTypes = map[string]JobTypeOptions{}
+	}
+	return options
 }
 
 func (r *Runner) markSucceeded(job *models.CaseGenerationJob) error {
@@ -200,26 +279,4 @@ func (r *Runner) markFailed(job *models.CaseGenerationJob, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
 	return r.store.MarkFailed(ctx, job.TenantID, job.ID, cause)
-}
-
-func normalizeOptions(options Options) Options {
-	if options.MaxConcurrency <= 0 {
-		options.MaxConcurrency = defaultMaxConcurrency
-	}
-	if options.MaxRetries < 0 {
-		options.MaxRetries = defaultMaxRetries
-	}
-	if options.PollInterval <= 0 {
-		options.PollInterval = defaultPollInterval
-	}
-	if options.RetryBackoff < 0 {
-		options.RetryBackoff = defaultRetryBackoff
-	}
-	if options.RunningJobTimeout <= 0 {
-		options.RunningJobTimeout = defaultRunningJobTimeout
-	}
-	if options.StateUpdateTimeout <= 0 {
-		options.StateUpdateTimeout = defaultStateUpdateTimeout
-	}
-	return options
 }

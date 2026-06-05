@@ -5,10 +5,12 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
+import { listJobs } from '../api/jobs'
 import { getProject } from '../api/projects'
 import { useDocumentsStore } from '../stores/documents'
 import { useTasksStore } from '../stores/tasks'
 import { notifySuccess } from '../utils/error'
+import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +25,8 @@ const { items: taskItems, loading: taskLoading, creating: taskCreating } = store
 const uploadDialog = ref(false)
 const uploadForm = reactive({ name: '', file: null })
 const uploadFormRef = ref(null)
+const documentJobs = ref({})
+const taskJobs = ref({})
 
 const taskDialog = ref(false)
 const taskForm = reactive({ documentIds: [] })
@@ -38,8 +42,12 @@ async function refresh() {
   } catch {
     /* api/client.js 已弹错 */
   }
-  documents.fetch(projectId.value).catch(() => {})
-  tasks.fetch(projectId.value).catch(() => {})
+  await Promise.all([
+    documents.fetch(projectId.value).catch(() => {}),
+    tasks.fetch(projectId.value).catch(() => {}),
+  ])
+  loadDocumentJobs().catch(() => {})
+  loadTaskJobs().catch(() => {})
 }
 
 function formatDate(value) {
@@ -77,6 +85,7 @@ async function submitUpload() {
     })
     notifySuccess('文档已上传，后台正在分块/向量化')
     uploadDialog.value = false
+    loadDocumentJobs().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -86,6 +95,7 @@ async function reprocessDocument(doc) {
   try {
     await documents.reprocess(doc.id)
     notifySuccess(`文档 ${doc.name} 重新处理已触发`)
+    loadDocumentJobs().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -100,6 +110,9 @@ async function removeDocument(doc) {
   try {
     await documents.remove(doc.id)
     notifySuccess('文档已删除')
+    const next = { ...documentJobs.value }
+    delete next[doc.id]
+    documentJobs.value = next
   } catch {
     /* 错误已弹窗 */
   }
@@ -150,6 +163,28 @@ function viewTask(task) {
 function openGenerateWorkspace() {
   router.push({ name: 'generate', query: { project_id: projectId.value } })
 }
+
+async function loadDocumentJobs() {
+  const entries = await Promise.all(
+    docItems.value.map(async (doc) => [doc.id, latestJob(await listJobs({ document_id: doc.id }))]),
+  )
+  documentJobs.value = Object.fromEntries(entries.filter(([, job]) => job))
+}
+
+async function loadTaskJobs() {
+  const entries = await Promise.all(
+    taskItems.value.map(async (task) => [task.id, latestJob(await listJobs({ task_id: task.id }))]),
+  )
+  taskJobs.value = Object.fromEntries(entries.filter(([, job]) => job))
+}
+
+function latestDocumentJob(row) {
+  return documentJobs.value[row.id] || null
+}
+
+function latestTaskJob(row) {
+  return taskJobs.value[row.id] || null
+}
 </script>
 
 <template>
@@ -186,6 +221,26 @@ function openGenerateWorkspace() {
         <el-table-column label="状态" width="140">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
+        <el-table-column label="最近任务" min-width="240">
+          <template #default="{ row }">
+            <div v-if="latestDocumentJob(row)" class="job-cell">
+              <div class="job-line">
+                <span>{{ jobTypeLabel(latestDocumentJob(row).job_type) }}</span>
+                <el-tag size="small" :type="jobStatusType(latestDocumentJob(row).status)">
+                  {{ jobStatusLabel(latestDocumentJob(row).status) }}
+                </el-tag>
+                <span class="muted small">
+                  {{ latestDocumentJob(row).retry_count }}/{{ latestDocumentJob(row).max_retries }}
+                </span>
+              </div>
+              <span
+                v-if="row.status === 'failed' && latestDocumentJob(row).last_error"
+                class="muted danger small"
+              >{{ compactJobError(latestDocumentJob(row)) }}</span>
+            </div>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="更新时间" width="180">
           <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
         </el-table-column>
@@ -217,6 +272,25 @@ function openGenerateWorkspace() {
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column label="状态" width="160">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
+        </el-table-column>
+        <el-table-column label="阶段" min-width="210">
+          <template #default="{ row }">
+            <div v-if="latestTaskJob(row)" class="job-cell">
+              <div class="job-line">
+                <span>{{ jobTypeLabel(latestTaskJob(row).job_type) }}</span>
+                <el-tag size="small" :type="jobStatusType(latestTaskJob(row).status)">
+                  {{ jobStatusLabel(latestTaskJob(row).status) }}
+                </el-tag>
+              </div>
+              <span
+                v-if="['retrying', 'failed'].includes(latestTaskJob(row).status)"
+                class="muted small"
+              >
+                retry {{ latestTaskJob(row).retry_count }}/{{ latestTaskJob(row).max_retries }}
+              </span>
+            </div>
+            <span v-else class="muted">{{ row.status }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="影响产品" min-width="180">
           <template #default="{ row }">
@@ -371,8 +445,27 @@ function openGenerateWorkspace() {
 .chip {
   margin-right: 4px;
 }
+.job-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.job-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.job-cell .small {
+  margin: 0;
+}
 .muted {
   color: #909399;
+}
+.danger {
+  color: #f56c6c;
+  word-break: break-word;
 }
 .small {
   font-size: 12px;
