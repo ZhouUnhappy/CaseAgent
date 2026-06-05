@@ -1,6 +1,6 @@
 # config.yaml.example
 server:
-  port: 8080
+  port: 40003
   mode: debug
 
 database:

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
+import { MagicStick } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { getProject } from '../api/projects'
 import { useDocumentsStore } from '../stores/documents'
@@ -136,18 +137,36 @@ async function submitCreateTask() {
 }
 
 function viewTask(task) {
+  if (task.status === 'completed') {
+    router.push({
+      name: 'generate',
+      query: { project_id: projectId.value, task_id: task.id },
+    })
+    return
+  }
   router.push({ name: 'task-detail', params: { id: task.id } })
+}
+
+function openGenerateWorkspace() {
+  router.push({ name: 'generate', query: { project_id: projectId.value } })
 }
 </script>
 
 <template>
   <section class="project-detail">
     <header class="page-header">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ name: 'projects' }">项目</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ project?.name || `#${projectId}` }}</el-breadcrumb-item>
-      </el-breadcrumb>
-      <p v-if="project?.description" class="hint">{{ project.description }}</p>
+      <div class="page-heading">
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item :to="{ name: 'projects' }">项目</el-breadcrumb-item>
+          <el-breadcrumb-item>{{ project?.name || `#${projectId}` }}</el-breadcrumb-item>
+        </el-breadcrumb>
+        <p v-if="project?.description" class="hint">{{ project.description }}</p>
+      </div>
+      <div class="page-actions">
+        <el-button type="primary" :icon="MagicStick" @click="openGenerateWorkspace">
+          生成用例
+        </el-button>
+      </div>
     </header>
 
     <el-card shadow="never" class="card">
@@ -187,7 +206,7 @@ function viewTask(task) {
     <el-card shadow="never" class="card">
       <template #header>
         <div class="card-header">
-          <span>生成任务</span>
+          <span>生成任务与测试用例</span>
           <div class="header-actions">
             <el-button @click="tasks.fetch(projectId)" :loading="taskLoading">刷新</el-button>
             <el-button type="primary" @click="openCreateTask">新建任务</el-button>
@@ -225,12 +244,20 @@ function viewTask(task) {
         <el-table-column label="文档数" width="100">
           <template #default="{ row }">{{ (row.document_ids || []).length }}</template>
         </el-table-column>
+        <el-table-column label="测试用例" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'completed'" type="success" size="small">已生成</el-tag>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="更新时间" width="180">
           <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="viewTask(row)">详情</el-button>
+            <el-button size="small" type="primary" link @click="viewTask(row)">
+              {{ row.status === 'completed' ? '查看用例' : '详情' }}
+            </el-button>
           </template>
         </el-table-column>
         <template #empty>暂无任务，点击右上角新建。</template>
@@ -314,10 +341,20 @@ function viewTask(task) {
   border-radius: 8px;
   padding: 16px 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.page-heading {
+  min-width: 0;
 }
 .hint {
   margin: 8px 0 0;
   color: #909399;
+}
+.page-actions {
+  flex: 0 0 auto;
 }
 .card {
   border-radius: 8px;

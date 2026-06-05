@@ -6,7 +6,7 @@
 #   bash scripts/i1_retrieval_determinism.sh
 #
 # Env:
-#   CASEAGENT_BASE_URL                 (default http://localhost:8080/api/v1)
+#   CASEAGENT_BASE_URL                 (default http://localhost:40003/api/v1)
 #   CASEAGENT_I1_DETERMINISM_DOC_IDS   comma list of document ids to constrain
 #                                      the document search (default: all from
 #                                      most recent public corpus run, queried
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 REPORT="${CASEAGENT_I1_DETERMINISM_REPORT:-$ROOT_DIR/.dev/i1_retrieval_determinism.md}"
 TOP_K="${CASEAGENT_I1_DETERMINISM_TOP_K:-5}"
 TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-apache-dubbo}"

@@ -7,7 +7,7 @@
 #   bash scripts/i2_generation_e2e.sh
 #
 # Env:
-#   CASEAGENT_BASE_URL              default http://localhost:8080/api/v1
+#   CASEAGENT_BASE_URL              default http://localhost:40003/api/v1
 #   CASEAGENT_PSQL_DSN              required (used to resolve project + verify cases)
 #   CASEAGENT_I2_E2E_PROJECT_ID     project to use; defaults to the most recent
 #                                    "I1 public corpus %" project
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 REPORT="${CASEAGENT_I2_E2E_REPORT:-$ROOT_DIR/.dev/i2_generation_e2e.md}"
 TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-apache-dubbo}"
 

@@ -5,7 +5,7 @@
 
 ## 前置环境
 
-- 后端服务监听于 `CASEAGENT_BASE_URL`（默认 `http://localhost:8080/api/v1`），并已应用 `backend/migrations/001_init.sql`。
+- 后端服务监听于 `CASEAGENT_BASE_URL`（默认 `http://localhost:40003/api/v1`），并已应用 `backend/migrations/001_init.sql`。
 - PostgreSQL 已启用 `pgvector` 扩展，向量列维度与 `model.embedding.dimensions` 一致。
 - `model.embedding` 配置可访问（Ark 或 OpenAI-compatible），后端启动后能成功调用 embedding 接口。
 - 本地命令：`curl`、`jq`；启用 PSQL 校验时还需 `psql` 与 `CASEAGENT_PSQL_DSN`。

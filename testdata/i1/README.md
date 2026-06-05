@@ -19,10 +19,10 @@ bash scripts/i1_retrieval_smoke.sh
 bash scripts/i1_long_knowledge_eval.sh
 ```
 
-默认后端地址为 `http://localhost:8080/api/v1`。如需覆盖：
+默认后端地址为 `http://localhost:40003/api/v1`。如需覆盖：
 
 ```bash
-CASEAGENT_BASE_URL=http://localhost:8081/api/v1 bash scripts/i1_retrieval_smoke.sh
+CASEAGENT_BASE_URL=http://localhost:40004/api/v1 bash scripts/i1_retrieval_smoke.sh
 ```
 
 如果需要同时验证 `document_chunks` 行数，可提供 PostgreSQL DSN：

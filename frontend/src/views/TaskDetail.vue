@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
+import { Check, Download, EditPen, Refresh } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
@@ -52,6 +53,28 @@ const canReview = computed(() =>
 )
 const canGenerate = computed(() => task.value?.status === 'ready_to_generate')
 const isPolling = computed(() => task.value && ['analyzing', 'generating'].includes(task.value.status))
+const caseSectionCount = computed(() => cases.value.length)
+const totalCaseCount = computed(() =>
+  cases.value.reduce((sum, section) => sum + (section.cases?.length || 0), 0),
+)
+const caseOutputEmptyDescription = computed(() => {
+  switch (task.value?.status) {
+    case 'analyzing':
+      return '正在分析影响范围'
+    case 'awaiting_review':
+      return '等待影响范围审核'
+    case 'ready_to_generate':
+      return '等待开始生成'
+    case 'generating':
+      return '正在生成测试用例'
+    case 'failed':
+      return '暂无已保存用例'
+    case 'completed':
+      return '暂无用例'
+    default:
+      return '暂无用例'
+  }
+})
 
 onMounted(async () => {
   await loadTask()
@@ -61,6 +84,7 @@ onUnmounted(() => stopPolling())
 
 watch(taskId, () => {
   stopPolling()
+  casesStore.clear()
   loadTask()
 })
 
@@ -68,13 +92,16 @@ watch(
   () => task.value?.status,
   (status) => {
     if (status === 'completed') {
-      casesStore.fetch(taskId.value).catch(() => {})
+      refreshCases().catch(() => {})
       stopPolling()
     } else if (status === 'failed') {
+      refreshCases().catch(() => {})
       stopPolling()
     } else if (status === 'analyzing' || status === 'generating') {
+      casesStore.clear()
       ensurePolling()
     } else {
+      casesStore.clear()
       stopPolling()
     }
   },
@@ -85,12 +112,18 @@ async function loadTask() {
     const t = await tasksStore.load(taskId.value)
     reviewForm.products = [...(t.affected_products || [])]
     reviewForm.modules = [...(t.affected_modules || [])]
-    if (['completed'].includes(t.status)) {
-      casesStore.fetch(taskId.value).catch(() => {})
+    if (['completed', 'failed'].includes(t.status)) {
+      refreshCases().catch(() => {})
+    } else {
+      casesStore.clear()
     }
   } catch {
     /* 错误已弹窗 */
   }
+}
+
+async function refreshCases() {
+  await casesStore.fetch(taskId.value)
 }
 
 function ensurePolling() {
@@ -154,6 +187,25 @@ function formatDate(value) {
 
 function priorityLabel(id) {
   return { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' }[id] || `P${id}`
+}
+
+function exportCases() {
+  if (!cases.value.length) return
+  const payload = {
+    task_id: taskId.value,
+    task_status: task.value?.status || '',
+    exported_at: new Date().toISOString(),
+    sections: cases.value,
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `caseagent-task-${taskId.value}-test-cases.json`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 function openEditor(section) {
@@ -320,15 +372,33 @@ async function submitKnowledgeFeedback() {
       </el-form>
     </el-card>
 
-    <el-card v-if="task.status === 'completed'" shadow="never" class="card">
+    <el-card shadow="never" class="card case-output-card">
       <template #header>
         <div class="card-header">
-          <span>生成用例（{{ cases.length }} sections）</span>
-          <el-button @click="casesStore.fetch(taskId)" :loading="casesLoading">刷新</el-button>
+          <span>测试用例输出</span>
+          <div class="header-actions">
+            <el-tag type="info" size="small">{{ caseSectionCount }} sections</el-tag>
+            <el-tag type="success" size="small">{{ totalCaseCount }} cases</el-tag>
+            <el-button
+              :icon="Refresh"
+              @click="refreshCases"
+              :loading="casesLoading"
+              :disabled="!['completed', 'failed'].includes(task.status)"
+            >刷新</el-button>
+            <el-button
+              type="primary"
+              :icon="Download"
+              :disabled="!cases.length"
+              @click="exportCases"
+            >导出 JSON</el-button>
+          </div>
         </div>
       </template>
-      <el-empty v-if="!cases.length && !casesLoading" description="暂无用例" />
-      <el-collapse>
+      <el-empty
+        v-if="!cases.length && !casesLoading"
+        :description="caseOutputEmptyDescription"
+      />
+      <el-collapse v-else>
         <el-collapse-item
           v-for="section in cases"
           :key="section.id"
@@ -343,16 +413,42 @@ async function submitKnowledgeFeedback() {
           </template>
 
           <div class="section-actions">
-            <el-button size="small" @click="openEditor(section)">编辑 JSON</el-button>
+            <el-button size="small" :icon="EditPen" @click="openEditor(section)">编辑 JSON</el-button>
             <el-button
               size="small"
               type="primary"
+              :icon="Check"
               :disabled="section.status === 'submitted' || section.status === 'approved'"
               @click="submitSection(section)"
             >提交</el-button>
           </div>
 
           <el-table :data="section.cases || []" stripe size="small">
+            <el-table-column type="expand" width="48">
+              <template #default="{ row }">
+                <div class="case-expand">
+                  <div class="case-field">
+                    <div class="field-label">前置条件</div>
+                    <div class="field-body">{{ row.custom_preconds || '-' }}</div>
+                  </div>
+                  <div class="case-field">
+                    <div class="field-label">步骤</div>
+                    <el-table
+                      :data="row.custom_steps_separated || []"
+                      size="small"
+                      border
+                      class="steps-table"
+                    >
+                      <el-table-column label="#" width="56">
+                        <template #default="{ $index }">{{ $index + 1 }}</template>
+                      </el-table-column>
+                      <el-table-column prop="content" label="操作" min-width="260" />
+                      <el-table-column prop="expected" label="预期" min-width="260" />
+                    </el-table>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="title" label="标题" min-width="260" show-overflow-tooltip />
             <el-table-column label="优先级" width="100">
               <template #default="{ row }">{{ priorityLabel(row.priority_id) }}</template>
@@ -505,6 +601,14 @@ async function submitKnowledgeFeedback() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .section-title {
   display: flex;
@@ -533,5 +637,30 @@ async function submitKnowledgeFeedback() {
   margin: 8px 0 0;
   max-height: 320px;
   overflow: auto;
+}
+.case-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 16px 12px 48px;
+}
+.case-field {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.field-label {
+  color: #606266;
+  font-size: 13px;
+  font-weight: 500;
+}
+.field-body {
+  color: #303133;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.steps-table {
+  width: 100%;
 }
 </style>

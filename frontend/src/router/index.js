@@ -3,7 +3,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
-    redirect: '/projects',
+    redirect: '/generate',
+  },
+  {
+    path: '/generate',
+    name: 'generate',
+    component: () => import('../views/CaseGenerationWorkspace.vue'),
+    meta: { title: '生成用例' },
   },
   {
     path: '/projects',

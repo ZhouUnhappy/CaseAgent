@@ -38,6 +38,17 @@ CaseAgent/
 
 ## 快速开始
 
+也可以直接使用仓库根目录的开发脚本同时启动前后端：
+
+```bash
+./dev.sh restart
+```
+
+默认地址：
+
+- 前端：`http://localhost:40002/generate`
+- 后端：`http://localhost:40003`
+
 ### 后端
 
 ```bash
@@ -59,6 +70,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+前端默认启动在 `http://localhost:40002`，首页会进入生成用例工作台。
 
 ## API 文档
 

@@ -3,7 +3,7 @@
 #
 # Source after BASE_URL is set:
 #
-#   BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+#   BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 #   # shellcheck source=lib/tenant.sh
 #   . "$ROOT_DIR/scripts/lib/tenant.sh"
 #

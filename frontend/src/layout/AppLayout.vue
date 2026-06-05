@@ -2,15 +2,22 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Collection, DocumentChecked, FolderOpened, MagicStick } from '@element-plus/icons-vue'
 import { useTenantStore } from '../stores/tenant'
 
 const route = useRoute()
 const pageTitle = computed(() => route.meta?.title || 'CaseAgent')
+const activeMenu = computed(() => {
+  if (route.name === 'task-detail') return '/generate'
+  if (route.name === 'project-detail') return '/projects'
+  return route.path
+})
 
 const navItems = [
-  { index: '/projects', label: '项目' },
-  { index: '/knowledge', label: '知识库' },
-  { index: '/knowledge-suggestions', label: '知识建议' },
+  { index: '/generate', label: '生成用例', icon: MagicStick },
+  { index: '/projects', label: '项目管理', icon: FolderOpened },
+  { index: '/knowledge', label: '知识库', icon: Collection },
+  { index: '/knowledge-suggestions', label: '知识建议', icon: DocumentChecked },
 ]
 
 const tenantStore = useTenantStore()
@@ -57,9 +64,15 @@ async function submitCreate() {
 <template>
   <el-container class="layout-root">
     <el-aside width="220px" class="layout-aside">
-      <div class="brand">CaseAgent</div>
+      <div class="brand">
+        <div class="brand-mark">CA</div>
+        <div>
+          <strong>CaseAgent</strong>
+          <span>Test case workbench</span>
+        </div>
+      </div>
       <el-menu
-        :default-active="$route.path"
+        :default-active="activeMenu"
         router
         class="aside-menu"
       >
@@ -68,6 +81,7 @@ async function submitCreate() {
           :key="item.index"
           :index="item.index"
         >
+          <el-icon><component :is="item.icon" /></el-icon>
           {{ item.label }}
         </el-menu-item>
       </el-menu>
@@ -130,36 +144,66 @@ async function submitCreate() {
   min-height: 100vh;
 }
 .layout-aside {
-  background: #1f2329;
-  color: #e5eaf3;
+  background: #ffffff;
+  color: #111827;
+  border-right: 1px solid #e5e7eb;
 }
 .brand {
-  height: 60px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  border-bottom: 1px solid #eef2f7;
+  box-sizing: border-box;
+}
+.brand-mark {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  border-bottom: 1px solid #2a2f37;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 750;
+}
+.brand strong,
+.brand span {
+  display: block;
+}
+.brand strong {
+  font-size: 16px;
+  font-weight: 700;
+}
+.brand span {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 11px;
 }
 .aside-menu {
   border-right: none;
   background: transparent;
+  padding: 10px;
 }
 :deep(.el-menu) {
   background: transparent;
 }
 :deep(.el-menu-item) {
-  color: #cfd3dc;
+  height: 42px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  color: #475569;
 }
 :deep(.el-menu-item.is-active) {
-  color: #409eff;
-  background: #2a2f37;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-weight: 650;
 }
 .layout-header {
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -168,7 +212,8 @@ async function submitCreate() {
 }
 .header-title {
   font-size: 18px;
-  font-weight: 500;
+  font-weight: 650;
+  color: #111827;
 }
 .header-tenant {
   display: flex;
@@ -176,11 +221,11 @@ async function submitCreate() {
   gap: 8px;
 }
 .tenant-label {
-  color: #606266;
+  color: #64748b;
   font-size: 13px;
 }
 .layout-main {
-  background: #f5f7fa;
+  background: #f6f8fb;
   padding: 24px;
 }
 </style>

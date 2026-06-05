@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 FIXTURE="${CASEAGENT_ISOLATION_FIXTURE:-$ROOT_DIR/testdata/i1/product_knowledge.md}"
 POLL_ATTEMPTS="${CASEAGENT_POLL_ATTEMPTS:-60}"
 POLL_INTERVAL_SECONDS="${CASEAGENT_POLL_INTERVAL_SECONDS:-2}"

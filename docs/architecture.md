@@ -73,16 +73,22 @@
   - 每次 LLM 调用使用 `model.chat.request_timeout_seconds` 做单次超时，并输出 agent start/end/failure 日志，避免真实 provider 慢调用让 task 长期停在 `generating`
 - DeepAgent（协调）：`backend/internal/agent/deep/`
 - 子 Agent：`backend/internal/agent/{functional,ops,failure,boundary}/`
-- 任务服务（解析、去重、source_context 拼装）：`backend/internal/service/task/service.go`
-  - 解析：`parseGeneratedSections*`
-  - 去重：`dedupeGeneratedSections`
-  - 上下文追溯：`attachCaseContext` / `buildSourceContext`
+- 任务服务（应用层生成 workflow）：`backend/internal/service/task/`
+  - 顶层编排：`service.go`
+  - 任务创建 / review / generate / retry 状态机：`lifecycle.go`
+  - 需求与知识上下文：`context.go`
+  - 影响范围推断与知识 fallback：`scope.go`
+  - LLM 输出解析、归一化、去重、case context 注入：`parser.go`
+  - 状态更新与 test_cases 持久化：`store.go`
+  - 失败阶段归类与 context_gap 记录：`failure.go`
+  - Agent / retrieval / suggestion 默认依赖注入点：`dependencies.go`
 - 数据库表：`backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
 
 **单元测试**：`backend/internal/service/task/service_test.go`
 - `TestParseGeneratedSectionsSectionedJSON` / `TestParseGeneratedSectionsFlatJSON`
 - `TestDedupeGeneratedSections`
 - `TestAttachCaseContext` / `TestBuildSourceContext`
+- `backend/internal/service/task/lifecycle_test.go` 覆盖 review / generate 状态允许条件
 
 **回归脚本**：
 
@@ -109,7 +115,10 @@
 - 错误归一化：`frontend/src/utils/error.js`
 - 状态展示（直读后端 status，前端不二次推断）：`frontend/src/components/StatusTag.vue`
 - 业务页面：`frontend/src/views/`
-  - `ProjectList.vue` / `ProjectDetail.vue` / `KnowledgeBase.vue` / `TaskDetail.vue` / `KnowledgeSuggestions.vue`
+  - `CaseGenerationWorkspace.vue`：默认首页 `/generate`，承载项目选择、文档上传/选择、任务创建、影响范围确认、生成触发、测试用例查看/导出/提交
+  - `ProjectList.vue` / `ProjectDetail.vue`：项目与文档管理，并提供跳转到生成工作台的入口
+  - `TaskDetail.vue`：任务深度排查与用例 JSON 编辑
+  - `KnowledgeBase.vue` / `KnowledgeSuggestions.vue`：知识库与知识建议沉淀
 
 **可观测性**：
 

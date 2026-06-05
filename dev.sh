@@ -11,8 +11,8 @@ set -euo pipefail
 COMMAND=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/.dev/logs"
-VITE_PORT=5173
-GO_PORT=8080
+VITE_PORT=40002
+GO_PORT=40003
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

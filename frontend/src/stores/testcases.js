@@ -35,6 +35,9 @@ export const useTestCasesStore = defineStore('testcases', {
       this.replace(updated)
       return updated
     },
+    clear() {
+      this.items = []
+    },
     replace(updated) {
       const idx = this.items.findIndex((c) => c.id === updated.id)
       if (idx >= 0) this.items.splice(idx, 1, updated)

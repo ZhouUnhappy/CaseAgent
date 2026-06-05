@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 
 # Private corpora must NOT silently fall into a default tenant. The operator
 # has to name the tenant explicitly (see scripts/README.md).

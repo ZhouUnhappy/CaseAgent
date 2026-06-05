@@ -45,7 +45,7 @@ func main() {
 	h := handler.New(db.DB)
 	r := router.SetupRouter(h)
 
-	addr := ":8080"
+	addr := ":40003"
 	if config.Get().Server.Port != 0 {
 		addr = fmt.Sprintf(":%d", config.Get().Server.Port)
 	}

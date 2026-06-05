@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:8080/api/v1}"
+BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-apache-dubbo}"
 
 # shellcheck source=lib/tenant.sh

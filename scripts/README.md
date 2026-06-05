@@ -21,7 +21,7 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 
 ## 通用前置
 
-- 后端起在 `http://localhost:8080`（或用 `CASEAGENT_BASE_URL` 覆盖）。
+- 后端起在 `http://localhost:40003`（或用 `CASEAGENT_BASE_URL` 覆盖）。
 - PostgreSQL + pgvector 已启动，schema 已迁移（后端启动时会自动 apply `backend/migrations/001_init.sql`）。
 - 模型配置（chat / embedding）有效，能真发请求。
 - `curl` / `jq` / `psql` 可用。
