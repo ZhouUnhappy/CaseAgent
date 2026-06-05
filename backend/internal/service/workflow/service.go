@@ -25,8 +25,8 @@ type StartJobRunInput struct {
 }
 
 type FinishInput struct {
-	Status string
-	Cause  error
+	Event TransitionEvent
+	Cause error
 }
 
 type AgentRunInput struct {
@@ -117,7 +117,7 @@ func (s *Service) StartJobRun(ctx context.Context, input StartJobRunInput) (*mod
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		JobID:        &input.Job.ID,
-		Status:       models.WorkflowStatusRunning,
+		Status:       MustNextStatus(models.WorkflowStatusPending, TransitionStart),
 		Metadata:     map[string]any{"retry_count": input.Job.RetryCount, "max_retries": input.Job.MaxRetries},
 		StartedAt:    &now,
 		CreatedAt:    now,
@@ -131,7 +131,7 @@ func (s *Service) StartJobRun(ctx context.Context, input StartJobRunInput) (*mod
 		TenantID:      tenantID,
 		WorkflowRunID: run.ID,
 		StepType:      input.Job.JobType,
-		Status:        models.WorkflowStatusRunning,
+		Status:        MustNextStatus(models.WorkflowStatusPending, TransitionStart),
 		Metadata:      map[string]any{},
 		StartedAt:     &now,
 		CreatedAt:     now,
@@ -157,28 +157,58 @@ func (s *Service) FinishRunAndStep(ctx context.Context, runID int, stepID int, i
 	if runID <= 0 {
 		return nil
 	}
-	status := normalizeStatus(input.Status)
+	if input.Event == "" {
+		return fmt.Errorf("finish workflow: transition event is required")
+	}
+
+	run := new(models.WorkflowRun)
+	if err := s.db.NewSelect().
+		Model(run).
+		Column("id", "status").
+		Where("id = ?", runID).
+		Scan(ctx); err != nil {
+		return err
+	}
+	runTransition, err := NextStatus(run.Status, input.Event)
+	if err != nil {
+		return fmt.Errorf("finish workflow run %d: %w", runID, err)
+	}
+
+	var stepTransition Transition
+	if stepID > 0 {
+		step := new(models.WorkflowStep)
+		if err := s.db.NewSelect().
+			Model(step).
+			Column("id", "status").
+			Where("id = ?", stepID).
+			Scan(ctx); err != nil {
+			return err
+		}
+		stepTransition, err = NextStatus(step.Status, input.Event)
+		if err != nil {
+			return fmt.Errorf("finish workflow step %d: %w", stepID, err)
+		}
+	}
+
 	now := time.Now()
 	if stepID > 0 {
-		if _, err := s.db.NewUpdate().
+		update := s.db.NewUpdate().
 			Model((*models.WorkflowStep)(nil)).
-			Set("status = ?", status).
-			Set("last_error = ?", errorString(input.Cause)).
-			Set("finished_at = ?", now).
+			Set("status = ?", stepTransition.To).
 			Set("updated_at = ?", now).
-			Where("id = ?", stepID).
-			Exec(ctx); err != nil {
+			Where("id = ?", stepID)
+		setTransitionTimestamps(update, stepTransition, now, input.Cause)
+		if _, err := update.Exec(ctx); err != nil {
 			return err
 		}
 	}
-	_, err := s.db.NewUpdate().
+	update := s.db.NewUpdate().
 		Model((*models.WorkflowRun)(nil)).
-		Set("status = ?", status).
-		Set("last_error = ?", errorString(input.Cause)).
-		Set("finished_at = ?", now).
+		Set("status = ?", runTransition.To).
 		Set("updated_at = ?", now).
-		Where("id = ?", runID).
-		Exec(ctx)
+		Where("id = ?", runID)
+	setTransitionTimestamps(update, runTransition, now, input.Cause)
+	_, err = update.Exec(ctx)
 	return err
 }
 
@@ -346,4 +376,23 @@ func nonNegative(value int) int {
 		return 0
 	}
 	return value
+}
+
+func setTransitionTimestamps(query *bun.UpdateQuery, transition Transition, now time.Time, cause error) {
+	switch transition.To {
+	case models.WorkflowStatusPending:
+		query.
+			Set("last_error = ''").
+			Set("started_at = NULL").
+			Set("finished_at = NULL")
+	case models.WorkflowStatusRunning:
+		query.
+			Set("last_error = ''").
+			Set("started_at = COALESCE(started_at, ?)", now).
+			Set("finished_at = NULL")
+	case models.WorkflowStatusSucceeded, models.WorkflowStatusFailed, models.WorkflowStatusCanceled:
+		query.
+			Set("last_error = ?", errorString(cause)).
+			Set("finished_at = ?", now)
+	}
 }

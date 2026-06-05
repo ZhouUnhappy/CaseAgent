@@ -22,7 +22,7 @@ type Store interface {
 	MarkRetry(ctx context.Context, tenantID int, job *models.BackgroundJob, lastErr error, runAfter time.Time) error
 	MarkFailed(ctx context.Context, tenantID int, jobID int, lastErr error) error
 	StartWorkflow(ctx context.Context, job *models.BackgroundJob) (runID int, stepID int, err error)
-	FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, status string, cause error) error
+	FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, event workflowservice.TransitionEvent, cause error) error
 }
 
 type BunStore struct {
@@ -192,11 +192,11 @@ func (s *BunStore) StartWorkflow(ctx context.Context, job *models.BackgroundJob)
 	return runID, stepID, nil
 }
 
-func (s *BunStore) FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, status string, cause error) error {
+func (s *BunStore) FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, event workflowservice.TransitionEvent, cause error) error {
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		return workflowservice.New(tx).FinishRunAndStep(ctx, runID, stepID, workflowservice.FinishInput{
-			Status: status,
-			Cause:  cause,
+			Event: event,
+			Cause: cause,
 		})
 	})
 }

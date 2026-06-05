@@ -181,7 +181,7 @@ func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 		return r.executor.Execute(ctx, tx, job)
 	})
 	if err == nil {
-		r.finishWorkflow(job, workflow, models.WorkflowStatusSucceeded, nil)
+		r.finishWorkflow(job, workflow, workflowservice.TransitionSucceed, nil)
 		if markErr := r.markSucceeded(job); markErr != nil {
 			slog.Error("background job success mark failed",
 				"job_id", job.ID,
@@ -192,7 +192,7 @@ func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 		return
 	}
 	if ctx.Err() != nil {
-		r.finishWorkflow(job, workflow, models.WorkflowStatusCanceled, err)
+		r.finishWorkflow(job, workflow, workflowservice.TransitionCancel, err)
 		slog.Warn("background job interrupted",
 			"job_id", job.ID,
 			"tenant_id", job.TenantID,
@@ -202,7 +202,7 @@ func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 	}
 
 	if job.RetryCount < job.MaxRetries {
-		r.finishWorkflow(job, workflow, models.WorkflowStatusFailed, err)
+		r.finishWorkflow(job, workflow, workflowservice.TransitionFail, err)
 		nextRun := time.Now().Add(r.options.RetryBackoff)
 		if markErr := r.markRetry(job, err, nextRun); markErr != nil {
 			slog.Error("background job retry mark failed",
@@ -215,7 +215,7 @@ func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 		return
 	}
 
-	r.finishWorkflow(job, workflow, models.WorkflowStatusFailed, err)
+	r.finishWorkflow(job, workflow, workflowservice.TransitionFail, err)
 	if failureErr := r.handleExhaustedFailure(job, err); failureErr != nil {
 		slog.Error("background job failure handler failed",
 			"job_id", job.ID,
@@ -258,18 +258,18 @@ func (r *Runner) startWorkflow(job *models.BackgroundJob) workflowHandle {
 	return workflowHandle{runID: runID, stepID: stepID}
 }
 
-func (r *Runner) finishWorkflow(job *models.BackgroundJob, handle workflowHandle, status string, cause error) {
+func (r *Runner) finishWorkflow(job *models.BackgroundJob, handle workflowHandle, event workflowservice.TransitionEvent, cause error) {
 	if handle.runID <= 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
-	if err := r.store.FinishWorkflow(ctx, job.TenantID, handle.runID, handle.stepID, status, cause); err != nil {
+	if err := r.store.FinishWorkflow(ctx, job.TenantID, handle.runID, handle.stepID, event, cause); err != nil {
 		slog.Error("background job workflow finish failed",
 			"job_id", job.ID,
 			"workflow_run_id", handle.runID,
 			"tenant_id", job.TenantID,
-			"status", status,
+			"event", event,
 			"error", err,
 		)
 	}

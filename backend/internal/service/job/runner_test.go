@@ -125,7 +125,7 @@ func TestRunOneRecordsWorkflowAndPropagatesRunID(t *testing.T) {
 	}
 	if finishes[0].runID != starts[0].runID ||
 		finishes[0].stepID != starts[0].stepID ||
-		finishes[0].status != models.WorkflowStatusSucceeded {
+		finishes[0].event != workflowservice.TransitionSucceed {
 		t.Fatalf("workflow finish = %#v, start = %#v", finishes[0], starts[0])
 	}
 }
@@ -381,7 +381,7 @@ func (s *fakeStore) StartWorkflow(ctx context.Context, job *models.BackgroundJob
 	return runID, stepID, nil
 }
 
-func (s *fakeStore) FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, status string, cause error) error {
+func (s *fakeStore) FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, event workflowservice.TransitionEvent, cause error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lastErr := ""
@@ -392,7 +392,7 @@ func (s *fakeStore) FinishWorkflow(ctx context.Context, tenantID int, runID int,
 		tenantID: tenantID,
 		runID:    runID,
 		stepID:   stepID,
-		status:   status,
+		event:    event,
 		lastErr:  lastErr,
 	})
 	return nil
@@ -408,7 +408,7 @@ type workflowFinish struct {
 	tenantID int
 	runID    int
 	stepID   int
-	status   string
+	event    workflowservice.TransitionEvent
 	lastErr  string
 }
 

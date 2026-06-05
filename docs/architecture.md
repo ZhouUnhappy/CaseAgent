@@ -88,6 +88,7 @@
   - worker 按 `job_runner.max_concurrency` 限制并发，用 tenant-scoped tx 执行任务，启动时恢复超时 running job。
   - worker 领取 job 后创建 `workflow_runs` / `workflow_steps`，并把 `workflow_run_id` 注入任务执行 context。
 - Workflow trace：`backend/internal/service/workflow/`
+  - Workflow run / step 状态通过 `start/succeed/fail/cancel/replay` 事件做集中转移，非法 transition 在 service 层拒绝。
   - `GenerateCases` 记录 document / knowledge retrieval 摘要、case generation agent 摘要和 generated cases artifact。
   - `backend/internal/service/agent/` 通过 chat model decorator 记录每次 LLM `Generate` 的 provider/model、prompt/response 字符数、agent/attempt metadata 和错误摘要。
   - API：`GET /api/v1/tasks/:id/trace` 返回 workflow runs、steps、agent runs、model calls、retrieval runs、artifacts。
