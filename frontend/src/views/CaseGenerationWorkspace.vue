@@ -706,39 +706,6 @@ function findSelectedJobWithError() {
 
           <el-empty v-if="!tasks.length && !tasksLoading" description="暂无生成任务" />
 
-          <div v-if="task && latestSelectedJob" class="job-summary">
-            <div class="job-summary-main">
-              <strong>{{ jobTypeLabel(latestSelectedJob.job_type) }}</strong>
-              <el-tag size="small" :type="jobStatusType(latestSelectedJob.status)">
-                {{ jobStatusLabel(latestSelectedJob.status) }}
-              </el-tag>
-              <span>retry {{ latestSelectedJob.retry_count }}/{{ latestSelectedJob.max_retries }}</span>
-              <span v-if="latestSelectedJob.status === 'retrying'">
-                next {{ formatDate(latestSelectedJob.run_after) }}
-              </span>
-            </div>
-            <p v-if="selectedJobError" class="job-error">{{ selectedJobError }}</p>
-          </div>
-
-          <div v-if="workspaceTimeline.length" class="mini-timeline">
-            <div
-              v-for="item in workspaceTimeline"
-              :key="item.key"
-              class="mini-timeline-item"
-              :class="item.status"
-            >
-              <span class="mini-dot" />
-              <div>
-                <strong>{{ item.label }}</strong>
-                <small>
-                  {{ jobStatusLabel(item.status) }}
-                  <span v-if="item.retry"> · retry {{ item.retry }}</span>
-                  <span> · {{ formatDate(item.time) }}</span>
-                </small>
-              </div>
-            </div>
-          </div>
-
           <el-form v-if="task" label-position="top" class="review-form">
             <el-form-item label="受影响产品">
               <el-select
@@ -791,6 +758,58 @@ function findSelectedJobWithError() {
           </div>
 
           <el-tag v-if="isPolling" type="warning" class="polling-tag">后台处理中，每 3 秒刷新</el-tag>
+
+          <el-alert
+            v-if="canRetry && selectedJobError"
+            :title="selectedJobError"
+            type="error"
+            :closable="false"
+            class="inline-alert"
+          />
+
+          <el-collapse v-if="task" class="workspace-diagnostics">
+            <el-collapse-item name="jobs">
+              <template #title>
+                <span class="diagnostic-title">诊断信息</span>
+                <el-tag v-if="latestSelectedJob" size="small" :type="jobStatusType(latestSelectedJob.status)">
+                  {{ jobStatusLabel(latestSelectedJob.status) }}
+                </el-tag>
+              </template>
+
+              <div v-if="latestSelectedJob" class="job-summary">
+                <div class="job-summary-main">
+                  <strong>{{ jobTypeLabel(latestSelectedJob.job_type) }}</strong>
+                  <el-tag size="small" :type="jobStatusType(latestSelectedJob.status)">
+                    {{ jobStatusLabel(latestSelectedJob.status) }}
+                  </el-tag>
+                  <span>retry {{ latestSelectedJob.retry_count }}/{{ latestSelectedJob.max_retries }}</span>
+                  <span v-if="latestSelectedJob.status === 'retrying'">
+                    next {{ formatDate(latestSelectedJob.run_after) }}
+                  </span>
+                </div>
+                <p v-if="selectedJobError" class="job-error">{{ selectedJobError }}</p>
+              </div>
+
+              <div v-if="workspaceTimeline.length" class="mini-timeline">
+                <div
+                  v-for="item in workspaceTimeline"
+                  :key="item.key"
+                  class="mini-timeline-item"
+                  :class="item.status"
+                >
+                  <span class="mini-dot" />
+                  <div>
+                    <strong>{{ item.label }}</strong>
+                    <small>
+                      {{ jobStatusLabel(item.status) }}
+                      <span v-if="item.retry"> · retry {{ item.retry }}</span>
+                      <span> · {{ formatDate(item.time) }}</span>
+                    </small>
+                  </div>
+                </div>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
         </section>
       </div>
 
@@ -1139,6 +1158,7 @@ function findSelectedJobWithError() {
   font-weight: 700;
 }
 .inline-alert {
+  margin-top: 12px;
   margin-bottom: 12px;
 }
 .doc-list,
@@ -1299,6 +1319,24 @@ function findSelectedJobWithError() {
 }
 .polling-tag {
   margin-top: 12px;
+}
+.workspace-diagnostics {
+  margin-top: 12px;
+  border-top: 1px solid #eef2f7;
+  border-bottom: 0;
+}
+.workspace-diagnostics :deep(.el-collapse-item__header) {
+  gap: 8px;
+  min-height: 42px;
+  line-height: 1.2;
+}
+.workspace-diagnostics :deep(.el-collapse-item__content) {
+  padding-bottom: 4px;
+}
+.diagnostic-title {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 650;
 }
 .case-collapse {
   border-top: 1px solid #eef2f7;

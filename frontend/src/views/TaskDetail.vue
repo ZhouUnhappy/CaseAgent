@@ -468,162 +468,6 @@ async function submitKnowledgeFeedback() {
     </header>
 
     <el-card shadow="never" class="card">
-      <template #header>
-        <div class="card-header">
-          <span>后台任务</span>
-          <el-button size="small" :loading="jobsLoading" @click="loadJobs">刷新</el-button>
-        </div>
-      </template>
-      <el-timeline class="job-timeline">
-        <el-timeline-item
-          v-for="item in jobTimeline"
-          :key="item.key"
-          :type="jobStatusType(item.status)"
-          :timestamp="formatDate(item.time)"
-          placement="top"
-        >
-          <div class="job-row">
-            <div class="job-row-main">
-              <span class="job-label">{{ item.label }}</span>
-              <el-tag size="small" :type="jobStatusType(item.status)">
-                {{ jobStatusLabel(item.status) }}
-              </el-tag>
-              <span v-if="item.retry" class="muted small">retry {{ item.retry }}</span>
-              <span v-if="item.nextRun" class="muted small">next {{ formatDate(item.nextRun) }}</span>
-            </div>
-            <p v-if="item.error" class="muted danger job-error">{{ item.error }}</p>
-          </div>
-        </el-timeline-item>
-      </el-timeline>
-    </el-card>
-
-    <el-card shadow="never" class="card trace-card" v-loading="traceLoading">
-      <template #header>
-        <div class="card-header">
-          <span>Workflow Trace</span>
-          <el-button size="small" :loading="traceLoading" @click="loadTrace">刷新</el-button>
-        </div>
-      </template>
-      <div class="trace-summary-grid">
-        <div class="trace-metric">
-          <span class="metric-value">{{ traceSummary.workflows }}</span>
-          <span class="metric-label">runs</span>
-        </div>
-        <div class="trace-metric">
-          <span class="metric-value">{{ traceSummary.steps }}</span>
-          <span class="metric-label">steps</span>
-        </div>
-        <div class="trace-metric">
-          <span class="metric-value">{{ traceSummary.agents }}</span>
-          <span class="metric-label">agents</span>
-        </div>
-        <div class="trace-metric">
-          <span class="metric-value">{{ traceSummary.modelCalls }}</span>
-          <span class="metric-label">models</span>
-        </div>
-        <div class="trace-metric">
-          <span class="metric-value">{{ traceSummary.retrievals }}</span>
-          <span class="metric-label">retrievals</span>
-        </div>
-        <div class="trace-metric">
-          <span class="metric-value">{{ traceSummary.artifacts }}</span>
-          <span class="metric-label">artifacts</span>
-        </div>
-      </div>
-      <p v-if="traceSummary.lastError" class="muted danger trace-error">
-        {{ traceSummary.lastError }}
-      </p>
-      <el-empty
-        v-if="!hasTraceData && !traceLoading"
-        description="暂无 workflow trace"
-      />
-      <div v-if="hasTraceData" class="trace-layout">
-        <div class="trace-column">
-          <h3>Runs</h3>
-          <div v-for="run in traceRuns" :key="run.id" class="trace-row">
-            <div class="trace-row-main">
-              <span class="trace-title">{{ jobTypeLabel(run.workflow_type) }}</span>
-              <el-tag size="small" :type="jobStatusType(run.status)">
-                {{ traceStatusLabel(run.status) }}
-              </el-tag>
-            </div>
-            <div class="muted small">
-              #{{ run.id }} · {{ formatDate(run.started_at || run.created_at) }}
-            </div>
-            <p v-if="run.last_error" class="muted danger trace-error">
-              {{ compactTraceText(run.last_error) }}
-            </p>
-          </div>
-        </div>
-        <div class="trace-column">
-          <h3>Agents</h3>
-          <div v-for="agent in traceAgents" :key="agent.id" class="trace-row">
-            <div class="trace-row-main">
-              <span class="trace-title">{{ agent.agent_name }}</span>
-              <el-tag size="small" :type="jobStatusType(agent.status)">
-                {{ traceStatusLabel(agent.status) }}
-              </el-tag>
-            </div>
-            <div class="muted small">{{ agent.stage }} · {{ formatDate(agent.finished_at || agent.created_at) }}</div>
-            <p v-if="agent.output_summary" class="trace-snippet">
-              {{ compactTraceText(agent.output_summary) }}
-            </p>
-            <p v-if="agent.last_error" class="muted danger trace-error">
-              {{ compactTraceText(agent.last_error) }}
-            </p>
-          </div>
-          <el-empty v-if="!traceAgents.length && hasTraceData" description="暂无 agent runs" />
-        </div>
-        <div class="trace-column">
-          <h3>Models</h3>
-          <div v-for="call in traceModelCalls" :key="call.id" class="trace-row">
-            <div class="trace-row-main">
-              <span class="trace-title">{{ call.provider || '-' }} / {{ call.model || '-' }}</span>
-              <el-tag size="small" :type="jobStatusType(call.status)">
-                {{ traceStatusLabel(call.status) }}
-              </el-tag>
-            </div>
-            <div class="muted small">
-              {{ call.prompt_chars }} prompt · {{ call.response_chars }} response
-            </div>
-            <p v-if="call.last_error" class="muted danger trace-error">
-              {{ compactTraceText(call.last_error) }}
-            </p>
-          </div>
-          <el-empty v-if="!traceModelCalls.length && hasTraceData" description="暂无 model calls" />
-        </div>
-        <div class="trace-column">
-          <h3>Retrievals</h3>
-          <div v-for="retrieval in traceRetrievals" :key="retrieval.id" class="trace-row">
-            <div class="trace-row-main">
-              <span class="trace-title">{{ retrieval.retriever_type }}</span>
-              <el-tag size="small" :type="jobStatusType(retrieval.status)">
-                {{ traceStatusLabel(retrieval.status) }}
-              </el-tag>
-            </div>
-            <div class="muted small">
-              {{ retrieval.query_count }} queries · {{ retrieval.hit_count }} hits
-            </div>
-          </div>
-          <el-empty v-if="!traceRetrievals.length && hasTraceData" description="暂无 retrieval runs" />
-        </div>
-        <div class="trace-column">
-          <h3>Artifacts</h3>
-          <div v-for="artifact in traceArtifacts" :key="artifact.id" class="trace-row">
-            <div class="trace-row-main">
-              <span class="trace-title">{{ artifact.name || artifact.artifact_type }}</span>
-              <el-tag size="small" type="info">{{ artifact.artifact_type }}</el-tag>
-            </div>
-            <div class="muted small">
-              {{ artifactLabel(artifact) }} · {{ formatDate(artifact.created_at) }}
-            </div>
-          </div>
-          <el-empty v-if="!traceArtifacts.length && hasTraceData" description="暂无 artifacts" />
-        </div>
-      </div>
-    </el-card>
-
-    <el-card shadow="never" class="card">
       <template #header><span>影响范围审核</span></template>
       <el-form label-width="100px">
         <el-form-item label="受影响产品">
@@ -799,6 +643,154 @@ async function submitKnowledgeFeedback() {
       </el-collapse>
     </el-card>
 
+    <el-card shadow="never" class="card diagnostics-card" v-loading="traceLoading">
+      <template #header>
+        <div class="card-header">
+          <span>诊断信息</span>
+          <div class="header-actions">
+            <el-button size="small" :loading="jobsLoading" @click="loadJobs">刷新任务</el-button>
+            <el-button size="small" :loading="traceLoading" @click="loadTrace">刷新 Trace</el-button>
+          </div>
+        </div>
+      </template>
+
+      <div class="diagnostic-summary">
+        <el-tag size="small" type="info">{{ jobTimeline.length }} timeline</el-tag>
+        <el-tag size="small" type="info">{{ traceSummary.workflows }} runs</el-tag>
+        <el-tag size="small" type="info">{{ traceSummary.steps }} steps</el-tag>
+        <el-tag size="small" type="info">{{ traceSummary.agents }} agents</el-tag>
+        <el-tag size="small" type="info">{{ traceSummary.modelCalls }} model calls</el-tag>
+        <el-tag size="small" type="info">{{ traceSummary.retrievals }} retrievals</el-tag>
+        <el-tag size="small" type="info">{{ traceSummary.artifacts }} artifacts</el-tag>
+      </div>
+      <p v-if="traceSummary.lastError || lastJobError" class="muted danger trace-error">
+        {{ traceSummary.lastError || lastJobError }}
+      </p>
+
+      <el-collapse class="diagnostic-collapse">
+        <el-collapse-item name="jobs">
+          <template #title>
+            <span class="diagnostic-title">后台任务 timeline</span>
+          </template>
+          <el-timeline class="job-timeline">
+            <el-timeline-item
+              v-for="item in jobTimeline"
+              :key="item.key"
+              :type="jobStatusType(item.status)"
+              :timestamp="formatDate(item.time)"
+              placement="top"
+            >
+              <div class="job-row">
+                <div class="job-row-main">
+                  <span class="job-label">{{ item.label }}</span>
+                  <el-tag size="small" :type="jobStatusType(item.status)">
+                    {{ jobStatusLabel(item.status) }}
+                  </el-tag>
+                  <span v-if="item.retry" class="muted small">retry {{ item.retry }}</span>
+                  <span v-if="item.nextRun" class="muted small">next {{ formatDate(item.nextRun) }}</span>
+                </div>
+                <p v-if="item.error" class="muted danger job-error">{{ item.error }}</p>
+              </div>
+            </el-timeline-item>
+          </el-timeline>
+        </el-collapse-item>
+
+        <el-collapse-item name="trace">
+          <template #title>
+            <span class="diagnostic-title">Workflow Trace / Model / Retrieval</span>
+          </template>
+          <el-empty
+            v-if="!hasTraceData && !traceLoading"
+            description="暂无 workflow trace"
+          />
+          <div v-if="hasTraceData" class="trace-layout">
+            <div class="trace-column">
+              <h3>Runs</h3>
+              <div v-for="run in traceRuns" :key="run.id" class="trace-row">
+                <div class="trace-row-main">
+                  <span class="trace-title">{{ jobTypeLabel(run.workflow_type) }}</span>
+                  <el-tag size="small" :type="jobStatusType(run.status)">
+                    {{ traceStatusLabel(run.status) }}
+                  </el-tag>
+                </div>
+                <div class="muted small">
+                  #{{ run.id }} · {{ formatDate(run.started_at || run.created_at) }}
+                </div>
+                <p v-if="run.last_error" class="muted danger trace-error">
+                  {{ compactTraceText(run.last_error) }}
+                </p>
+              </div>
+            </div>
+            <div class="trace-column">
+              <h3>Agents</h3>
+              <div v-for="agent in traceAgents" :key="agent.id" class="trace-row">
+                <div class="trace-row-main">
+                  <span class="trace-title">{{ agent.agent_name }}</span>
+                  <el-tag size="small" :type="jobStatusType(agent.status)">
+                    {{ traceStatusLabel(agent.status) }}
+                  </el-tag>
+                </div>
+                <div class="muted small">{{ agent.stage }} · {{ formatDate(agent.finished_at || agent.created_at) }}</div>
+                <p v-if="agent.output_summary" class="trace-snippet">
+                  {{ compactTraceText(agent.output_summary) }}
+                </p>
+                <p v-if="agent.last_error" class="muted danger trace-error">
+                  {{ compactTraceText(agent.last_error) }}
+                </p>
+              </div>
+              <el-empty v-if="!traceAgents.length && hasTraceData" description="暂无 agent runs" />
+            </div>
+            <div class="trace-column">
+              <h3>Models</h3>
+              <div v-for="call in traceModelCalls" :key="call.id" class="trace-row">
+                <div class="trace-row-main">
+                  <span class="trace-title">{{ call.provider || '-' }} / {{ call.model || '-' }}</span>
+                  <el-tag size="small" :type="jobStatusType(call.status)">
+                    {{ traceStatusLabel(call.status) }}
+                  </el-tag>
+                </div>
+                <div class="muted small">
+                  {{ call.prompt_chars }} prompt · {{ call.response_chars }} response
+                </div>
+                <p v-if="call.last_error" class="muted danger trace-error">
+                  {{ compactTraceText(call.last_error) }}
+                </p>
+              </div>
+              <el-empty v-if="!traceModelCalls.length && hasTraceData" description="暂无 model calls" />
+            </div>
+            <div class="trace-column">
+              <h3>Retrievals</h3>
+              <div v-for="retrieval in traceRetrievals" :key="retrieval.id" class="trace-row">
+                <div class="trace-row-main">
+                  <span class="trace-title">{{ retrieval.retriever_type }}</span>
+                  <el-tag size="small" :type="jobStatusType(retrieval.status)">
+                    {{ traceStatusLabel(retrieval.status) }}
+                  </el-tag>
+                </div>
+                <div class="muted small">
+                  {{ retrieval.query_count }} queries · {{ retrieval.hit_count }} hits
+                </div>
+              </div>
+              <el-empty v-if="!traceRetrievals.length && hasTraceData" description="暂无 retrieval runs" />
+            </div>
+            <div class="trace-column">
+              <h3>Artifacts</h3>
+              <div v-for="artifact in traceArtifacts" :key="artifact.id" class="trace-row">
+                <div class="trace-row-main">
+                  <span class="trace-title">{{ artifact.name || artifact.artifact_type }}</span>
+                  <el-tag size="small" type="info">{{ artifact.artifact_type }}</el-tag>
+                </div>
+                <div class="muted small">
+                  {{ artifactLabel(artifact) }} · {{ formatDate(artifact.created_at) }}
+                </div>
+              </div>
+              <el-empty v-if="!traceArtifacts.length && hasTraceData" description="暂无 artifacts" />
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
     <el-dialog
       v-model="editorVisible"
       :title="`编辑 section: ${editingCase?.section || ''}`"
@@ -896,8 +888,23 @@ async function submitKnowledgeFeedback() {
 .card {
   border-radius: 8px;
 }
-.trace-card {
+.diagnostics-card {
   overflow: hidden;
+}
+.diagnostic-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.diagnostic-collapse {
+  border-top: 1px solid #ebeef5;
+}
+.diagnostic-title {
+  color: #303133;
+  font-size: 13px;
+  font-weight: 600;
 }
 .trace-summary-grid {
   display: grid;
