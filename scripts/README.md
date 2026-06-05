@@ -8,6 +8,7 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 
 | 脚本 | 默认 TENANT_SLUG | 备注 |
 |---|---|---|
+| `demo_bootstrap.sh` | `demo-caseagent` | 只使用仓库公开 fixture，专供演示/录屏，避免污染私有语料 tenant |
 | `i1_retrieval_smoke.sh` | `i1-smoke` | 仓库内简化 fixture |
 | `i1_public_corpus_eval.sh` | `apache-dubbo` | 全部 fixture 来自 apache/dubbo-website |
 | `i1_private_corpus_eval.sh` | `CASEAGENT_I1_PRIVATE_TENANT_SLUG` 必填，不给直接 exit | 防止私有数据误入默认 tenant |
@@ -31,6 +32,28 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 
 ```bash
 export CASEAGENT_PSQL_DSN='postgres://user:pass@localhost:5432/caseagent?sslmode=disable'
+```
+
+## Demo Bootstrap
+
+### `demo_bootstrap.sh`
+
+**用途**：创建稳定演示数据。脚本会创建 / 复用 `demo-caseagent` tenant，上传仓库内 `testdata/i1/{requirement,product_knowledge,module_knowledge}.md`，等待文档与知识处理完成，创建任务，提交影响范围 review，触发生成，并校验 completed task 至少包含 1 条用例和 model_call trace。
+
+**前置**：
+
+- 后端和 worker 已启动。
+- 为稳定演示，后端建议使用 fake provider：`model.chat.provider=fake`、`model.chat.model=valid_json`、`model.embedding.provider=fake`。脚本无法从 API 查询当前 provider，因此这项由启动配置保证。
+- 前端默认在 `http://localhost:40002`（`dev.sh` 默认端口），可用 `CASEAGENT_FRONTEND_URL` 覆盖。
+
+**输入**：默认读 `testdata/i1/{requirement,product_knowledge,module_knowledge}.md`，可用 `CASEAGENT_DEMO_*_FIXTURE` 覆盖。默认产品 / 模块名分别为 `CaseAgent Cloud` / `控制平面`，可用 `CASEAGENT_DEMO_PRODUCT_NAME` / `CASEAGENT_DEMO_MODULE_NAME` 覆盖。
+
+**输出**：stdout 打印 `tenant_slug`、`project_id`、`document_id`、knowledge id、`task_id`、前端 `frontend_url`、case/section/trace 计数，以及前端 localStorage tenant 提示。
+
+**清理方式**：脚本每次用新的 `run_token` 命名项目并把 knowledge metadata 写入 `aliases=["CaseAgent demo fixture"]`。演示数据只进入 `demo-caseagent` tenant；如需清理，可在设置 `CASEAGENT_PSQL_DSN` 后按 run_token 删除，或通过 API 删除输出的 project 与 knowledge id。
+
+```bash
+bash scripts/demo_bootstrap.sh
 ```
 
 ## 数据闭环（i1_*）

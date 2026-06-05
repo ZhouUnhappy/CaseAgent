@@ -111,6 +111,7 @@
 
 | 脚本 | 用途 |
 | --- | --- |
+| `scripts/demo_bootstrap.sh` | 使用公开 fixture + fake provider 预期配置创建可演示的 tenant/project/document/knowledge/task，并输出前端任务 URL |
 | `scripts/i2_generation_e2e.sh` | 选最近一个 public-corpus 项目 → analyze → review → generate → 校验落库；含三项硬断言（`duplicate_title_count==0` / `cases_missing_affected_fields==0` / `sections_with_source_context==section_count`）|
 
 **回归证据**：
@@ -179,6 +180,7 @@
 
 ```bash
 # 后端 + 数据库 + pgvector 起好后
+bash scripts/demo_bootstrap.sh              # 稳定演示数据
 bash scripts/i1_retrieval_smoke.sh           # 数据闭环冒烟
 bash scripts/i1_retrieval_determinism.sh     # 检索稳定性
 bash scripts/i2_generation_e2e.sh            # 生成闭环 e2e
