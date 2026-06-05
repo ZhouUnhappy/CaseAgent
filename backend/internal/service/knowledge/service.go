@@ -10,6 +10,7 @@ import (
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
 	dbvector "caseagent/internal/db/vector"
+	"caseagent/internal/indexing"
 	markdowncleaner "caseagent/internal/markdown"
 
 	"github.com/cloudwego/eino/components/embedding"
@@ -62,10 +63,13 @@ func (s *Service) ProcessKnowledge(ctx context.Context, kbID int, content string
 	for i, v := range embResult[0] {
 		embedding32[i] = float32(v)
 	}
+	profile := indexing.CurrentProfile()
 
 	_, err = s.db.NewUpdate().Model(&models.KnowledgeBase{}).
 		Set("content = ?", cleanedContent).
 		Set("embedding = ?", dbvector.New(embedding32)).
+		Set("index_profile = ?", profile.Name).
+		Set("index_version = ?", profile.Version).
 		Set("status = ?", models.KnowledgeStatusCompleted).
 		Set("updated_at = ?", time.Now()).
 		Where("id = ?", kbID).

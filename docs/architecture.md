@@ -47,6 +47,9 @@
 - 检索服务：`backend/internal/service/retrieval/`
 - 向量存储：`backend/internal/db/vector/`、`backend/internal/db/pgvector/`
 - 向量健康维护：`backend/internal/service/maintenance/`
+  - `document_chunks.index_profile/index_version` 与 `knowledge_base.index_profile/index_version` 记录当前向量由哪套 embedding + chunk/profile 生成。
+  - `GET /api/v1/maintenance/vector-health` 返回缺失 / 维度不匹配 / stale index 明细，`GET /api/v1/maintenance/stale-index` 返回可重建计划。
+  - `POST /api/v1/maintenance/reindex` 只在当前 tenant 下把 stale/缺失对象排入 `background_jobs`，job payload 写入目标 profile/version，worker 会为重建 job 写 `workflow_runs` / `workflow_steps`。
 
 **回归脚本**（详细用法见 [`scripts/README.md`](../scripts/README.md)）：
 

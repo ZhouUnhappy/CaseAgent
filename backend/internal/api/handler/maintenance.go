@@ -24,6 +24,16 @@ func (h *Handler) GetVectorHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, report)
 }
 
+func (h *Handler) ListStaleIndex(c *gin.Context) {
+	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, plan)
+}
+
 // ReindexVectors is tenant-scoped: it only repairs vectors for the calling
 // tenant's documents/knowledge. Cross-tenant batch repair would need an admin
 // endpoint and a superuser DSN to bypass RLS; not implemented yet.
@@ -59,11 +69,17 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 
 func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan) error {
 	jobs := jobservice.New(DBFromContext(c))
+	payload := map[string]any{
+		"reason":        "stale_index",
+		"index_profile": plan.Profile.Name,
+		"index_version": plan.Profile.Version,
+	}
 	for _, id := range plan.DocumentIDs {
 		if _, err := jobs.Enqueue(c, jobservice.EnqueueInput{
 			DocumentID: id,
 			JobType:    models.JobTypeDocumentReprocess,
 			MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentReprocess),
+			Payload:    payload,
 		}); err != nil {
 			return fmt.Errorf("enqueue document reindex job %d: %w", id, err)
 		}
@@ -73,6 +89,7 @@ func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan) erro
 			KnowledgeID: id,
 			JobType:     models.JobTypeKnowledgeReprocess,
 			MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),
+			Payload:     payload,
 		}); err != nil {
 			return fmt.Errorf("enqueue knowledge reindex job %d: %w", id, err)
 		}

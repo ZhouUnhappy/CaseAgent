@@ -147,6 +147,10 @@ func (s *Service) StartJobRun(ctx context.Context, input StartJobRunInput) (*mod
 	}
 
 	now := time.Now()
+	metadata := map[string]any{"retry_count": input.Job.RetryCount, "max_retries": input.Job.MaxRetries}
+	if len(input.Job.Payload) > 0 {
+		metadata["payload"] = input.Job.Payload
+	}
 	run := &models.WorkflowRun{
 		TenantID:     tenantID,
 		WorkflowType: input.Job.JobType,
@@ -154,7 +158,7 @@ func (s *Service) StartJobRun(ctx context.Context, input StartJobRunInput) (*mod
 		ResourceID:   resourceID,
 		JobID:        &input.Job.ID,
 		Status:       MustNextStatus(models.WorkflowStatusPending, TransitionStart),
-		Metadata:     map[string]any{"retry_count": input.Job.RetryCount, "max_retries": input.Job.MaxRetries},
+		Metadata:     metadata,
 		StartedAt:    &now,
 		CreatedAt:    now,
 		UpdatedAt:    now,

@@ -75,6 +75,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		maintenance := biz.Group("/maintenance")
 		{
 			maintenance.GET("/vector-health", h.GetVectorHealth)
+			maintenance.GET("/stale-index", h.ListStaleIndex)
 			maintenance.POST("/reindex", h.ReindexVectors)
 		}
 

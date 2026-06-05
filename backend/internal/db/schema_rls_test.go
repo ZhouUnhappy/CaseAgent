@@ -47,6 +47,40 @@ func TestRLSIsolation(t *testing.T) {
 			return err
 		}
 
+		document := &models.Document{
+			TenantID:  tenantA,
+			ProjectID: project.ID,
+			Name:      "rls-doc",
+			Type:      "markdown",
+			Source:    "upload",
+			Content:   "# doc",
+			Status:    models.DocumentStatusCompleted,
+		}
+		if _, err := tx.NewInsert().Model(document).Returning("id").Exec(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.NewInsert().Model(&models.DocumentChunk{
+			TenantID:     tenantA,
+			DocumentID:   document.ID,
+			Content:      "chunk",
+			ParentDocID:  document.ID,
+			IndexProfile: "rls-profile",
+			IndexVersion: "rls-version",
+		}).Exec(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.NewInsert().Model(&models.KnowledgeBase{
+			TenantID:     tenantA,
+			Type:         "module",
+			Name:         "rls-knowledge",
+			Content:      "knowledge",
+			Status:       models.KnowledgeStatusCompleted,
+			IndexProfile: "rls-profile",
+			IndexVersion: "rls-version",
+		}).Exec(ctx); err != nil {
+			return err
+		}
+
 		task := &models.CaseGenerationTask{
 			TenantID:    tenantA,
 			ProjectID:   project.ID,
@@ -95,6 +129,24 @@ func TestRLSIsolation(t *testing.T) {
 	})
 	if count != 0 {
 		t.Fatalf("tenant B saw %d background jobs under RLS; expected 0", count)
+	}
+
+	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*models.DocumentChunk)(nil)).Count(ctx)
+		return err
+	})
+	if count != 0 {
+		t.Fatalf("tenant B saw %d document chunks under RLS; expected 0", count)
+	}
+
+	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*models.KnowledgeBase)(nil)).Count(ctx)
+		return err
+	})
+	if count != 0 {
+		t.Fatalf("tenant B saw %d knowledge rows under RLS; expected 0", count)
 	}
 
 	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {

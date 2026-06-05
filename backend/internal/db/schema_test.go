@@ -69,4 +69,10 @@ func TestLoadSchemaSQL(t *testing.T) {
 		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS workflow_run_id") {
 		t.Fatalf("expected generic background job columns in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "ADD COLUMN IF NOT EXISTS index_profile") ||
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS index_version") ||
+		!strings.Contains(schema, "document_chunks_index_profile_idx") ||
+		!strings.Contains(schema, "knowledge_base_index_profile_idx") {
+		t.Fatalf("expected index profile columns and indexes in schema, got: %s", schema)
+	}
 }

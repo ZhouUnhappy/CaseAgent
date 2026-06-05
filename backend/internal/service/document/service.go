@@ -12,6 +12,7 @@ import (
 	"caseagent/internal/db"
 	"caseagent/internal/db/models"
 	dbvector "caseagent/internal/db/vector"
+	"caseagent/internal/indexing"
 	markdowncleaner "caseagent/internal/markdown"
 
 	"github.com/cloudwego/eino/components/embedding"
@@ -22,8 +23,6 @@ type Service struct {
 	db        bun.IDB
 	embedding embedding.Embedder
 }
-
-const maxChunkRunes = 1200
 
 func New(ctx context.Context, db bun.IDB) (*Service, error) {
 	cfg := config.Get()
@@ -69,6 +68,7 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 	}
 
 	tenantID, _ := db.TenantFromContext(ctx)
+	profile := indexing.CurrentProfile()
 	for _, chunk := range chunks {
 		embResult, err := s.embedding.EmbedStrings(ctx, []string{chunk})
 		if err != nil {
@@ -86,12 +86,14 @@ func (s *Service) ProcessDocument(ctx context.Context, docID int, content string
 		}
 
 		docChunk := &models.DocumentChunk{
-			TenantID:    tenantID,
-			DocumentID:  docID,
-			ParentDocID: docID,
-			Content:     chunk,
-			Embedding:   dbvector.New(embedding32),
-			CreatedAt:   time.Now(),
+			TenantID:     tenantID,
+			DocumentID:   docID,
+			ParentDocID:  docID,
+			Content:      chunk,
+			Embedding:    dbvector.New(embedding32),
+			IndexProfile: profile.Name,
+			IndexVersion: profile.Version,
+			CreatedAt:    time.Now(),
 		}
 
 		_, err = s.db.NewInsert().Model(docChunk).Exec(ctx)
@@ -176,7 +178,7 @@ func (s *Service) splitByHeaders(content string) []string {
 		if chunk == "" {
 			continue
 		}
-		filtered = append(filtered, splitLargeChunk(chunk, maxChunkRunes)...)
+		filtered = append(filtered, splitLargeChunk(chunk, indexing.DocumentMaxChunkRunes)...)
 	}
 
 	return filtered

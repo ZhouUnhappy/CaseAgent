@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"caseagent/internal/config"
 	"caseagent/internal/db/models"
+	"caseagent/internal/indexing"
 
 	"github.com/uptrace/bun"
 )
@@ -16,6 +16,7 @@ type Service struct {
 }
 
 type VectorHealthReport struct {
+	Profile    indexing.Profile      `json:"profile"`
 	Dimensions int                   `json:"dimensions"`
 	Documents  DocumentVectorHealth  `json:"documents"`
 	Knowledge  KnowledgeVectorHealth `json:"knowledge"`
@@ -29,6 +30,7 @@ type DocumentVectorHealth struct {
 	NoChunksIDs         []int `json:"no_chunks_ids"`
 	MissingEmbeddingIDs []int `json:"missing_embedding_ids"`
 	MismatchedVectorIDs []int `json:"mismatched_vector_ids"`
+	StaleIndexIDs       []int `json:"stale_index_ids"`
 }
 
 type KnowledgeVectorHealth struct {
@@ -38,13 +40,15 @@ type KnowledgeVectorHealth struct {
 	BlockedIDs          []int `json:"blocked_ids"`
 	MissingEmbeddingIDs []int `json:"missing_embedding_ids"`
 	MismatchedVectorIDs []int `json:"mismatched_vector_ids"`
+	StaleIndexIDs       []int `json:"stale_index_ids"`
 }
 
 type RepairPlan struct {
-	DocumentIDs         []int `json:"document_ids"`
-	KnowledgeIDs        []int `json:"knowledge_ids"`
-	BlockedDocumentIDs  []int `json:"blocked_document_ids"`
-	BlockedKnowledgeIDs []int `json:"blocked_knowledge_ids"`
+	Profile             indexing.Profile `json:"profile"`
+	DocumentIDs         []int            `json:"document_ids"`
+	KnowledgeIDs        []int            `json:"knowledge_ids"`
+	BlockedDocumentIDs  []int            `json:"blocked_document_ids"`
+	BlockedKnowledgeIDs []int            `json:"blocked_knowledge_ids"`
 }
 
 type documentVectorRow struct {
@@ -56,6 +60,7 @@ type documentVectorRow struct {
 	ChunkCount               int    `bun:"chunk_count"`
 	MissingEmbeddingCount    int    `bun:"missing_embedding_count"`
 	MismatchedEmbeddingCount int    `bun:"mismatched_embedding_count"`
+	StaleIndexCount          int    `bun:"stale_index_count"`
 }
 
 type knowledgeVectorRow struct {
@@ -64,6 +69,7 @@ type knowledgeVectorRow struct {
 	Status                   string `bun:"status"`
 	MissingEmbeddingCount    int    `bun:"missing_embedding_count"`
 	MismatchedEmbeddingCount int    `bun:"mismatched_embedding_count"`
+	StaleIndexCount          int    `bun:"stale_index_count"`
 }
 
 func New(db bun.IDB) *Service {
@@ -71,18 +77,19 @@ func New(db bun.IDB) *Service {
 }
 
 func (s *Service) VectorHealth(ctx context.Context) (*VectorHealthReport, error) {
-	dimensions := config.Get().Model.Embedding.Dimensions
-	documents, err := s.documentVectorHealth(ctx, dimensions)
+	profile := indexing.CurrentProfile()
+	documents, err := s.documentVectorHealth(ctx, profile)
 	if err != nil {
 		return nil, err
 	}
-	knowledge, err := s.knowledgeVectorHealth(ctx, dimensions)
+	knowledge, err := s.knowledgeVectorHealth(ctx, profile)
 	if err != nil {
 		return nil, err
 	}
 
 	return &VectorHealthReport{
-		Dimensions: dimensions,
+		Profile:    profile,
+		Dimensions: profile.Dimensions,
 		Documents:  documents,
 		Knowledge:  knowledge,
 	}, nil
@@ -95,6 +102,7 @@ func (s *Service) RepairPlan(ctx context.Context) (*RepairPlan, error) {
 	}
 
 	return &RepairPlan{
+		Profile:             report.Profile,
 		DocumentIDs:         report.Documents.ReprocessableIDs,
 		KnowledgeIDs:        report.Knowledge.ReprocessableIDs,
 		BlockedDocumentIDs:  report.Documents.BlockedIDs,
@@ -102,7 +110,7 @@ func (s *Service) RepairPlan(ctx context.Context) (*RepairPlan, error) {
 	}, nil
 }
 
-func (s *Service) documentVectorHealth(ctx context.Context, dimensions int) (DocumentVectorHealth, error) {
+func (s *Service) documentVectorHealth(ctx context.Context, profile indexing.Profile) (DocumentVectorHealth, error) {
 	var rows []documentVectorRow
 	err := s.db.NewRaw(`
 		SELECT
@@ -113,12 +121,13 @@ func (s *Service) documentVectorHealth(ctx context.Context, dimensions int) (Doc
 			d.status,
 			COUNT(dc.id) AS chunk_count,
 			COALESCE(SUM(CASE WHEN dc.id IS NOT NULL AND dc.embedding IS NULL THEN 1 ELSE 0 END), 0) AS missing_embedding_count,
-			COALESCE(SUM(CASE WHEN dc.id IS NOT NULL AND dc.embedding IS NOT NULL AND vector_dims(dc.embedding) <> ? THEN 1 ELSE 0 END), 0) AS mismatched_embedding_count
+			COALESCE(SUM(CASE WHEN dc.id IS NOT NULL AND dc.embedding IS NOT NULL AND vector_dims(dc.embedding) <> ? THEN 1 ELSE 0 END), 0) AS mismatched_embedding_count,
+			COALESCE(SUM(CASE WHEN dc.id IS NOT NULL AND (COALESCE(dc.index_profile, '') <> ? OR COALESCE(dc.index_version, '') <> ?) THEN 1 ELSE 0 END), 0) AS stale_index_count
 		FROM documents AS d
 		LEFT JOIN document_chunks AS dc ON dc.document_id = d.id
 		GROUP BY d.id
 		ORDER BY d.id ASC
-	`, dimensions).Scan(ctx, &rows)
+	`, profile.Dimensions, profile.Name, profile.Version).Scan(ctx, &rows)
 	if err != nil {
 		return DocumentVectorHealth{}, fmt.Errorf("inspect document vector health: %w", err)
 	}
@@ -138,6 +147,9 @@ func (s *Service) documentVectorHealth(ctx context.Context, dimensions int) (Doc
 		if row.MismatchedEmbeddingCount > 0 {
 			health.MismatchedVectorIDs = append(health.MismatchedVectorIDs, row.ID)
 		}
+		if row.StaleIndexCount > 0 {
+			health.StaleIndexIDs = append(health.StaleIndexIDs, row.ID)
+		}
 		if blocked {
 			health.BlockedIDs = append(health.BlockedIDs, row.ID)
 			continue
@@ -150,7 +162,7 @@ func (s *Service) documentVectorHealth(ctx context.Context, dimensions int) (Doc
 	return health, nil
 }
 
-func (s *Service) knowledgeVectorHealth(ctx context.Context, dimensions int) (KnowledgeVectorHealth, error) {
+func (s *Service) knowledgeVectorHealth(ctx context.Context, profile indexing.Profile) (KnowledgeVectorHealth, error) {
 	var rows []knowledgeVectorRow
 	err := s.db.NewRaw(`
 		SELECT
@@ -158,10 +170,11 @@ func (s *Service) knowledgeVectorHealth(ctx context.Context, dimensions int) (Kn
 			content,
 			status,
 			CASE WHEN embedding IS NULL THEN 1 ELSE 0 END AS missing_embedding_count,
-			CASE WHEN embedding IS NOT NULL AND vector_dims(embedding) <> ? THEN 1 ELSE 0 END AS mismatched_embedding_count
+			CASE WHEN embedding IS NOT NULL AND vector_dims(embedding) <> ? THEN 1 ELSE 0 END AS mismatched_embedding_count,
+			CASE WHEN embedding IS NOT NULL AND (COALESCE(index_profile, '') <> ? OR COALESCE(index_version, '') <> ?) THEN 1 ELSE 0 END AS stale_index_count
 		FROM knowledge_base
 		ORDER BY id ASC
-	`, dimensions).Scan(ctx, &rows)
+	`, profile.Dimensions, profile.Name, profile.Version).Scan(ctx, &rows)
 	if err != nil {
 		return KnowledgeVectorHealth{}, fmt.Errorf("inspect knowledge vector health: %w", err)
 	}
@@ -178,6 +191,9 @@ func (s *Service) knowledgeVectorHealth(ctx context.Context, dimensions int) (Kn
 		if row.MismatchedEmbeddingCount > 0 {
 			health.MismatchedVectorIDs = append(health.MismatchedVectorIDs, row.ID)
 		}
+		if row.StaleIndexCount > 0 {
+			health.StaleIndexIDs = append(health.StaleIndexIDs, row.ID)
+		}
 		if blocked {
 			health.BlockedIDs = append(health.BlockedIDs, row.ID)
 			continue
@@ -191,7 +207,7 @@ func (s *Service) knowledgeVectorHealth(ctx context.Context, dimensions int) (Kn
 }
 
 func classifyDocumentVectorRow(row documentVectorRow) (needsReprocess bool, blocked bool) {
-	needsReprocess = row.ChunkCount == 0 || row.MissingEmbeddingCount > 0 || row.MismatchedEmbeddingCount > 0
+	needsReprocess = row.ChunkCount == 0 || row.MissingEmbeddingCount > 0 || row.MismatchedEmbeddingCount > 0 || row.StaleIndexCount > 0
 	if !needsReprocess {
 		return false, false
 	}
@@ -211,7 +227,7 @@ func classifyDocumentVectorRow(row documentVectorRow) (needsReprocess bool, bloc
 }
 
 func classifyKnowledgeVectorRow(row knowledgeVectorRow) (needsReprocess bool, blocked bool) {
-	needsReprocess = row.MissingEmbeddingCount > 0 || row.MismatchedEmbeddingCount > 0
+	needsReprocess = row.MissingEmbeddingCount > 0 || row.MismatchedEmbeddingCount > 0 || row.StaleIndexCount > 0
 	if !needsReprocess {
 		return false, false
 	}

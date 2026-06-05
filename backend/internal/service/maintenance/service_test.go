@@ -38,6 +38,19 @@ func TestClassifyDocumentVectorRow(t *testing.T) {
 			t.Fatalf("expected blocked gdrive document, got needsReprocess=%v blocked=%v", needsReprocess, blocked)
 		}
 	})
+
+	t.Run("stale index with stored content is repairable", func(t *testing.T) {
+		needsReprocess, blocked := classifyDocumentVectorRow(documentVectorRow{
+			Source:          "upload",
+			Content:         "# requirement",
+			ChunkCount:      2,
+			StaleIndexCount: 2,
+		})
+
+		if !needsReprocess || blocked {
+			t.Fatalf("expected stale document to be repairable, got needsReprocess=%v blocked=%v", needsReprocess, blocked)
+		}
+	})
 }
 
 func TestClassifyKnowledgeVectorRow(t *testing.T) {
@@ -60,6 +73,17 @@ func TestClassifyKnowledgeVectorRow(t *testing.T) {
 
 		if !needsReprocess || !blocked {
 			t.Fatalf("expected blocked knowledge, got needsReprocess=%v blocked=%v", needsReprocess, blocked)
+		}
+	})
+
+	t.Run("stale index with content is repairable", func(t *testing.T) {
+		needsReprocess, blocked := classifyKnowledgeVectorRow(knowledgeVectorRow{
+			Content:         "module spec",
+			StaleIndexCount: 1,
+		})
+
+		if !needsReprocess || blocked {
+			t.Fatalf("expected stale knowledge to be repairable, got needsReprocess=%v blocked=%v", needsReprocess, blocked)
 		}
 	})
 }
