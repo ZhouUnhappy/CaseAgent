@@ -121,12 +121,13 @@
 | --- | --- |
 | `scripts/demo_bootstrap.sh` | 使用公开 fixture + fake provider 预期配置创建可演示的 tenant/project/document/knowledge/task，并输出前端任务 URL |
 | `scripts/i2_generation_e2e.sh` | 选最近一个 public-corpus 项目 → analyze → review → generate → 校验落库；含三项硬断言（`duplicate_title_count==0` / `cases_missing_affected_fields==0` / `sections_with_source_context==section_count`）|
-| `scripts/i2_generation_quality_eval.sh` | 包装 e2e 并输出结构化质量报告：case/section、字段完整率、source_context、失败阶段、model_call、字符/token、prompt version 指标 |
+| `scripts/i2_generation_quality_eval.sh` | 包装 e2e 并输出 Markdown + JSON + 静态 HTML 质量报告：case/section、字段完整率、source_context、失败阶段、model_call、字符/token、prompt version 指标 |
 
 **回归证据**：
 
 - `docs/regression/i2_retrieval_context.md` —— parent retriever 上下文样例、DeepAgent 失败重试样例、生成质量样例
 - `docs/regression/i2_e2e_generation.md` —— 端到端流程（选需求 → 分析 → 审核 → 生成 → 入库 → 查询 → 修改/提交），含 cURL 与 SQL
+- `docs/regression/i2_generation_quality_eval.html` —— `scripts/i2_generation_quality_eval.sh` 生成的静态可视化入口（同名 `.md` / `.json` 保留原始指标）
 
 ---
 

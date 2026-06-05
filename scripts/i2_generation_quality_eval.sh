@@ -9,6 +9,8 @@
 #   CASEAGENT_PSQL_DSN                    required by i2_generation_e2e.sh
 #   CASEAGENT_TENANT_SLUG                 default apache-dubbo
 #   CASEAGENT_I2_QUALITY_REPORT           default docs/regression/i2_generation_quality_eval.md
+#   CASEAGENT_I2_QUALITY_JSON_REPORT      default docs/regression/i2_generation_quality_eval.json
+#   CASEAGENT_I2_QUALITY_HTML_REPORT      default docs/regression/i2_generation_quality_eval.html
 #   CASEAGENT_I2_QUALITY_E2E_REPORT       default .dev/i2_generation_quality_e2e.md
 #   CASEAGENT_I2_FIELD_COMPLETE_MIN       default 1.0
 #   CASEAGENT_I2_SOURCE_CONTEXT_MIN       default 1.0
@@ -21,6 +23,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${CASEAGENT_BASE_URL:-http://localhost:40003/api/v1}"
 TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-apache-dubbo}"
 REPORT="${CASEAGENT_I2_QUALITY_REPORT:-$ROOT_DIR/docs/regression/i2_generation_quality_eval.md}"
+JSON_REPORT="${CASEAGENT_I2_QUALITY_JSON_REPORT:-${REPORT%.md}.json}"
+HTML_REPORT="${CASEAGENT_I2_QUALITY_HTML_REPORT:-${REPORT%.md}.html}"
 E2E_REPORT="${CASEAGENT_I2_QUALITY_E2E_REPORT:-$ROOT_DIR/.dev/i2_generation_quality_e2e.md}"
 FIELD_COMPLETE_MIN="${CASEAGENT_I2_FIELD_COMPLETE_MIN:-1.0}"
 SOURCE_CONTEXT_MIN="${CASEAGENT_I2_SOURCE_CONTEXT_MIN:-1.0}"
@@ -38,7 +42,331 @@ require_command curl
 require_command jq
 require_command awk
 
-mkdir -p "$(dirname "$REPORT")" "$(dirname "$E2E_REPORT")"
+mkdir -p "$(dirname "$REPORT")" "$(dirname "$JSON_REPORT")" "$(dirname "$HTML_REPORT")" "$(dirname "$E2E_REPORT")"
+
+write_quality_html() {
+    local html_report="$1"
+    local report_json="$2"
+
+    {
+        cat <<'HTML'
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CaseAgent I2 Quality Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --border: #d8e0ea;
+      --ink: #172033;
+      --muted: #637083;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #d97706;
+      --red: #dc2626;
+      --track: #e9eef5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 24px; line-height: 1.2; }
+    h2 { font-size: 16px; line-height: 1.3; }
+    h3 { font-size: 13px; color: var(--muted); font-weight: 700; }
+    .muted { color: var(--muted); }
+    .meta, .grid, .charts, .columns { display: grid; gap: 12px; }
+    .meta { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+    .grid { grid-template-columns: repeat(6, minmax(0, 1fr)); margin-bottom: 14px; }
+    .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 14px; }
+    .columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      min-width: 0;
+    }
+    .panel h2 { margin-bottom: 12px; }
+    .chip-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      padding: 0 9px;
+      background: #fff;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .kpi strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    .kpi span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .ok strong { color: var(--green); }
+    .warn strong { color: var(--amber); }
+    .bad strong { color: var(--red); }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr) 58px;
+      gap: 10px;
+      align-items: center;
+      margin: 10px 0;
+    }
+    .track {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--track);
+    }
+    .fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+    .fill.ok { background: var(--green); }
+    .fill.warn { background: var(--amber); }
+    .fill.bad { background: var(--red); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid #e5eaf1;
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 700; }
+    code {
+      color: #0f172a;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      word-break: break-word;
+    }
+    .empty {
+      color: var(--muted);
+      padding: 8px 0;
+    }
+    @media (max-width: 920px) {
+      .meta, .grid, .charts, .columns { grid-template-columns: 1fr; }
+      header { flex-direction: column; }
+      .bar-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>CaseAgent I2 Quality Report</h1>
+      <p class="muted" id="subtitle"></p>
+    </div>
+    <div class="chip-row" id="headerChips"></div>
+  </header>
+
+  <section class="meta" id="metaGrid"></section>
+  <section class="grid" id="kpiGrid"></section>
+
+  <section class="charts">
+    <div class="panel">
+      <h2>质量覆盖率</h2>
+      <div id="rateBars"></div>
+    </div>
+    <div class="panel">
+      <h2>Trace 分布</h2>
+      <div id="traceBars"></div>
+    </div>
+  </section>
+
+  <section class="charts">
+    <div class="panel">
+      <h2>Model Call 统计</h2>
+      <div id="modelStats"></div>
+    </div>
+    <div class="panel">
+      <h2>失败阶段分布</h2>
+      <div id="failureStages"></div>
+    </div>
+  </section>
+
+  <section class="columns">
+    <div class="panel">
+      <h2>Prompt Version</h2>
+      <div id="promptVersions"></div>
+    </div>
+    <div class="panel">
+      <h2>Model Status</h2>
+      <div id="modelStatuses"></div>
+    </div>
+    <div class="panel">
+      <h2>失败原因</h2>
+      <div id="failureReasons"></div>
+    </div>
+  </section>
+</main>
+<script type="application/json" id="report-json">
+HTML
+        jq '.' <<<"$report_json"
+        cat <<'HTML'
+</script>
+<script>
+  const report = JSON.parse(document.getElementById('report-json').textContent);
+  const metrics = report.metrics || report;
+  const thresholds = report.thresholds || {};
+
+  const fmtRate = (value) => `${Math.round((Number(value) || 0) * 1000) / 10}%`;
+  const fmtNumber = (value) => new Intl.NumberFormat().format(Number(value) || 0);
+  const byId = (id) => document.getElementById(id);
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+
+  function statusClass(label, ok) {
+    if (ok === true) return 'ok';
+    if (ok === false) return 'bad';
+    return label;
+  }
+
+  function card(label, value, cls = '') {
+    return `<div class="panel kpi ${cls}"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
+  }
+
+  function bar(label, value, max = 1, cls = '', isRate = false) {
+    const numeric = Number(value) || 0;
+    const denom = Math.max(Number(max) || 1, numeric, 1);
+    const pct = Math.max(0, Math.min(100, (numeric / denom) * 100));
+    const shown = isRate ? fmtRate(numeric) : fmtNumber(numeric);
+    return `
+      <div class="bar-row">
+        <strong>${escapeHtml(label)}</strong>
+        <div class="track"><div class="fill ${escapeHtml(cls)}" style="width:${pct}%"></div></div>
+        <span class="muted">${escapeHtml(shown)}</span>
+      </div>`;
+  }
+
+  function table(rows, columns) {
+    if (!rows || rows.length === 0) return '<div class="empty">暂无数据</div>';
+    const head = `<thead><tr>${columns.map((col) => `<th>${escapeHtml(col.label)}</th>`).join('')}</tr></thead>`;
+    const body = `<tbody>${rows.map((row) => `
+      <tr>${columns.map((col) => `<td>${col.code ? `<code>${escapeHtml(row[col.key])}</code>` : escapeHtml(row[col.key])}</td>`).join('')}</tr>`).join('')}</tbody>`;
+    return `<table>${head}${body}</table>`;
+  }
+
+  byId('subtitle').textContent = `generated ${report.generated_at || '-'} · task #${metrics.task_id || '-'}`;
+  byId('headerChips').innerHTML = [
+    ['tenant', report.tenant],
+    ['status', metrics.terminal_status],
+    ['base', report.base_url],
+  ].map(([label, value]) => `<span class="chip">${escapeHtml(label)}: ${escapeHtml(value || '-')}</span>`).join('');
+
+  byId('metaGrid').innerHTML = [
+    card('E2E report', report.e2e_report || '-', ''),
+    card('duplicate max', thresholds.duplicate_title_count_max ?? '-', ''),
+    card('field min', thresholds.field_complete_rate_min ?? '-', ''),
+    card('source min', thresholds.source_context_coverage_min ?? '-', ''),
+  ].join('');
+
+  const fieldOk = Number(metrics.field_complete_rate) >= Number(thresholds.field_complete_rate_min ?? 0);
+  const sourceOk = Number(metrics.source_context_coverage) >= Number(thresholds.source_context_coverage_min ?? 0);
+  const duplicateOk = Number(metrics.duplicate_title_count) <= Number(thresholds.duplicate_title_count_max ?? 0);
+  const modelOk = Number(metrics.model_call_count) >= Number(thresholds.model_call_count_min ?? 0);
+  byId('kpiGrid').innerHTML = [
+    card('sections', fmtNumber(metrics.section_count)),
+    card('cases', fmtNumber(metrics.case_count)),
+    card('duplicate titles', fmtNumber(metrics.duplicate_title_count), statusClass('', duplicateOk)),
+    card('field complete', fmtRate(metrics.field_complete_rate), statusClass('', fieldOk)),
+    card('source context', fmtRate(metrics.source_context_coverage), statusClass('', sourceOk)),
+    card('model calls', fmtNumber(metrics.model_call_count), statusClass('', modelOk)),
+  ].join('');
+
+  byId('rateBars').innerHTML = [
+    bar('field complete', metrics.field_complete_rate, 1, fieldOk ? 'ok' : 'bad', true),
+    bar('source context', metrics.source_context_coverage, 1, sourceOk ? 'ok' : 'bad', true),
+    bar('product hit', metrics.product_hit_rate, 1, 'ok', true),
+    bar('module hit', metrics.module_hit_rate, 1, 'ok', true),
+  ].join('');
+
+  const trace = metrics.trace_counts || {};
+  const traceRows = Object.entries(trace);
+  const traceMax = Math.max(...traceRows.map(([, value]) => Number(value) || 0), 1);
+  byId('traceBars').innerHTML = traceRows.map(([label, value]) => bar(label, value, traceMax, 'ok')).join('');
+
+  const usage = metrics.model_call_usage || {};
+  byId('modelStats').innerHTML = [
+    bar('prompt chars', metrics.model_call_prompt_chars, Math.max(metrics.model_call_prompt_chars, metrics.model_call_response_chars, 1), 'ok'),
+    bar('response chars', metrics.model_call_response_chars, Math.max(metrics.model_call_prompt_chars, metrics.model_call_response_chars, 1), 'ok'),
+    bar('prompt tokens', usage.prompt_tokens, Math.max(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, 1), 'ok'),
+    bar('completion tokens', usage.completion_tokens, Math.max(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, 1), 'ok'),
+    bar('total tokens', usage.total_tokens, Math.max(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, 1), 'ok'),
+  ].join('');
+
+  const failureStages = metrics.failure_stage_distribution || [];
+  const failureMax = Math.max(...failureStages.map((row) => Number(row.count) || 0), 1);
+  byId('failureStages').innerHTML = failureStages.length
+    ? failureStages.map((row) => bar(row.stage, row.count, failureMax, 'bad')).join('')
+    : '<div class="empty">暂无失败阶段</div>';
+
+  byId('promptVersions').innerHTML = table(metrics.prompt_version_distribution || [], [
+    { key: 'prompt_id', label: 'prompt_id', code: true },
+    { key: 'prompt_version', label: 'version', code: true },
+    { key: 'count', label: 'count' },
+  ]);
+
+  byId('modelStatuses').innerHTML = table(metrics.model_call_status_counts || [], [
+    { key: 'status', label: 'status', code: true },
+    { key: 'count', label: 'count' },
+  ]);
+
+  byId('failureReasons').innerHTML = table(metrics.failure_reason_distribution || [], [
+    { key: 'reason', label: 'reason', code: true },
+    { key: 'count', label: 'count' },
+  ]);
+</script>
+</body>
+</html>
+HTML
+    } > "$html_report"
+}
 
 CASEAGENT_I2_E2E_REPORT="$E2E_REPORT" \
 CASEAGENT_TENANT_SLUG="$TENANT_SLUG" \
@@ -157,12 +485,44 @@ duplicate_title_count="$(jq -r '.duplicate_title_count' <<<"$metrics")"
 field_complete_rate="$(jq -r '.field_complete_rate' <<<"$metrics")"
 source_context_coverage="$(jq -r '.source_context_coverage' <<<"$metrics")"
 model_call_count="$(jq -r '.model_call_count' <<<"$metrics")"
+GENERATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+report_json="$(jq -n \
+    --arg generated_at "$GENERATED_AT" \
+    --arg base_url "$BASE_URL" \
+    --arg tenant "$TENANT_SLUG" \
+    --arg e2e_report "$E2E_REPORT" \
+    --arg duplicate_title_max "$DUPLICATE_TITLE_MAX" \
+    --arg field_complete_min "$FIELD_COMPLETE_MIN" \
+    --arg source_context_min "$SOURCE_CONTEXT_MIN" \
+    --arg model_call_min "$MODEL_CALL_MIN" \
+    --argjson metrics "$metrics" \
+    '{
+      generated_at: $generated_at,
+      base_url: $base_url,
+      tenant: $tenant,
+      e2e_report: $e2e_report,
+      thresholds: {
+        duplicate_title_count_max: ($duplicate_title_max | tonumber),
+        field_complete_rate_min: ($field_complete_min | tonumber),
+        source_context_coverage_min: ($source_context_min | tonumber),
+        model_call_count_min: ($model_call_min | tonumber)
+      },
+      metrics: $metrics
+    }'
+)"
+
+jq '.' <<<"$report_json" > "$JSON_REPORT"
+write_quality_html "$HTML_REPORT" "$report_json"
 
 {
     printf '# I2 Generation Quality Eval\n\n'
     printf -- '- base_url: `%s`\n' "$BASE_URL"
     printf -- '- tenant: `%s`\n' "$TENANT_SLUG"
+    printf -- '- generated_at: `%s`\n' "$GENERATED_AT"
     printf -- '- e2e_report: `%s`\n' "$E2E_REPORT"
+    printf -- '- json_report: `%s`\n' "$JSON_REPORT"
+    printf -- '- html_report: `%s`\n' "$HTML_REPORT"
     printf -- '- thresholds:\n'
     printf '  - duplicate_title_count <= `%s`\n' "$DUPLICATE_TITLE_MAX"
     printf '  - field_complete_rate >= `%s`\n' "$FIELD_COMPLETE_MIN"
@@ -191,4 +551,4 @@ awk -v got="$model_call_count" -v min="$MODEL_CALL_MIN" 'BEGIN { exit !(got >= m
     exit 1
 }
 
-echo "[i2-quality] passed (report: $REPORT)"
+echo "[i2-quality] passed (report: $REPORT, json: $JSON_REPORT, html: $HTML_REPORT)"

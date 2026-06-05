@@ -154,9 +154,9 @@ bash scripts/demo_bootstrap.sh
 
 **用途**：复用固定 public-corpus 生成路径，记录结构化质量指标和阈值结果，包括 section / case 数、模块/产品命中率、重复标题数、字段完整率、source_context 覆盖率、失败阶段 / 原因分布、model_call 次数、prompt / response 字符数、provider usage token 汇总和 prompt version 分布。
 
-**输入**：同 `i2_generation_e2e.sh`；可用 `CASEAGENT_I2_QUALITY_*` 覆盖报告路径和阈值。
+**输入**：同 `i2_generation_e2e.sh`；可用 `CASEAGENT_I2_QUALITY_*` 覆盖报告路径、JSON/HTML 输出路径和阈值。
 
-**输出**：默认 `docs/regression/i2_generation_quality_eval.md`，同时保留 e2e 子报告到 `.dev/i2_generation_quality_e2e.md`。
+**输出**：默认生成 `docs/regression/i2_generation_quality_eval.md`、`docs/regression/i2_generation_quality_eval.json`、`docs/regression/i2_generation_quality_eval.html`，同时保留 e2e 子报告到 `.dev/i2_generation_quality_e2e.md`。HTML 是纯静态报告，可直接用浏览器打开查看质量覆盖率、trace 分布、失败分布、token/字符统计和 prompt version 分布。
 
 **阈值**：默认 `duplicate_title_count <= 0`、`field_complete_rate >= 1.0`、`source_context_coverage >= 1.0`、`model_call_count >= 1`；产品/模块命中率与 token/字符统计作为趋势指标记录。
 
