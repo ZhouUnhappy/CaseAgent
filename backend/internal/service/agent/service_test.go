@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"caseagent/internal/agent/prompts"
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
@@ -85,9 +86,10 @@ func TestMessageCharsCountsPromptAndReasoningContent(t *testing.T) {
 func TestRunTimedAgentCallLinksModelCallsToAgentRun(t *testing.T) {
 	recorder := &fakeAgentTraceRecorder{nextAgentRunID: 77}
 	chatModel := traceChatModel(&stubChatModel{content: "ok"}, recorder, "fake", "trace")
+	rendered := prompts.Rendered{ID: prompts.FunctionalCases, Version: "v1", Content: "prompt"}
 
 	output, err := runTimedAgentCall(context.Background(), "functional", "initial", time.Second, recorder, func(ctx context.Context) (string, error) {
-		result, err := chatModel.Generate(ctx, []*schema.Message{schema.UserMessage("prompt")})
+		result, err := chatModel.Generate(prompts.WithRenderedPrompt(ctx, rendered), []*schema.Message{schema.UserMessage(rendered.Content)})
 		if err != nil {
 			return "", err
 		}
@@ -107,6 +109,12 @@ func TestRunTimedAgentCallLinksModelCallsToAgentRun(t *testing.T) {
 	}
 	if recorder.modelCalls[0].AgentRunID == nil || *recorder.modelCalls[0].AgentRunID != 77 {
 		t.Fatalf("model call agent_run_id = %#v, want 77", recorder.modelCalls[0].AgentRunID)
+	}
+	if recorder.modelCalls[0].Metadata["prompt_id"] != string(prompts.FunctionalCases) {
+		t.Fatalf("model call prompt_id = %#v", recorder.modelCalls[0].Metadata["prompt_id"])
+	}
+	if recorder.modelCalls[0].Metadata["prompt_version"] != "v1" {
+		t.Fatalf("model call prompt_version = %#v", recorder.modelCalls[0].Metadata["prompt_version"])
 	}
 	if len(recorder.finishedAgents) != 1 || recorder.finishedAgents[0].Status != models.WorkflowStatusSucceeded {
 		t.Fatalf("finished agents = %#v", recorder.finishedAgents)

@@ -74,6 +74,10 @@
   - 每次 LLM 调用使用 `model.chat.request_timeout_seconds` 做单次超时，并输出 agent start/end/failure 日志，避免真实 provider 慢调用让 task 长期停在 `generating`
 - DeepAgent（协调）：`backend/internal/agent/deep/`
 - 子 Agent：`backend/internal/agent/{functional,ops,failure,boundary}/`
+- Prompt Registry：`backend/internal/agent/prompts/registry.go`
+  - prompt 模板按 `ID + version` 注册，Agent 只渲染 registry 默认版本，不在业务代码中内联长模板。
+  - `model_calls.metadata.prompt_id` / `prompt_version` 记录本次 LLM 调用实际使用的 prompt。
+  - 新增 prompt 版本：在 registry 增加同 ID 新 version，标记 `Default: true` 并取消旧版本 default；回滚则把 default 标记切回旧版本，配套更新 `registry_test.go`。
 - 任务服务（应用层生成 workflow）：`backend/internal/service/task/`
   - 顶层编排：`service.go`
   - 任务创建 / review / generate / retry 状态机：`lifecycle.go`

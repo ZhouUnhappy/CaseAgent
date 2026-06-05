@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"caseagent/internal/agent/prompts"
 	"caseagent/internal/db/models"
 	workflowservice "caseagent/internal/service/workflow"
 
@@ -75,6 +76,10 @@ func (m *tracedChatModel) record(ctx context.Context, input []*schema.Message, o
 		"attempt":    traceInfo.Attempt,
 		"elapsed_ms": elapsed.Milliseconds(),
 		"streaming":  streaming,
+	}
+	if promptInfo, ok := prompts.TraceFromContext(ctx); ok {
+		metadata["prompt_id"] = string(promptInfo.ID)
+		metadata["prompt_version"] = promptInfo.Version
 	}
 	if output != nil && output.ResponseMeta != nil {
 		metadata["finish_reason"] = output.ResponseMeta.FinishReason

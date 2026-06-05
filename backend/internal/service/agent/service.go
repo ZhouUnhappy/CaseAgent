@@ -36,6 +36,7 @@ import (
 	"caseagent/internal/agent/failure"
 	"caseagent/internal/agent/functional"
 	"caseagent/internal/agent/ops"
+	"caseagent/internal/agent/prompts"
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
@@ -63,6 +64,7 @@ type Config struct {
 	TraceRecorder   workflowservice.AgentTraceRecorder
 	ChatProvider    string // Optional, used for model_call trace rows when ChatModel is provided
 	ChatModelName   string // Optional, used for model_call trace rows when ChatModel is provided
+	PromptRegistry  *prompts.Registry
 }
 
 const GenerationStageDeepAgentFallback = "deep_agent_fallback"
@@ -142,24 +144,28 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		traceRecorder = workflowservice.NewRecorder(cfg.TraceDB)
 	}
 	chatModel = traceChatModel(chatModel, traceRecorder, provider, modelName)
+	promptRegistry := cfg.PromptRegistry
+	if promptRegistry == nil {
+		promptRegistry = prompts.DefaultRegistry()
+	}
 
 	// Create sub-agents
-	functionalAgent, err := functional.New(ctx, &functional.Config{ChatModel: chatModel})
+	functionalAgent, err := functional.New(ctx, &functional.Config{ChatModel: chatModel, Prompts: promptRegistry})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create functional agent: %w", err)
 	}
 
-	opsAgent, err := ops.New(ctx, &ops.Config{ChatModel: chatModel})
+	opsAgent, err := ops.New(ctx, &ops.Config{ChatModel: chatModel, Prompts: promptRegistry})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ops agent: %w", err)
 	}
 
-	failureAgent, err := failure.New(ctx, &failure.Config{ChatModel: chatModel})
+	failureAgent, err := failure.New(ctx, &failure.Config{ChatModel: chatModel, Prompts: promptRegistry})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create failure agent: %w", err)
 	}
 
-	boundaryAgent, err := boundary.New(ctx, &boundary.Config{ChatModel: chatModel})
+	boundaryAgent, err := boundary.New(ctx, &boundary.Config{ChatModel: chatModel, Prompts: promptRegistry})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create boundary agent: %w", err)
 	}
@@ -171,6 +177,7 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	deepAgent, err := deep.New(ctx, &deep.Config{
 		ChatModel: chatModel,
 		SubAgents: subAgents,
+		Prompts:   promptRegistry,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deep agent: %w", err)
