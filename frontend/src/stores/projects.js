@@ -26,5 +26,10 @@ export const useProjectsStore = defineStore('projects', {
         this.creating = false
       }
     },
+    clear() {
+      this.items = []
+      this.loading = false
+      this.creating = false
+    },
   },
 })

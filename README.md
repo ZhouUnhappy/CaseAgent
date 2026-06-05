@@ -77,7 +77,10 @@ npm run dev
 ## API 文档
 
 - `POST /api/v1/tenants` - 创建租户（slug + name；不需要 X-Tenant-ID header）
-- `GET /api/v1/tenants` - 列出租户（同上）
+- `GET /api/v1/tenants` - 列出 active 租户；`include_archived=true` 可包含归档租户
+- `PUT /api/v1/tenants/:slug` - 更新租户显示名
+- `POST /api/v1/tenants/:slug/archive` - 归档租户，业务 API 不再接受该 slug
+- `POST /api/v1/tenants/:slug/unarchive` - 恢复归档租户
 
 以下端点都要求 `X-Tenant-ID: <slug>` header：
 

@@ -27,6 +27,10 @@ func TestLoadSchemaSQL(t *testing.T) {
 	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS tenants") {
 		t.Fatalf("expected tenants table definition in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "ADD COLUMN IF NOT EXISTS archived_at") ||
+		!strings.Contains(schema, "tenants_archived_at_idx") {
+		t.Fatalf("expected tenant archive lifecycle schema, got: %s", schema)
+	}
 	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS documents") {
 		t.Fatalf("expected documents table definition in schema, got: %s", schema)
 	}

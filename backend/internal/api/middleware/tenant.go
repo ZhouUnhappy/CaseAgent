@@ -24,7 +24,11 @@ func Tenant(bunDB *bun.DB) gin.HandlerFunc {
 		}
 
 		tenant := &models.Tenant{}
-		if err := bunDB.NewSelect().Model(tenant).Where("slug = ?", slug).Scan(c.Request.Context()); err != nil {
+		if err := bunDB.NewSelect().
+			Model(tenant).
+			Where("slug = ?", slug).
+			Where("archived_at IS NULL").
+			Scan(c.Request.Context()); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("tenant %q not found", slug)})
 			return
 		}

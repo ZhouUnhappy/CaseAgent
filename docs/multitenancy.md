@@ -8,14 +8,14 @@ CaseAgent 的所有业务对象（projects / documents / document_chunks / knowl
 
 ```
 tenants
-  ├─ id, slug (unique), name, created_at, updated_at
+  ├─ id, slug (unique), name, archived_at, created_at, updated_at
 
 每张业务表都有
   ├─ tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
   └─ btree index on tenant_id
 ```
 
-`tenants` 表本身不启用 RLS —— 它是元数据，由 `/api/v1/tenants` 端点公开 list/create。其他业务表全部启用 `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`。
+`tenants` 表本身不启用 RLS —— 它是元数据，由 `/api/v1/tenants` 端点公开 list/create/update/archive。归档 tenant 保留审计和历史数据，但默认列表隐藏；业务 API 的 tenant middleware 只解析 `archived_at IS NULL` 的 tenant。其他业务表全部启用 `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`。
 
 ## RLS Policy 模板
 
@@ -53,7 +53,7 @@ middleware/tx.go       ─► db.RunInTenantTx(ctx, db, fn)
 handler.XxxFunc(c)     ─► DBFromContext(c).NewSelect/Insert/...
     │
     ▼ status >= 400 → tx rollback
-COMMIT (or ROLLBACK)
+COMMIT (or ROLLBACK) → flush buffered response
 ```
 
 - 关键 helper：
@@ -64,8 +64,7 @@ COMMIT (or ROLLBACK)
   - `handler.RunAsyncAfterCommit(c, h.DB, tenantID, fn)` — 文档、知识库、维护类异步处理仍用它在请求提交后单独开 tx；不能复用请求事务。
   - 生成任务 analyze / generate 不走直接 goroutine；handler 只写 `background_jobs`，`service/job` worker 再用 tenant-scoped tx 领取并执行。
   - worker 会为每个 job 写入 `workflow_runs` / `workflow_steps`，业务服务继续在同一 tenant context 下记录 agent / retrieval / artifact trace。
-
-- Caveat：gin 在 `c.JSON` 时已经把 response flush 给 client；我们的 tx commit 发生在 handler 返回之后。如果 commit 失败，client 已经看到 success status。日志会记录，但无法回滚 response。验证阶段够用；生产化要换成 buffered ResponseWriter。
+  - `middleware/tx.go` 使用 buffered response writer，handler 成功响应会等事务 commit 和 after-commit hook 成功排程后再 flush；commit 失败时返回 5xx，避免客户端先看到成功。
 
 ## Tenant 解析协议
 
@@ -73,8 +72,16 @@ COMMIT (or ROLLBACK)
 |---|---|---|
 | 传递方式 | HTTP Header `X-Tenant-ID` | 简单直接；SaaS 化后可换成 JWT claims |
 | 值 | tenant slug（字符串） | 人类可读、URL 安全；中间件查表换成 int id |
-| 缺失 / 不存在 | 400，`{"error":"missing X-Tenant-ID header"}` / `{"error":"tenant \"xxx\" not found"}` | 白名单路由 `/api/v1/tenants` 跳过此校验 |
-| 前端 | localStorage(`caseagent.tenant_slug`) + axios request interceptor 自动注入 | 切换 tenant → `window.location.reload()` 让所有 view 重新拉数据 |
+| 缺失 / 不存在 / 已归档 | 400，`{"error":"missing X-Tenant-ID header"}` / `{"error":"tenant \"xxx\" not found"}` | 白名单路由 `/api/v1/tenants` 跳过此校验；归档 tenant 不再能访问业务 API |
+| 前端 | localStorage(`caseagent.tenant_slug`) + axios request interceptor 自动注入 | 切换 tenant 会清空 tenant-scoped Pinia store 并用 RouterView key 触发当前页面重新拉数据，不做硬刷新 |
+
+## Tenant 生命周期与 demo 清理
+
+- 创建：`POST /api/v1/tenants` 或前端顶部“新建”/`/tenants` 页面；slug 创建后不改名，显示名可通过 `PUT /api/v1/tenants/:slug` 更新。
+- 默认 tenant：前端 `/tenants` 页面可把一个 active tenant 设为默认，保存在 localStorage(`caseagent.default_tenant_slug`)；当前 tenant 缺失或被归档时，前端优先选择默认 tenant。
+- 归档：`POST /api/v1/tenants/:slug/archive` 设置 `archived_at`。归档不会删除业务数据，适合作为 demo / 试用环境的“停用”操作；业务 API 会拒绝这个 slug，普通租户下拉也不再显示。
+- 恢复：`POST /api/v1/tenants/:slug/unarchive` 清空 `archived_at`，租户重新进入 active 列表。
+- 清理：demo 数据优先按 project / knowledge / document 等业务 API 删除；需要保留历史但停止误用时归档 tenant。直接删除 tenant 会因业务表 `ON DELETE CASCADE` 清掉该 tenant 的业务数据，当前不暴露为前端操作，只建议在明确的一次性测试库清理中用 SQL 执行。
 
 ## NOBYPASSRLS Role 配置
 
@@ -113,4 +120,4 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 - **`tenant_id IS NULL` 平台共享知识**：当前所有 knowledge 强归属 tenant。同一组件（Dubbo / Linux）在不同公司侧重点不同，"通用知识"塞共享池反而会稀释检索质量。
 - **跨 tenant 的知识复制 / marketplace**：使用频率预计极低，UX 未经真实用户验证。真要做时走 `POST /api/v1/knowledge/import`（应用层端点临时切租户上下文读 + 写入当前 tenant），**不污染 RLS policy**。
 - **跨 tenant 批量 reindex**：`POST /api/v1/maintenance/reindex` 当前只 reindex 当前 tenant 数据。真要批量跑需要独立 admin endpoint + superuser DSN，明确绕过 RLS。
-- **完整 tenant CRUD**：当前只有 `POST` / `GET`。`DELETE` / `PUT` 留作运维需求出现时再加。
+- **tenant 物理删除**：当前只暴露 create / list / update name / archive / unarchive。物理删除会级联删除业务数据，只留给明确的测试库清理脚本或人工 SQL。

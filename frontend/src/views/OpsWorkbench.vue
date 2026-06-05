@@ -12,7 +12,7 @@ import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel } from '..
 
 const router = useRouter()
 const tenantStore = useTenantStore()
-const { items: tenants, currentSlug, loading: tenantLoading } = storeToRefs(tenantStore)
+const { activeItems: tenants, currentSlug, loading: tenantLoading } = storeToRefs(tenantStore)
 
 const activeTab = ref('jobs')
 const jobs = ref([])
@@ -75,7 +75,9 @@ function formatDate(value) {
 
 function applyTenant(slug) {
   tenantStore.setCurrent(slug)
-  window.location.reload()
+  jobFilters.tenant = slug
+  workflowFilters.tenant = slug
+  refreshAll()
 }
 
 function buildJobParams() {

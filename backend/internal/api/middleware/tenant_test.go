@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"caseagent/internal/api/middleware"
 	"caseagent/internal/db/models"
@@ -39,8 +40,15 @@ func TestTenantMiddleware(t *testing.T) {
 	if _, err := bunDB.NewInsert().Model(tenant).Returning("id").Exec(ctx); err != nil {
 		t.Fatalf("seed tenant: %v", err)
 	}
+	now := time.Now()
+	archivedTenant := &models.Tenant{Slug: "mw-archived-test", Name: "Archived Middleware Test", ArchivedAt: &now}
+	if _, err := bunDB.NewInsert().Model(archivedTenant).Returning("id").Exec(ctx); err != nil {
+		t.Fatalf("seed archived tenant: %v", err)
+	}
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Tenant)(nil)).Where("id = ?", tenant.ID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Tenant)(nil)).
+			Where("id IN (?)", bun.In([]int{tenant.ID, archivedTenant.ID})).
+			Exec(ctx)
 	})
 
 	gin.SetMode(gin.TestMode)
@@ -56,12 +64,12 @@ func TestTenantMiddleware(t *testing.T) {
 	})
 
 	cases := []struct {
-		name           string
-		header         string
-		setHeader      bool
-		wantStatus     int
-		wantTenantID   int
-		wantErrSubstr  string
+		name          string
+		header        string
+		setHeader     bool
+		wantStatus    int
+		wantTenantID  int
+		wantErrSubstr string
 	}{
 		{
 			name:         "valid slug stashes tenant_id",
@@ -89,6 +97,13 @@ func TestTenantMiddleware(t *testing.T) {
 			setHeader:     true,
 			wantStatus:    http.StatusBadRequest,
 			wantErrSubstr: `tenant "does-not-exist" not found`,
+		},
+		{
+			name:          "archived slug rejected",
+			header:        "mw-archived-test",
+			setHeader:     true,
+			wantStatus:    http.StatusBadRequest,
+			wantErrSubstr: `tenant "mw-archived-test" not found`,
 		},
 	}
 

@@ -56,6 +56,11 @@ export const useKnowledgeStore = defineStore('knowledge', {
       await deleteKnowledge(id)
       this.items = this.items.filter((k) => k.id !== id)
     },
+    clear() {
+      this.items = []
+      this.loading = false
+      this.saving = false
+    },
     replace(updated) {
       const idx = this.items.findIndex((k) => k.id === updated.id)
       if (idx >= 0) this.items.splice(idx, 1, updated)

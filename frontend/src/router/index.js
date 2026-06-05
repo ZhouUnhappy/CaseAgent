@@ -49,6 +49,12 @@ const routes = [
     component: () => import('../views/OpsWorkbench.vue'),
     meta: { title: '运维工作台' },
   },
+  {
+    path: '/tenants',
+    name: 'tenants',
+    component: () => import('../views/TenantManagement.vue'),
+    meta: { title: '租户管理' },
+  },
 ]
 
 const router = createRouter({

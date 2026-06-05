@@ -40,6 +40,11 @@ export const useDocumentsStore = defineStore('documents', {
       await deleteDocument(id)
       this.items = this.items.filter((d) => d.id !== id)
     },
+    clear() {
+      this.items = []
+      this.loading = false
+      this.uploading = false
+    },
     replace(updated) {
       const idx = this.items.findIndex((d) => d.id === updated.id)
       if (idx >= 0) this.items.splice(idx, 1, updated)

@@ -37,6 +37,8 @@ export const useTestCasesStore = defineStore('testcases', {
     },
     clear() {
       this.items = []
+      this.loading = false
+      this.saving = false
     },
     replace(updated) {
       const idx = this.items.findIndex((c) => c.id === updated.id)

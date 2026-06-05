@@ -2,11 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor } from '@element-plus/icons-vue'
+import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor, OfficeBuilding } from '@element-plus/icons-vue'
 import { useTenantStore } from '../stores/tenant'
 
 const route = useRoute()
 const pageTitle = computed(() => route.meta?.title || 'CaseAgent')
+const tenantStore = useTenantStore()
+const routeViewKey = computed(() => `${tenantStore.currentSlug}:${tenantStore.version}:${route.fullPath}`)
 const activeMenu = computed(() => {
   if (route.name === 'task-detail') return '/generate'
   if (route.name === 'project-detail') return '/projects'
@@ -19,9 +21,8 @@ const navItems = [
   { index: '/knowledge', label: '知识库', icon: Collection },
   { index: '/knowledge-suggestions', label: '知识建议', icon: DocumentChecked },
   { index: '/ops', label: '运维', icon: Monitor },
+  { index: '/tenants', label: '租户', icon: OfficeBuilding },
 ]
-
-const tenantStore = useTenantStore()
 
 onMounted(() => {
   tenantStore.fetch().catch(() => {
@@ -31,9 +32,6 @@ onMounted(() => {
 
 function onTenantChange(slug) {
   tenantStore.setCurrent(slug)
-  // Hard reload so every view re-fetches data scoped to the new tenant
-  // instead of needing each store to subscribe to tenant changes.
-  window.location.reload()
 }
 
 const createDialogVisible = ref(false)
@@ -55,7 +53,6 @@ async function submitCreate() {
     ElMessage.success(`租户 ${created.slug} 已创建`)
     createDialogVisible.value = false
     tenantStore.setCurrent(created.slug)
-    window.location.reload()
   } catch {
     // notifyApiError already shown
   }
@@ -101,7 +98,7 @@ async function submitCreate() {
             @change="onTenantChange"
           >
             <el-option
-              v-for="t in tenantStore.items"
+              v-for="t in tenantStore.activeItems"
               :key="t.slug"
               :label="`${t.name} (${t.slug})`"
               :value="t.slug"
@@ -111,7 +108,7 @@ async function submitCreate() {
         </div>
       </el-header>
       <el-main class="layout-main">
-        <RouterView />
+        <RouterView :key="routeViewKey" />
       </el-main>
     </el-container>
   </el-container>

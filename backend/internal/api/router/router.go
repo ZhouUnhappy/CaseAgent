@@ -19,6 +19,9 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 	{
 		tenants.POST("", h.CreateTenant)
 		tenants.GET("", h.ListTenants)
+		tenants.PUT("/:slug", h.UpdateTenant)
+		tenants.POST("/:slug/archive", h.ArchiveTenant)
+		tenants.POST("/:slug/unarchive", h.UnarchiveTenant)
 	}
 
 	// All other routes require X-Tenant-ID and run inside a tenant-scoped tx.

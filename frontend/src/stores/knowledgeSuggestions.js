@@ -72,5 +72,11 @@ export const useKnowledgeSuggestionsStore = defineStore('knowledgeSuggestions', 
         this.saving = false
       }
     },
+    clear() {
+      this.items = []
+      this.loading = false
+      this.saving = false
+      this.draftingId = null
+    },
   },
 })

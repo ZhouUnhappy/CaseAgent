@@ -60,5 +60,11 @@ export const useTasksStore = defineStore('tasks', {
       const idx = this.items.findIndex((t) => t.id === updated.id)
       if (idx >= 0) this.items.splice(idx, 1, updated)
     },
+    clear() {
+      this.items = []
+      this.current = null
+      this.loading = false
+      this.creating = false
+    },
   },
 })
