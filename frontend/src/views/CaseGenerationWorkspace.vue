@@ -75,6 +75,43 @@ const taskStatusText = computed(() => {
 })
 const latestSelectedJob = computed(() => latestJob(selectedTaskJobs.value))
 const selectedJobError = computed(() => compactJobError(findSelectedJobWithError()))
+const workspaceTimeline = computed(() => {
+  if (!task.value) return []
+  const rows = [
+    {
+      key: 'created',
+      label: 'Created',
+      status: 'succeeded',
+      time: task.value.created_at,
+    },
+  ]
+  for (const job of selectedTaskJobs.value) {
+    rows.push({
+      key: `job-${job.id}`,
+      label: jobTypeLabel(job.job_type),
+      status: job.status,
+      time: job.started_at || job.run_after || job.created_at,
+      retry: `${job.retry_count}/${job.max_retries}`,
+    })
+  }
+  if (['awaiting_review', 'ready_to_generate'].includes(task.value.status)) {
+    rows.push({
+      key: 'review',
+      label: 'Review',
+      status: task.value.status === 'awaiting_review' ? 'running' : 'succeeded',
+      time: task.value.updated_at,
+    })
+  }
+  if (['completed', 'failed'].includes(task.value.status)) {
+    rows.push({
+      key: 'final',
+      label: task.value.status === 'completed' ? 'Completed' : 'Failed',
+      status: task.value.status === 'completed' ? 'succeeded' : 'failed',
+      time: task.value.updated_at,
+    })
+  }
+  return rows
+})
 const selectedDocumentCount = computed(() => selectedDocumentIds.value.length)
 const primaryAction = computed(() => {
   if (!selectedProjectId.value) {
@@ -682,6 +719,25 @@ function findSelectedJobWithError() {
           <p v-if="selectedJobError" class="job-error">{{ selectedJobError }}</p>
         </div>
 
+        <div v-if="workspaceTimeline.length" class="mini-timeline">
+          <div
+            v-for="item in workspaceTimeline"
+            :key="item.key"
+            class="mini-timeline-item"
+            :class="item.status"
+          >
+            <span class="mini-dot" />
+            <div>
+              <strong>{{ item.label }}</strong>
+              <small>
+                {{ jobStatusLabel(item.status) }}
+                <span v-if="item.retry"> · retry {{ item.retry }}</span>
+                <span> · {{ formatDate(item.time) }}</span>
+              </small>
+            </div>
+          </div>
+        </div>
+
         <el-form v-if="task" label-position="top" class="review-form">
           <el-form-item label="受影响产品">
             <el-select
@@ -1176,6 +1232,46 @@ function findSelectedJobWithError() {
   color: #f56c6c;
   font-size: 12px;
   word-break: break-word;
+}
+.mini-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-left: 4px;
+}
+.mini-timeline-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: #475569;
+}
+.mini-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.mini-timeline-item.running .mini-dot,
+.mini-timeline-item.retrying .mini-dot {
+  background: #e6a23c;
+}
+.mini-timeline-item.failed .mini-dot {
+  background: #f56c6c;
+}
+.mini-timeline-item.succeeded .mini-dot {
+  background: #67c23a;
+}
+.mini-timeline-item strong {
+  display: block;
+  color: #111827;
+  font-size: 13px;
+}
+.mini-timeline-item small {
+  color: #64748b;
+  font-size: 12px;
 }
 .panel-footer {
   display: flex;

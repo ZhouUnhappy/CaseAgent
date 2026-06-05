@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"caseagent/internal/config"
+
 	"github.com/cloudwego/eino/components/embedding"
 )
 
@@ -43,5 +45,28 @@ func TestDimensionCheckedEmbedderRejectsUnexpectedDimensions(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "expected 4, got 3") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewEmbedderFakeReturnsConfiguredDimensions(t *testing.T) {
+	embedder, err := NewEmbedder(context.Background(), config.EmbeddingModelConfig{
+		Provider:   "fake",
+		Dimensions: 6,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder() returned error: %v", err)
+	}
+
+	result, err := embedder.EmbedStrings(context.Background(), []string{"alpha", "alpha"})
+	if err != nil {
+		t.Fatalf("EmbedStrings() returned error: %v", err)
+	}
+	if len(result) != 2 || len(result[0]) != 6 {
+		t.Fatalf("unexpected fake embedding shape: %#v", result)
+	}
+	for i := range result[0] {
+		if result[0][i] != result[1][i] {
+			t.Fatalf("fake embedding not deterministic: %#v", result)
+		}
 	}
 }

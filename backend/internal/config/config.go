@@ -105,6 +105,9 @@ func Load(configPath string) error {
 	if err := viper.Unmarshal(cfg); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	if err := Validate(cfg); err != nil {
+		return err
+	}
 
 	return nil
 }

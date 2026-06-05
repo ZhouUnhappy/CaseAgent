@@ -17,6 +17,7 @@ model:
     # - ark
     # - deepseek (OpenAI-compatible; default base_url is https://api.deepseek.com)
     # - openai (generic OpenAI-compatible)
+    # - fake (tests/regression only; model selects fake scenario)
     provider: ark
     model: ep-your-chat-endpoint
     api_key: your_ark_api_key
@@ -37,6 +38,7 @@ model:
     # base_url: https://api.deepseek.com
     # region: ""
   embedding:
+    # Supported providers: ark, openai, fake (tests/regression only).
     provider: ark
     model: ep-your-embedding-endpoint
     dimensions: 2000

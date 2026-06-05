@@ -39,6 +39,8 @@ func NewEmbedder(ctx context.Context, cfg config.EmbeddingModelConfig) (embeddin
 			openAIConfig.Dimensions = &dimensions
 		}
 		embedder, err = openaiembedding.NewEmbedder(ctx, openAIConfig)
+	case "fake":
+		embedder = newFakeEmbedder(cfg.Dimensions)
 	default:
 		return nil, fmt.Errorf("unsupported embedding provider: %s", cfg.Provider)
 	}

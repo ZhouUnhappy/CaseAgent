@@ -31,6 +31,8 @@ func NewChatModel(ctx context.Context, cfg config.ChatModelConfig) (model.BaseCh
 		return openaiacl.NewClient(ctx, openAICompatibleChatConfig(cfg, deepSeekDefaultBaseURL))
 	case "openai":
 		return openaiacl.NewClient(ctx, openAICompatibleChatConfig(cfg, ""))
+	case "fake":
+		return newFakeChatModel(cfg.Model), nil
 	default:
 		return nil, fmt.Errorf("unsupported chat provider: %s", cfg.Provider)
 	}

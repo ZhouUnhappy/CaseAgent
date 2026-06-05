@@ -65,6 +65,9 @@ func Init(ctx context.Context) error {
 	if err := ensureVectorDimensions(ctx, DB, config.Get().Model.Embedding.Dimensions); err != nil {
 		return err
 	}
+	if err := validateRuntimeConfig(ctx, DB, config.Get()); err != nil {
+		return err
+	}
 
 	return nil
 }

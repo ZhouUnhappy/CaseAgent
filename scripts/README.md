@@ -12,6 +12,7 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 | `i1_public_corpus_eval.sh` | `apache-dubbo` | 全部 fixture 来自 apache/dubbo-website |
 | `i1_private_corpus_eval.sh` | `CASEAGENT_I1_PRIVATE_TENANT_SLUG` 必填，不给直接 exit | 防止私有数据误入默认 tenant |
 | `i2_generation_e2e.sh` | `apache-dubbo` | 默认复用最新 public-corpus project；复用其他 project 时同时设置 `CASEAGENT_TENANT_SLUG` |
+| `i2_generation_quality_eval.sh` | `apache-dubbo` | 包装 i2 e2e 并输出可提交的质量指标 |
 | `multitenancy_isolation.sh` | 一次性创建 `iso-a-*` / `iso-b-*` 两个临时 tenant | 验证私有 vs 私有隔离 |
 | `i1_retrieval_cleanup.sh` | **绕过** RLS（用 `CASEAGENT_PSQL_DSN` superuser 直接 DELETE） | design intent |
 
@@ -123,6 +124,20 @@ export CASEAGENT_PSQL_DSN='postgres://user:pass@localhost:5432/caseagent?sslmode
 **输出**：默认 `.dev/i2_generation_e2e.md`。
 
 **何时跑**：改了 Agent 编排、解析、去重、source_context 拼装、或任何会影响生成结构的逻辑时。
+
+---
+
+### `i2_generation_quality_eval.sh`
+
+**用途**：复用固定 public-corpus 生成路径，记录结构化质量指标和阈值结果，包括模块/产品命中率、重复标题数、字段完整率、source_context 覆盖率、失败原因分布。
+
+**输入**：同 `i2_generation_e2e.sh`；可用 `CASEAGENT_I2_QUALITY_*` 覆盖报告路径和阈值。
+
+**输出**：默认 `docs/regression/i2_generation_quality_eval.md`，同时保留 e2e 子报告到 `.dev/i2_generation_quality_e2e.md`。
+
+**阈值**：默认 `duplicate_title_count <= 0`、`field_complete_rate >= 1.0`、`source_context_coverage >= 1.0`；产品/模块命中率作为趋势指标记录。
+
+**何时跑**：生成逻辑、prompt、retrieval context、模型配置变化后，需要留下可比较质量证据时。
 
 ---
 

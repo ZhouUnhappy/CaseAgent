@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"caseagent/internal/ai"
 	"caseagent/internal/config"
 )
 
@@ -156,5 +158,71 @@ func TestGenerationErrorCarriesFailureStage(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("generation error should unwrap original cause")
+	}
+}
+
+func TestGenerateCasesWithFakeProvider(t *testing.T) {
+	chatModel, err := ai.NewChatModel(context.Background(), config.ChatModelConfig{
+		Provider: "fake",
+		Model:    "valid_json",
+	})
+	if err != nil {
+		t.Fatalf("NewChatModel() returned error: %v", err)
+	}
+	service, err := New(context.Background(), &Config{ChatModel: chatModel, ChatCallTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	output, err := service.GenerateCases(context.Background(), "fake requirements", "fake knowledge")
+	if err != nil {
+		t.Fatalf("GenerateCases() returned error: %v", err)
+	}
+	if !strings.Contains(output, `"section": "功能测试"`) {
+		t.Fatalf("unexpected output: %s", output)
+	}
+}
+
+func TestGenerateCasesWithFakePartialFailureProvider(t *testing.T) {
+	chatModel, err := ai.NewChatModel(context.Background(), config.ChatModelConfig{
+		Provider: "fake",
+		Model:    "partial_failure",
+	})
+	if err != nil {
+		t.Fatalf("NewChatModel() returned error: %v", err)
+	}
+	service, err := New(context.Background(), &Config{ChatModel: chatModel, ChatCallTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	output, err := service.GenerateCases(context.Background(), "fake requirements", "fake knowledge")
+	if err != nil {
+		t.Fatalf("GenerateCases() returned error despite partial failure: %v", err)
+	}
+	if !strings.Contains(output, "功能测试") {
+		t.Fatalf("unexpected output: %s", output)
+	}
+}
+
+func TestGenerateCasesWithFakeTimeoutProvider(t *testing.T) {
+	chatModel, err := ai.NewChatModel(context.Background(), config.ChatModelConfig{
+		Provider: "fake",
+		Model:    "timeout",
+	})
+	if err != nil {
+		t.Fatalf("NewChatModel() returned error: %v", err)
+	}
+	service, err := New(context.Background(), &Config{ChatModel: chatModel, ChatCallTimeout: time.Millisecond})
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	_, err = service.GenerateCases(context.Background(), "fake requirements", "fake knowledge")
+	if err == nil {
+		t.Fatal("GenerateCases() expected timeout error")
+	}
+	if FailureStage(err) != GenerationStageDeepAgentFallback {
+		t.Fatalf("FailureStage() = %q, want %q", FailureStage(err), GenerationStageDeepAgentFallback)
 	}
 }
