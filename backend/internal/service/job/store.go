@@ -8,6 +8,7 @@ import (
 
 	tenantdb "caseagent/internal/db"
 	"caseagent/internal/db/models"
+	workflowservice "caseagent/internal/service/workflow"
 
 	"github.com/uptrace/bun"
 )
@@ -15,11 +16,13 @@ import (
 type Store interface {
 	ListTenantIDs(ctx context.Context) ([]int, error)
 	RecoverStale(ctx context.Context, timeout time.Duration) (int, error)
-	ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.CaseGenerationJob, error)
+	ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.BackgroundJob, error)
 	RunInTenantTx(ctx context.Context, tenantID int, fn func(context.Context, bun.Tx) error) error
 	MarkSucceeded(ctx context.Context, tenantID int, jobID int) error
-	MarkRetry(ctx context.Context, tenantID int, job *models.CaseGenerationJob, lastErr error, runAfter time.Time) error
+	MarkRetry(ctx context.Context, tenantID int, job *models.BackgroundJob, lastErr error, runAfter time.Time) error
 	MarkFailed(ctx context.Context, tenantID int, jobID int, lastErr error) error
+	StartWorkflow(ctx context.Context, job *models.BackgroundJob) (runID int, stepID int, err error)
+	FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, status string, cause error) error
 }
 
 type BunStore struct {
@@ -58,7 +61,7 @@ func (s *BunStore) RecoverStale(ctx context.Context, timeout time.Duration) (int
 	for _, tenantID := range tenantIDs {
 		if err := s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
 			result, err := tx.NewUpdate().
-				Model((*models.CaseGenerationJob)(nil)).
+				Model((*models.BackgroundJob)(nil)).
 				Set("status = ?", models.JobStatusPending).
 				Set("locked_at = NULL").
 				Set("run_after = CURRENT_TIMESTAMP").
@@ -79,14 +82,14 @@ func (s *BunStore) RecoverStale(ctx context.Context, timeout time.Duration) (int
 	return recovered, nil
 }
 
-func (s *BunStore) ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.CaseGenerationJob, error) {
-	var claimed *models.CaseGenerationJob
+func (s *BunStore) ClaimNext(ctx context.Context, tenantID int, jobType string) (*models.BackgroundJob, error) {
+	var claimed *models.BackgroundJob
 	if err := s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		job := new(models.CaseGenerationJob)
+		job := new(models.BackgroundJob)
 		err := tx.NewRaw(`
 WITH next_job AS (
     SELECT id
-    FROM case_generation_jobs
+    FROM background_jobs
     WHERE status = ?
       AND run_after <= CURRENT_TIMESTAMP
       AND (? = '' OR job_type = ?)
@@ -94,7 +97,7 @@ WITH next_job AS (
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
-UPDATE case_generation_jobs AS j
+UPDATE background_jobs AS j
 SET status = ?,
     locked_at = CURRENT_TIMESTAMP,
     started_at = COALESCE(j.started_at, CURRENT_TIMESTAMP),
@@ -125,7 +128,7 @@ func (s *BunStore) MarkSucceeded(ctx context.Context, tenantID int, jobID int) e
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		now := time.Now()
 		_, err := tx.NewUpdate().
-			Model((*models.CaseGenerationJob)(nil)).
+			Model((*models.BackgroundJob)(nil)).
 			Set("status = ?", models.JobStatusSucceeded).
 			Set("locked_at = NULL").
 			Set("finished_at = ?", now).
@@ -137,11 +140,11 @@ func (s *BunStore) MarkSucceeded(ctx context.Context, tenantID int, jobID int) e
 	})
 }
 
-func (s *BunStore) MarkRetry(ctx context.Context, tenantID int, job *models.CaseGenerationJob, lastErr error, runAfter time.Time) error {
+func (s *BunStore) MarkRetry(ctx context.Context, tenantID int, job *models.BackgroundJob, lastErr error, runAfter time.Time) error {
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		now := time.Now()
 		_, err := tx.NewUpdate().
-			Model((*models.CaseGenerationJob)(nil)).
+			Model((*models.BackgroundJob)(nil)).
 			Set("status = ?", models.JobStatusPending).
 			Set("retry_count = ?", job.RetryCount+1).
 			Set("last_error = ?", errorString(lastErr)).
@@ -159,7 +162,7 @@ func (s *BunStore) MarkFailed(ctx context.Context, tenantID int, jobID int, last
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
 		now := time.Now()
 		_, err := tx.NewUpdate().
-			Model((*models.CaseGenerationJob)(nil)).
+			Model((*models.BackgroundJob)(nil)).
 			Set("status = ?", models.JobStatusFailed).
 			Set("last_error = ?", errorString(lastErr)).
 			Set("locked_at = NULL").
@@ -169,6 +172,32 @@ func (s *BunStore) MarkFailed(ctx context.Context, tenantID int, jobID int, last
 			Where("status = ?", models.JobStatusRunning).
 			Exec(ctx)
 		return err
+	})
+}
+
+func (s *BunStore) StartWorkflow(ctx context.Context, job *models.BackgroundJob) (int, int, error) {
+	var runID int
+	var stepID int
+	if err := s.RunInTenantTx(ctx, job.TenantID, func(ctx context.Context, tx bun.Tx) error {
+		run, step, err := workflowservice.New(tx).StartJobRun(ctx, workflowservice.StartJobRunInput{Job: job})
+		if err != nil {
+			return err
+		}
+		runID = run.ID
+		stepID = step.ID
+		return nil
+	}); err != nil {
+		return 0, 0, err
+	}
+	return runID, stepID, nil
+}
+
+func (s *BunStore) FinishWorkflow(ctx context.Context, tenantID int, runID int, stepID int, status string, cause error) error {
+	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
+		return workflowservice.New(tx).FinishRunAndStep(ctx, runID, stepID, workflowservice.FinishInput{
+			Status: status,
+			Cause:  cause,
+		})
 	})
 }
 

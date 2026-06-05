@@ -1,6 +1,6 @@
 # 多租户架构
 
-CaseAgent 的所有业务对象（projects / documents / document_chunks / knowledge_base / case_generation_tasks / case_generation_jobs / test_cases / knowledge_update_suggestion_groups / knowledge_update_suggestion_occurrences）都强归属于一个 tenant。跨 tenant 数据互不可见，由 PostgreSQL Row-Level Security 在 DB 层兜底强制，应用层即使漏掉 WHERE 也不会泄露。
+CaseAgent 的所有业务对象（projects / documents / document_chunks / knowledge_base / case_generation_tasks / background_jobs / workflow_runs / workflow_steps / agent_runs / model_calls / retrieval_runs / artifacts / test_cases / knowledge_update_suggestion_groups / knowledge_update_suggestion_occurrences）都强归属于一个 tenant。跨 tenant 数据互不可见，由 PostgreSQL Row-Level Security 在 DB 层兜底强制，应用层即使漏掉 WHERE 也不会泄露。
 
 > 本文维护当前多租户架构约束；历史实施过程以 git log 为准。
 
@@ -15,7 +15,7 @@ tenants
   └─ btree index on tenant_id
 ```
 
-`tenants` 表本身不启用 RLS —— 它是元数据，由 `/api/v1/tenants` 端点公开 list/create。其他 9 张业务表全部启用 `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`。
+`tenants` 表本身不启用 RLS —— 它是元数据，由 `/api/v1/tenants` 端点公开 list/create。其他业务表全部启用 `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`。
 
 ## RLS Policy 模板
 
@@ -62,7 +62,8 @@ COMMIT (or ROLLBACK)
   - `handler.DBFromContext(c) bun.IDB` — handler 拿到 tx-scoped 连接
   - `handler.TenantIDFromContext(c) (int, bool)` — handler 拿到 tenant id（写 INSERT 时填字段）
   - `handler.RunAsyncAfterCommit(c, h.DB, tenantID, fn)` — 文档、知识库、维护类异步处理仍用它在请求提交后单独开 tx；不能复用请求事务。
-  - 生成任务 analyze / generate 不走直接 goroutine；handler 只写 `case_generation_jobs`，`service/job` worker 再用 tenant-scoped tx 领取并执行。
+  - 生成任务 analyze / generate 不走直接 goroutine；handler 只写 `background_jobs`，`service/job` worker 再用 tenant-scoped tx 领取并执行。
+  - worker 会为每个 job 写入 `workflow_runs` / `workflow_steps`，业务服务继续在同一 tenant context 下记录 agent / retrieval / artifact trace。
 
 - Caveat：gin 在 `c.JSON` 时已经把 response flush 给 client；我们的 tx commit 发生在 handler 返回之后。如果 commit 失败，client 已经看到 success status。日志会记录，但无法回滚 response。验证阶段够用；生产化要换成 buffered ResponseWriter。
 
@@ -101,7 +102,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 1. **schema**：列 `tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` + btree index
 2. **model**：Go struct 加 `TenantID int \`bun:"tenant_id,notnull" json:"tenant_id"\`` + 在 `db/models/all.go` 和 `db/db.go` 的 model 注册列表加入
 3. **RLS**：schema 末尾追加 `ENABLE / FORCE ROW LEVEL SECURITY` + `DROP POLICY IF EXISTS` + `CREATE POLICY` 三行（复用同一模板）
-4. **handler / worker**：所有 INSERT 路径填 `TenantID: handler.TenantIDFromContext(c)` 或 `db.TenantFromContext(ctx)`；service.New 接 `bun.IDB`；生成任务类后台 work 写入 `case_generation_jobs`，worker 必须用 `db.RunInTenantTx`
+4. **handler / worker**：所有 INSERT 路径填 `TenantID: handler.TenantIDFromContext(c)` 或 `db.TenantFromContext(ctx)`；service.New 接 `bun.IDB`；生成任务类后台 work 写入 `background_jobs`，worker 必须用 `db.RunInTenantTx`
 5. **测试**：扩展 `db/schema_rls_test.go`（或新建表的隔离测试）证明跨 tenant 不可见
 6. **文档**：更新本文、`scripts/README.md` 和相关回归脚本说明，写清新表的 tenant 归属与验证方式
 

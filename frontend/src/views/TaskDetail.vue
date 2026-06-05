@@ -6,6 +6,7 @@ import { ElMessageBox } from 'element-plus'
 import { Check, Download, EditPen, Refresh } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
+import { getTaskTrace } from '../api/tasks'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
@@ -32,6 +33,8 @@ const generating = ref(false)
 const retrying = ref(false)
 const jobs = ref([])
 const jobsLoading = ref(false)
+const trace = ref(null)
+const traceLoading = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
@@ -123,6 +126,32 @@ const jobTimeline = computed(() => {
   return rows
 })
 const lastJobError = computed(() => compactJobError(findLastJobWithError()))
+const traceSummary = computed(() => {
+  const value = trace.value || {}
+  return {
+    workflows: value.workflow_runs?.length || 0,
+    steps: value.steps?.length || 0,
+    agents: value.agent_runs?.length || 0,
+    modelCalls: value.model_calls?.length || 0,
+    retrievals: value.retrieval_runs?.length || 0,
+    artifacts: value.artifacts?.length || 0,
+    lastError: latestTraceError(value),
+  }
+})
+const traceRuns = computed(() => trace.value?.workflow_runs || [])
+const traceAgents = computed(() => trace.value?.agent_runs || [])
+const traceRetrievals = computed(() => trace.value?.retrieval_runs || [])
+const traceArtifacts = computed(() => trace.value?.artifacts || [])
+const hasTraceData = computed(() =>
+  Boolean(
+    traceSummary.value.workflows ||
+      traceSummary.value.steps ||
+      traceSummary.value.agents ||
+      traceSummary.value.modelCalls ||
+      traceSummary.value.retrievals ||
+      traceSummary.value.artifacts,
+  ),
+)
 
 onMounted(async () => {
   await loadTask()
@@ -159,6 +188,7 @@ async function loadTask() {
   try {
     const t = await tasksStore.load(taskId.value)
     loadJobs().catch(() => {})
+    loadTrace().catch(() => {})
     reviewForm.products = [...(t.affected_products || [])]
     reviewForm.modules = [...(t.affected_modules || [])]
     if (['completed', 'failed'].includes(t.status)) {
@@ -180,6 +210,15 @@ async function loadJobs() {
   }
 }
 
+async function loadTrace() {
+  traceLoading.value = true
+  try {
+    trace.value = await getTaskTrace(taskId.value)
+  } finally {
+    traceLoading.value = false
+  }
+}
+
 async function refreshCases() {
   await casesStore.fetch(taskId.value)
 }
@@ -189,6 +228,7 @@ function ensurePolling() {
   polling.value = setInterval(() => {
     tasksStore.load(taskId.value).catch(() => {})
     loadJobs().catch(() => {})
+    loadTrace().catch(() => {})
   }, 3000)
 }
 function stopPolling() {
@@ -249,6 +289,42 @@ function findLastJobWithError() {
     if (jobs.value[i].last_error) return jobs.value[i]
   }
   return null
+}
+
+function latestTraceError(value) {
+  const rows = [
+    ...(value.workflow_runs || []),
+    ...(value.steps || []),
+    ...(value.agent_runs || []),
+    ...(value.model_calls || []),
+    ...(value.retrieval_runs || []),
+  ]
+    .filter((row) => row.last_error)
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
+  return compactTraceText(rows[0]?.last_error || '')
+}
+
+function compactTraceText(value) {
+  if (!value) return ''
+  return value.length > 160 ? `${value.slice(0, 157)}...` : value
+}
+
+function traceStatusLabel(status) {
+  return {
+    pending: 'pending',
+    running: 'running',
+    succeeded: 'succeeded',
+    failed: 'failed',
+    canceled: 'canceled',
+  }[status] || status || '-'
+}
+
+function artifactLabel(artifact) {
+  const payload = artifact.payload || {}
+  const counts = []
+  if (payload.section_count !== undefined) counts.push(`${payload.section_count} sections`)
+  if (payload.case_count !== undefined) counts.push(`${payload.case_count} cases`)
+  return counts.length ? counts.join(' · ') : artifact.artifact_type
 }
 
 function priorityLabel(id) {
@@ -418,6 +494,114 @@ async function submitKnowledgeFeedback() {
           </div>
         </el-timeline-item>
       </el-timeline>
+    </el-card>
+
+    <el-card shadow="never" class="card trace-card" v-loading="traceLoading">
+      <template #header>
+        <div class="card-header">
+          <span>Workflow Trace</span>
+          <el-button size="small" :loading="traceLoading" @click="loadTrace">刷新</el-button>
+        </div>
+      </template>
+      <div class="trace-summary-grid">
+        <div class="trace-metric">
+          <span class="metric-value">{{ traceSummary.workflows }}</span>
+          <span class="metric-label">runs</span>
+        </div>
+        <div class="trace-metric">
+          <span class="metric-value">{{ traceSummary.steps }}</span>
+          <span class="metric-label">steps</span>
+        </div>
+        <div class="trace-metric">
+          <span class="metric-value">{{ traceSummary.agents }}</span>
+          <span class="metric-label">agents</span>
+        </div>
+        <div class="trace-metric">
+          <span class="metric-value">{{ traceSummary.modelCalls }}</span>
+          <span class="metric-label">models</span>
+        </div>
+        <div class="trace-metric">
+          <span class="metric-value">{{ traceSummary.retrievals }}</span>
+          <span class="metric-label">retrievals</span>
+        </div>
+        <div class="trace-metric">
+          <span class="metric-value">{{ traceSummary.artifacts }}</span>
+          <span class="metric-label">artifacts</span>
+        </div>
+      </div>
+      <p v-if="traceSummary.lastError" class="muted danger trace-error">
+        {{ traceSummary.lastError }}
+      </p>
+      <el-empty
+        v-if="!hasTraceData && !traceLoading"
+        description="暂无 workflow trace"
+      />
+      <div v-if="hasTraceData" class="trace-layout">
+        <div class="trace-column">
+          <h3>Runs</h3>
+          <div v-for="run in traceRuns" :key="run.id" class="trace-row">
+            <div class="trace-row-main">
+              <span class="trace-title">{{ jobTypeLabel(run.workflow_type) }}</span>
+              <el-tag size="small" :type="jobStatusType(run.status)">
+                {{ traceStatusLabel(run.status) }}
+              </el-tag>
+            </div>
+            <div class="muted small">
+              #{{ run.id }} · {{ formatDate(run.started_at || run.created_at) }}
+            </div>
+            <p v-if="run.last_error" class="muted danger trace-error">
+              {{ compactTraceText(run.last_error) }}
+            </p>
+          </div>
+        </div>
+        <div class="trace-column">
+          <h3>Agents</h3>
+          <div v-for="agent in traceAgents" :key="agent.id" class="trace-row">
+            <div class="trace-row-main">
+              <span class="trace-title">{{ agent.agent_name }}</span>
+              <el-tag size="small" :type="jobStatusType(agent.status)">
+                {{ traceStatusLabel(agent.status) }}
+              </el-tag>
+            </div>
+            <div class="muted small">{{ agent.stage }} · {{ formatDate(agent.finished_at || agent.created_at) }}</div>
+            <p v-if="agent.output_summary" class="trace-snippet">
+              {{ compactTraceText(agent.output_summary) }}
+            </p>
+            <p v-if="agent.last_error" class="muted danger trace-error">
+              {{ compactTraceText(agent.last_error) }}
+            </p>
+          </div>
+          <el-empty v-if="!traceAgents.length && hasTraceData" description="暂无 agent runs" />
+        </div>
+        <div class="trace-column">
+          <h3>Retrievals</h3>
+          <div v-for="retrieval in traceRetrievals" :key="retrieval.id" class="trace-row">
+            <div class="trace-row-main">
+              <span class="trace-title">{{ retrieval.retriever_type }}</span>
+              <el-tag size="small" :type="jobStatusType(retrieval.status)">
+                {{ traceStatusLabel(retrieval.status) }}
+              </el-tag>
+            </div>
+            <div class="muted small">
+              {{ retrieval.query_count }} queries · {{ retrieval.hit_count }} hits
+            </div>
+          </div>
+          <el-empty v-if="!traceRetrievals.length && hasTraceData" description="暂无 retrieval runs" />
+        </div>
+        <div class="trace-column">
+          <h3>Artifacts</h3>
+          <div v-for="artifact in traceArtifacts" :key="artifact.id" class="trace-row">
+            <div class="trace-row-main">
+              <span class="trace-title">{{ artifact.name || artifact.artifact_type }}</span>
+              <el-tag size="small" type="info">{{ artifact.artifact_type }}</el-tag>
+            </div>
+            <div class="muted small">
+              {{ artifactLabel(artifact) }} · {{ formatDate(artifact.created_at) }}
+            </div>
+          </div>
+          <el-empty v-if="!traceArtifacts.length && hasTraceData" description="暂无 artifacts" />
+        </div>
+      </div>
     </el-card>
 
     <el-card shadow="never" class="card">
@@ -693,6 +877,83 @@ async function submitKnowledgeFeedback() {
 .card {
   border-radius: 8px;
 }
+.trace-card {
+  overflow: hidden;
+}
+.trace-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.trace-metric {
+  min-width: 0;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+.metric-value {
+  display: block;
+  color: #303133;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.metric-label {
+  display: block;
+  margin-top: 2px;
+  color: #909399;
+  font-size: 12px;
+}
+.trace-layout {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.trace-column {
+  min-width: 0;
+}
+.trace-column h3 {
+  margin: 0 0 8px;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
+}
+.trace-row {
+  min-width: 0;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.trace-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.trace-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #303133;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-snippet {
+  margin: 6px 0 0;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.trace-error {
+  margin-bottom: 8px;
+  word-break: break-word;
+}
 .job-timeline {
   padding: 4px 0 0;
 }
@@ -778,5 +1039,25 @@ async function submitKnowledgeFeedback() {
 }
 .steps-table {
   width: 100%;
+}
+@media (max-width: 1200px) {
+  .trace-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .trace-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .task-meta,
+  .card-header,
+  .header-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .trace-summary-grid,
+  .trace-layout {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

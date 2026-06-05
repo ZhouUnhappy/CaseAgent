@@ -28,7 +28,7 @@ func New(db bun.IDB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.CaseGenerationJob, error) {
+func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.BackgroundJob, error) {
 	tenantID, ok := tenantdb.TenantFromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("enqueue job: no tenant in context")
@@ -38,7 +38,7 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.Case
 	}
 
 	now := time.Now()
-	job := &models.CaseGenerationJob{
+	job := &models.BackgroundJob{
 		TenantID:    tenantID,
 		TaskID:      optionalID(input.TaskID),
 		DocumentID:  optionalID(input.DocumentID),

@@ -58,12 +58,22 @@ func TestRLSIsolation(t *testing.T) {
 		}
 		taskID = task.ID
 
-		_, err := tx.NewInsert().Model(&models.CaseGenerationJob{
+		if _, err := tx.NewInsert().Model(&models.BackgroundJob{
 			TenantID:   tenantA,
 			TaskID:     intPointer(taskID),
 			JobType:    models.JobTypeGenerate,
 			Status:     models.JobStatusPending,
 			MaxRetries: 1,
+		}).Exec(ctx); err != nil {
+			return err
+		}
+
+		_, err := tx.NewInsert().Model(&models.WorkflowRun{
+			TenantID:     tenantA,
+			WorkflowType: models.JobTypeGenerate,
+			ResourceType: "task",
+			ResourceID:   taskID,
+			Status:       models.WorkflowStatusRunning,
 		}).Exec(ctx)
 		return err
 	})
@@ -80,11 +90,20 @@ func TestRLSIsolation(t *testing.T) {
 
 	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		count, err = tx.NewSelect().Model((*models.CaseGenerationJob)(nil)).Count(ctx)
+		count, err = tx.NewSelect().Model((*models.BackgroundJob)(nil)).Count(ctx)
 		return err
 	})
 	if count != 0 {
-		t.Fatalf("tenant B saw %d case generation jobs under RLS; expected 0", count)
+		t.Fatalf("tenant B saw %d background jobs under RLS; expected 0", count)
+	}
+
+	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*models.WorkflowRun)(nil)).Count(ctx)
+		return err
+	})
+	if count != 0 {
+		t.Fatalf("tenant B saw %d workflow runs under RLS; expected 0", count)
 	}
 
 	crossErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
@@ -96,7 +115,7 @@ func TestRLSIsolation(t *testing.T) {
 	}
 
 	crossJobErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
-		_, err := tx.NewInsert().Model(&models.CaseGenerationJob{
+		_, err := tx.NewInsert().Model(&models.BackgroundJob{
 			TenantID:   tenantA,
 			TaskID:     intPointer(taskID),
 			JobType:    models.JobTypeGenerate,
@@ -107,6 +126,20 @@ func TestRLSIsolation(t *testing.T) {
 	})
 	if crossJobErr == nil {
 		t.Fatal("cross-tenant job INSERT succeeded; WITH CHECK should have blocked it")
+	}
+
+	crossWorkflowErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(&models.WorkflowRun{
+			TenantID:     tenantA,
+			WorkflowType: models.JobTypeGenerate,
+			ResourceType: "task",
+			ResourceID:   taskID,
+			Status:       models.WorkflowStatusRunning,
+		}).Exec(ctx)
+		return err
+	})
+	if crossWorkflowErr == nil {
+		t.Fatal("cross-tenant workflow INSERT succeeded; WITH CHECK should have blocked it")
 	}
 }
 

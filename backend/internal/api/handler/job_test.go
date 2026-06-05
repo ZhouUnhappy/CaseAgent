@@ -7,7 +7,7 @@ import (
 )
 
 func TestToJobViewMapsRetrying(t *testing.T) {
-	view := toJobView(models.CaseGenerationJob{
+	view := toJobView(models.BackgroundJob{
 		Status:     models.JobStatusPending,
 		RetryCount: 1,
 	})
@@ -18,7 +18,7 @@ func TestToJobViewMapsRetrying(t *testing.T) {
 }
 
 func TestToJobViewKeepsInitialPending(t *testing.T) {
-	view := toJobView(models.CaseGenerationJob{
+	view := toJobView(models.BackgroundJob{
 		Status: models.JobStatusPending,
 	})
 

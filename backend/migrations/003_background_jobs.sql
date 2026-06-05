@@ -1,6 +1,6 @@
 -- Persistent job runner for case generation analyze/generate work.
 
-CREATE TABLE IF NOT EXISTS case_generation_jobs (
+CREATE TABLE IF NOT EXISTS background_jobs (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     task_id INTEGER NOT NULL REFERENCES case_generation_tasks(id) ON DELETE CASCADE,
@@ -15,28 +15,28 @@ CREATE TABLE IF NOT EXISTS case_generation_jobs (
     finished_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT case_generation_jobs_type_check
+    CONSTRAINT background_jobs_type_check
         CHECK (job_type IN ('analyze', 'generate')),
-    CONSTRAINT case_generation_jobs_status_check
+    CONSTRAINT background_jobs_status_check
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
-    CONSTRAINT case_generation_jobs_retry_check
+    CONSTRAINT background_jobs_retry_check
         CHECK (retry_count >= 0 AND max_retries >= 0)
 );
 
-CREATE INDEX IF NOT EXISTS case_generation_jobs_tenant_id_idx
-    ON case_generation_jobs (tenant_id);
-CREATE INDEX IF NOT EXISTS case_generation_jobs_task_id_idx
-    ON case_generation_jobs (task_id);
-CREATE INDEX IF NOT EXISTS case_generation_jobs_claim_idx
-    ON case_generation_jobs (tenant_id, status, run_after, id)
+CREATE INDEX IF NOT EXISTS background_jobs_tenant_id_idx
+    ON background_jobs (tenant_id);
+CREATE INDEX IF NOT EXISTS background_jobs_task_id_idx
+    ON background_jobs (task_id);
+CREATE INDEX IF NOT EXISTS background_jobs_claim_idx
+    ON background_jobs (tenant_id, status, run_after, id)
     WHERE status = 'pending';
-CREATE UNIQUE INDEX IF NOT EXISTS case_generation_jobs_active_unique_idx
-    ON case_generation_jobs (tenant_id, task_id, job_type)
+CREATE UNIQUE INDEX IF NOT EXISTS background_jobs_active_unique_idx
+    ON background_jobs (tenant_id, task_id, job_type)
     WHERE status IN ('pending', 'running');
 
-ALTER TABLE case_generation_jobs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE case_generation_jobs FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS case_generation_jobs_tenant_isolation ON case_generation_jobs;
-CREATE POLICY case_generation_jobs_tenant_isolation ON case_generation_jobs
+ALTER TABLE background_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE background_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS background_jobs_tenant_isolation ON background_jobs;
+CREATE POLICY background_jobs_tenant_isolation ON background_jobs
     USING (tenant_id = current_setting('app.tenant_id')::int)
     WITH CHECK (tenant_id = current_setting('app.tenant_id')::int);

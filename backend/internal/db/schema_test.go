@@ -42,15 +42,31 @@ func TestLoadSchemaSQL(t *testing.T) {
 	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS knowledge_update_suggestion_occurrences") {
 		t.Fatalf("expected suggestion occurrence table definition in schema, got: %s", schema)
 	}
-	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS case_generation_jobs") {
-		t.Fatalf("expected case generation jobs table definition in schema, got: %s", schema)
+	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS background_jobs") {
+		t.Fatalf("expected background jobs table definition in schema, got: %s", schema)
 	}
-	if !strings.Contains(schema, "case_generation_jobs_tenant_isolation") {
-		t.Fatalf("expected case generation jobs RLS policy in schema, got: %s", schema)
+	if !strings.Contains(schema, "background_jobs_tenant_isolation") {
+		t.Fatalf("expected background jobs RLS policy in schema, got: %s", schema)
+	}
+	for _, table := range []string{
+		"workflow_runs",
+		"workflow_steps",
+		"agent_runs",
+		"model_calls",
+		"retrieval_runs",
+		"artifacts",
+	} {
+		if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS "+table) {
+			t.Fatalf("expected %s table definition in schema, got: %s", table, schema)
+		}
+		if !strings.Contains(schema, table+"_tenant_isolation") {
+			t.Fatalf("expected %s RLS policy in schema, got: %s", table, schema)
+		}
 	}
 	if !strings.Contains(schema, "ADD COLUMN IF NOT EXISTS document_id") ||
 		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS knowledge_id") ||
-		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS payload JSONB") {
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS payload JSONB") ||
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS workflow_run_id") {
 		t.Fatalf("expected generic background job columns in schema, got: %s", schema)
 	}
 }

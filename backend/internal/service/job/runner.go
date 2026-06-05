@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"caseagent/internal/db/models"
+	workflowservice "caseagent/internal/service/workflow"
 
 	"github.com/uptrace/bun"
 )
@@ -22,8 +23,8 @@ const (
 )
 
 type Executor interface {
-	Execute(ctx context.Context, tx bun.Tx, job *models.CaseGenerationJob) error
-	HandleFailure(ctx context.Context, tx bun.Tx, job *models.CaseGenerationJob, cause error) error
+	Execute(ctx context.Context, tx bun.Tx, job *models.BackgroundJob) error
+	HandleFailure(ctx context.Context, tx bun.Tx, job *models.BackgroundJob, cause error) error
 }
 
 type Options struct {
@@ -57,9 +58,9 @@ func NewRunner(store Store, executor Executor, options Options) *Runner {
 
 func (r *Runner) Start(ctx context.Context) {
 	if recovered, err := r.store.RecoverStale(ctx, r.options.RunningJobTimeout); err != nil {
-		slog.Error("case generation job recovery failed", "error", err)
+		slog.Error("background job recovery failed", "error", err)
 	} else if recovered > 0 {
-		slog.Info("case generation jobs recovered", "count", recovered)
+		slog.Info("background jobs recovered", "count", recovered)
 	}
 
 	workerTypes := r.workerTypes()
@@ -140,7 +141,7 @@ func (r *Runner) worker(ctx context.Context, workerID int, jobType string) {
 	}
 }
 
-func (r *Runner) claimNext(ctx context.Context, jobType string) (*models.CaseGenerationJob, error) {
+func (r *Runner) claimNext(ctx context.Context, jobType string) (*models.BackgroundJob, error) {
 	tenantIDs, err := r.store.ListTenantIDs(ctx)
 	if err != nil {
 		return nil, err
@@ -158,7 +159,7 @@ func (r *Runner) claimNext(ctx context.Context, jobType string) (*models.CaseGen
 	return nil, nil
 }
 
-func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
+func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 	slog.Info("background job started",
 		"job_id", job.ID,
 		"job_type", job.JobType,
@@ -170,10 +171,17 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 		"max_retries", job.MaxRetries,
 	)
 
-	err := r.store.RunInTenantTx(ctx, job.TenantID, func(ctx context.Context, tx bun.Tx) error {
+	workflow := r.startWorkflow(job)
+	execCtx := ctx
+	if workflow.runID > 0 {
+		execCtx = workflowservice.WithRunID(execCtx, workflow.runID)
+	}
+
+	err := r.store.RunInTenantTx(execCtx, job.TenantID, func(ctx context.Context, tx bun.Tx) error {
 		return r.executor.Execute(ctx, tx, job)
 	})
 	if err == nil {
+		r.finishWorkflow(job, workflow, models.WorkflowStatusSucceeded, nil)
 		if markErr := r.markSucceeded(job); markErr != nil {
 			slog.Error("background job success mark failed",
 				"job_id", job.ID,
@@ -184,6 +192,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 		return
 	}
 	if ctx.Err() != nil {
+		r.finishWorkflow(job, workflow, models.WorkflowStatusCanceled, err)
 		slog.Warn("background job interrupted",
 			"job_id", job.ID,
 			"tenant_id", job.TenantID,
@@ -193,6 +202,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 	}
 
 	if job.RetryCount < job.MaxRetries {
+		r.finishWorkflow(job, workflow, models.WorkflowStatusFailed, err)
 		nextRun := time.Now().Add(r.options.RetryBackoff)
 		if markErr := r.markRetry(job, err, nextRun); markErr != nil {
 			slog.Error("background job retry mark failed",
@@ -205,6 +215,7 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 		return
 	}
 
+	r.finishWorkflow(job, workflow, models.WorkflowStatusFailed, err)
 	if failureErr := r.handleExhaustedFailure(job, err); failureErr != nil {
 		slog.Error("background job failure handler failed",
 			"job_id", job.ID,
@@ -219,6 +230,47 @@ func (r *Runner) process(ctx context.Context, job *models.CaseGenerationJob) {
 			"tenant_id", job.TenantID,
 			"cause", err,
 			"error", markErr,
+		)
+	}
+}
+
+type workflowHandle struct {
+	runID  int
+	stepID int
+}
+
+func (r *Runner) startWorkflow(job *models.BackgroundJob) workflowHandle {
+	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
+	defer cancel()
+
+	runID, stepID, err := r.store.StartWorkflow(ctx, job)
+	if err != nil {
+		slog.Error("background job workflow start failed",
+			"job_id", job.ID,
+			"tenant_id", job.TenantID,
+			"error", err,
+		)
+		return workflowHandle{}
+	}
+	if runID > 0 {
+		job.WorkflowRunID = &runID
+	}
+	return workflowHandle{runID: runID, stepID: stepID}
+}
+
+func (r *Runner) finishWorkflow(job *models.BackgroundJob, handle workflowHandle, status string, cause error) {
+	if handle.runID <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
+	defer cancel()
+	if err := r.store.FinishWorkflow(ctx, job.TenantID, handle.runID, handle.stepID, status, cause); err != nil {
+		slog.Error("background job workflow finish failed",
+			"job_id", job.ID,
+			"workflow_run_id", handle.runID,
+			"tenant_id", job.TenantID,
+			"status", status,
+			"error", err,
 		)
 	}
 }
@@ -255,19 +307,19 @@ func normalizeOptions(options Options) Options {
 	return options
 }
 
-func (r *Runner) markSucceeded(job *models.CaseGenerationJob) error {
+func (r *Runner) markSucceeded(job *models.BackgroundJob) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
 	return r.store.MarkSucceeded(ctx, job.TenantID, job.ID)
 }
 
-func (r *Runner) markRetry(job *models.CaseGenerationJob, cause error, runAfter time.Time) error {
+func (r *Runner) markRetry(job *models.BackgroundJob, cause error, runAfter time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
 	return r.store.MarkRetry(ctx, job.TenantID, job, cause, runAfter)
 }
 
-func (r *Runner) handleExhaustedFailure(job *models.CaseGenerationJob, cause error) error {
+func (r *Runner) handleExhaustedFailure(job *models.BackgroundJob, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
 	return r.store.RunInTenantTx(ctx, job.TenantID, func(ctx context.Context, tx bun.Tx) error {
@@ -275,7 +327,7 @@ func (r *Runner) handleExhaustedFailure(job *models.CaseGenerationJob, cause err
 	})
 }
 
-func (r *Runner) markFailed(job *models.CaseGenerationJob, cause error) error {
+func (r *Runner) markFailed(job *models.BackgroundJob, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
 	return r.store.MarkFailed(ctx, job.TenantID, job.ID, cause)

@@ -45,6 +45,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		biz.DELETE("/documents/:id", h.DeleteDocument)
 
 		biz.GET("/tasks/:id", h.GetTask)
+		biz.GET("/tasks/:id/trace", h.GetTaskTrace)
 		biz.PUT("/tasks/:id/review", h.ReviewAffected)
 		biz.PUT("/tasks/:id/generate", h.GenerateCases)
 		biz.POST("/tasks/:id/retry", h.RetryTask)

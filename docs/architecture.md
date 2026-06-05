@@ -83,12 +83,18 @@
   - 失败阶段归类与 context_gap 记录：`failure.go`
   - Agent / retrieval / suggestion 默认依赖注入点：`dependencies.go`
 - 持久化任务运行器：`backend/internal/service/job/`
-  - handler 只写入 `case_generation_jobs`；worker 统一领取并执行 analyze / generate。
+  - handler 只写入 `background_jobs`；worker 统一领取并执行 analyze / generate。
   - job 记录 job 类型、tenant、task_id、状态、重试次数、最后错误、领取/完成时间。
   - worker 按 `job_runner.max_concurrency` 限制并发，用 tenant-scoped tx 执行任务，启动时恢复超时 running job。
+  - worker 领取 job 后创建 `workflow_runs` / `workflow_steps`，并把 `workflow_run_id` 注入任务执行 context。
+- Workflow trace：`backend/internal/service/workflow/`
+  - `GenerateCases` 记录 document / knowledge retrieval 摘要、case generation agent 摘要和 generated cases artifact。
+  - API：`GET /api/v1/tasks/:id/trace` 返回 workflow runs、steps、agent runs、model calls、retrieval runs、artifacts。
+  - 前端：`frontend/src/views/TaskDetail.vue` 展示 job timeline 与 Workflow Trace 面板，用于 demo 排查生成链路。
 - 数据库表：
   - `backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
-  - `backend/migrations/003_generation_jobs.sql`（`case_generation_jobs` + RLS）
+  - `backend/migrations/003_background_jobs.sql`（`background_jobs` + RLS）
+  - `backend/migrations/005_v2_workflow_trace.sql`（workflow / agent / model / retrieval / artifact trace + RLS）
 
 **单元测试**：`backend/internal/service/task/service_test.go`
 - `TestParseGeneratedSectionsSectionedJSON` / `TestParseGeneratedSectionsFlatJSON`
@@ -124,13 +130,13 @@
 - 业务页面：`frontend/src/views/`
   - `CaseGenerationWorkspace.vue`：默认首页 `/generate`，承载项目选择、文档上传/选择、任务创建、影响范围确认、生成触发、测试用例查看/导出/提交
   - `ProjectList.vue` / `ProjectDetail.vue`：项目与文档管理，并提供跳转到生成工作台的入口
-  - `TaskDetail.vue`：任务深度排查与用例 JSON 编辑
+  - `TaskDetail.vue`：任务深度排查、Workflow Trace、用例 JSON 编辑
   - `KnowledgeBase.vue` / `KnowledgeSuggestions.vue`：知识库与知识建议沉淀
 
 **可观测性**：
 
 - 前端：`api/client.js` 把 5xx/408/429/网络错误标记 `retryable=true`，`utils/error.js` 据此分别用 `warning` / `error` 弹给用户；处理失败行有「重新处理」按钮。
-- 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`。
+- 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态。
 
 **验证方式**：手工跑全流程；`cd frontend && npm run build` 通过。
 
@@ -148,7 +154,7 @@
 - 知识草稿生成：`backend/internal/agent/knowledge/`、`backend/internal/service/suggestion/draft.go`
 - 生命周期清理：`backend/internal/service/suggestion/cleanup.go`（启动时一次 + 每天一次；阈值见 `backend/configs/config-example.yaml` 的 `suggestion.auto_dismiss_pending_days`）
 - API handler：`backend/internal/api/handler/knowledge_suggestion.go`（`GET/POST/PUT /knowledge-suggestions`、`POST /knowledge-suggestions/:id/draft`）
-- 异步触发：`backend/internal/api/handler/task.go` 只提交 `case_generation_jobs`；`backend/internal/service/job/` worker 领取后执行 `AnalyzeTask` / `GenerateCases`。`AnalyzeTask` 末尾同步记录普通 suggestion（best-effort，不阻断 analyze），`GenerateCases` 失败且 job 重试耗尽后另开 tenant tx 标记 task failed 并记录 `context_gap`
+- 异步触发：`backend/internal/api/handler/task.go` 只提交 `background_jobs`；`backend/internal/service/job/` worker 领取后执行 `AnalyzeTask` / `GenerateCases`。`AnalyzeTask` 末尾同步记录普通 suggestion（best-effort，不阻断 analyze），`GenerateCases` 失败且 job 重试耗尽后另开 tenant tx 标记 task failed 并记录 `context_gap`
 - 前端：`frontend/src/views/TaskDetail.vue`（手动反馈）、`frontend/src/views/KnowledgeSuggestions.vue`、`frontend/src/views/KnowledgeBase.vue`（接收 `?type=&name=&from_suggestion_id=` 或兼容 `?create_type=&create_name=` 预填）
 
 **当前能力边界**（写在这里防止误以为是 bug）：

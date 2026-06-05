@@ -30,7 +30,7 @@ type jobView struct {
 
 func (h *Handler) ListJobs(c *gin.Context) {
 	query := DBFromContext(c).NewSelect().
-		Model((*models.CaseGenerationJob)(nil)).
+		Model((*models.BackgroundJob)(nil)).
 		Order("created_at ASC", "id ASC")
 
 	if ok := applyIntJobFilter(c, query, "task_id"); !ok {
@@ -48,7 +48,7 @@ func (h *Handler) ListJobs(c *gin.Context) {
 		}
 	}
 
-	var jobs []models.CaseGenerationJob
+	var jobs []models.BackgroundJob
 	if err := query.Scan(c, &jobs); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -90,7 +90,7 @@ func applyJobStatusFilter(c *gin.Context, query *bun.SelectQuery, status string)
 	return true
 }
 
-func toJobView(job models.CaseGenerationJob) jobView {
+func toJobView(job models.BackgroundJob) jobView {
 	status := job.Status
 	if status == models.JobStatusPending && job.RetryCount > 0 {
 		status = "retrying"

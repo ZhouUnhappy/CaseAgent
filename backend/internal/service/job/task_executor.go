@@ -19,7 +19,7 @@ func NewTaskExecutor() *TaskExecutor {
 	return &TaskExecutor{}
 }
 
-func (e *TaskExecutor) Execute(ctx context.Context, tx bun.Tx, job *models.CaseGenerationJob) error {
+func (e *TaskExecutor) Execute(ctx context.Context, tx bun.Tx, job *models.BackgroundJob) error {
 	switch job.JobType {
 	case models.JobTypeAnalyze:
 		taskID, err := requiredResourceID(job.TaskID, "task_id")
@@ -58,7 +58,7 @@ func (e *TaskExecutor) Execute(ctx context.Context, tx bun.Tx, job *models.CaseG
 	}
 }
 
-func (e *TaskExecutor) HandleFailure(ctx context.Context, tx bun.Tx, job *models.CaseGenerationJob, cause error) error {
+func (e *TaskExecutor) HandleFailure(ctx context.Context, tx bun.Tx, job *models.BackgroundJob, cause error) error {
 	switch job.JobType {
 	case models.JobTypeAnalyze:
 		taskID, err := requiredResourceID(job.TaskID, "task_id")

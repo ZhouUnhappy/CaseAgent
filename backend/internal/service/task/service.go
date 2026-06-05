@@ -2,10 +2,13 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	"caseagent/internal/db/models"
 	agentservice "caseagent/internal/service/agent"
+	retrievalservice "caseagent/internal/service/retrieval"
+	workflowservice "caseagent/internal/service/workflow"
 
 	"github.com/uptrace/bun"
 )
@@ -93,13 +96,22 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	retrievedHits := retrieveKnowledgeFallback(ctx, retriever, requirements, task.AffectedProducts, task.AffectedModules)
 	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, knowledgeResultsToBaseEntries(retrievedHits))
 	requirementsContext, documentHits := buildRequirementsContext(ctx, retriever, requirements, task.DocumentIDs, task.AffectedProducts, task.AffectedModules)
+	runID := workflowservice.RunIDPointerFromContext(ctx)
+	recordRetrievalTrace(ctx, s.db, taskID, runID,
+		buildDocumentQueries(requirements, task.AffectedProducts, task.AffectedModules),
+		documentHits,
+		buildKnowledgeQueries(requirements, task.AffectedProducts, task.AffectedModules),
+		retrievedHits,
+	)
 
 	agentSvc, err := s.caseGenerator(ctx)
 	if err != nil {
 		return generationFailure(GenerationStageInitializeAgent, "failed to initialize agent service: %w", err)
 	}
 
-	rawCases, err := agentSvc.GenerateCases(ctx, requirementsContext, formatKnowledgeContext(knowledgeEntries))
+	knowledgeContext := formatKnowledgeContext(knowledgeEntries)
+	rawCases, err := agentSvc.GenerateCases(ctx, requirementsContext, knowledgeContext)
+	recordAgentTrace(ctx, s.db, taskID, runID, requirementsContext, knowledgeContext, rawCases, err)
 	if err != nil {
 		stage := agentservice.FailureStage(err)
 		if stage == "" {
@@ -130,6 +142,112 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	if err = s.persistGeneratedCases(ctx, taskID, sections, sourceContext); err != nil {
 		return err
 	}
+	recordGeneratedCasesArtifact(ctx, s.db, taskID, runID, sections, sourceContext)
 
 	return s.updateTaskStatus(ctx, taskID, models.TaskStatusCompleted)
+}
+
+func recordRetrievalTrace(
+	ctx context.Context,
+	db bun.IDB,
+	taskID int,
+	runID *int,
+	documentQueries []string,
+	documentHits []retrievalservice.DocumentResult,
+	knowledgeQueries []string,
+	knowledgeHits []retrievalservice.KnowledgeResult,
+) {
+	taskIDPtr := &taskID
+	recorder := workflowservice.New(db)
+	if _, err := recorder.RecordRetrievalRun(ctx, workflowservice.RetrievalRunInput{
+		WorkflowRunID: runID,
+		TaskID:        taskIDPtr,
+		RetrieverType: "documents",
+		QueryCount:    len(documentQueries),
+		HitCount:      len(documentHits),
+		Metadata: map[string]any{
+			"queries": documentQueries,
+		},
+	}); err != nil {
+		slog.Warn("document retrieval trace record failed", "task_id", taskID, "error", err)
+	}
+	if _, err := recorder.RecordRetrievalRun(ctx, workflowservice.RetrievalRunInput{
+		WorkflowRunID: runID,
+		TaskID:        taskIDPtr,
+		RetrieverType: "knowledge",
+		QueryCount:    len(knowledgeQueries),
+		HitCount:      len(knowledgeHits),
+		Metadata: map[string]any{
+			"queries": knowledgeQueries,
+		},
+	}); err != nil {
+		slog.Warn("knowledge retrieval trace record failed", "task_id", taskID, "error", err)
+	}
+}
+
+func recordAgentTrace(ctx context.Context, db bun.IDB, taskID int, runID *int, requirements string, knowledge string, output string, cause error) {
+	status := models.WorkflowStatusSucceeded
+	lastErr := ""
+	if cause != nil {
+		status = models.WorkflowStatusFailed
+		lastErr = cause.Error()
+	}
+	taskIDPtr := &taskID
+	if _, err := workflowservice.New(db).RecordAgentRun(ctx, workflowservice.AgentRunInput{
+		WorkflowRunID: runID,
+		TaskID:        taskIDPtr,
+		AgentName:     "case_generation",
+		Stage:         "generate_cases",
+		Status:        status,
+		InputSummary:  summarizeTraceText(requirements) + "\n\n" + summarizeTraceText(knowledge),
+		OutputSummary: summarizeTraceText(output),
+		LastError:     lastErr,
+		Metadata: map[string]any{
+			"requirements_chars": len(requirements),
+			"knowledge_chars":    len(knowledge),
+			"output_chars":       len(output),
+		},
+	}); err != nil {
+		slog.Warn("agent trace record failed", "task_id", taskID, "error", err)
+	}
+}
+
+func recordGeneratedCasesArtifact(ctx context.Context, db bun.IDB, taskID int, runID *int, sections []generatedSection, sourceContext map[string]any) {
+	payload, err := json.Marshal(sections)
+	if err != nil {
+		slog.Warn("generated cases artifact marshal failed", "task_id", taskID, "error", err)
+		return
+	}
+	taskIDPtr := &taskID
+	if _, err := workflowservice.New(db).RecordArtifact(ctx, workflowservice.ArtifactInput{
+		WorkflowRunID: runID,
+		ArtifactType:  models.ArtifactTypeGeneratedCases,
+		ResourceType:  "task",
+		ResourceID:    taskIDPtr,
+		Name:          "deduped generated cases",
+		Content:       string(payload),
+		Payload: map[string]any{
+			"section_count":  len(sections),
+			"case_count":     countGeneratedCases(sections),
+			"source_context": sourceContext,
+		},
+	}); err != nil {
+		slog.Warn("generated cases artifact record failed", "task_id", taskID, "error", err)
+	}
+}
+
+func countGeneratedCases(sections []generatedSection) int {
+	total := 0
+	for _, section := range sections {
+		total += len(section.Cases)
+	}
+	return total
+}
+
+func summarizeTraceText(value string) string {
+	const max = 800
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
 }
