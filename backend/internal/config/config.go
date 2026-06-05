@@ -12,6 +12,7 @@ type Config struct {
 	Database   DatabaseConfig   `mapstructure:"database"`
 	Model      ModelConfig      `mapstructure:"model"`
 	Suggestion SuggestionConfig `mapstructure:"suggestion"`
+	JobRunner  JobRunnerConfig  `mapstructure:"job_runner"`
 	GWS        GWSConfig        `mapstructure:"gws"`
 }
 
@@ -65,6 +66,15 @@ type SuggestionConfig struct {
 	AutoDismissPendingDays int `mapstructure:"auto_dismiss_pending_days"`
 }
 
+type JobRunnerConfig struct {
+	MaxConcurrency            int `mapstructure:"max_concurrency"`
+	MaxRetries                int `mapstructure:"max_retries"`
+	RetryBackoffSeconds       int `mapstructure:"retry_backoff_seconds"`
+	PollIntervalSeconds       int `mapstructure:"poll_interval_seconds"`
+	RunningTimeoutSeconds     int `mapstructure:"running_timeout_seconds"`
+	StateUpdateTimeoutSeconds int `mapstructure:"state_update_timeout_seconds"`
+}
+
 var cfg *Config
 
 func Load(configPath string) error {
@@ -73,6 +83,12 @@ func Load(configPath string) error {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.SetDefault("model.chat.request_timeout_seconds", 60)
 	viper.SetDefault("suggestion.auto_dismiss_pending_days", 30)
+	viper.SetDefault("job_runner.max_concurrency", 2)
+	viper.SetDefault("job_runner.max_retries", 2)
+	viper.SetDefault("job_runner.retry_backoff_seconds", 5)
+	viper.SetDefault("job_runner.poll_interval_seconds", 2)
+	viper.SetDefault("job_runner.running_timeout_seconds", 900)
+	viper.SetDefault("job_runner.state_update_timeout_seconds", 10)
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {

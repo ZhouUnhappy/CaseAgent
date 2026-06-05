@@ -1,17 +1,17 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 
+	"caseagent/internal/config"
 	"caseagent/internal/db/models"
+	jobservice "caseagent/internal/service/job"
 	taskservice "caseagent/internal/service/task"
 
 	"github.com/gin-gonic/gin"
-	"github.com/uptrace/bun"
 )
 
 type CreateTaskRequest struct {
@@ -49,17 +49,14 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		"document_ids", task.DocumentIDs,
 	)
 
-	tenantID, _ := TenantIDFromContext(c)
-	taskID := task.ID
-	RunAsyncAfterCommitWithFailure(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
-			slog.Error("task analyze failed", "task_id", taskID, "error", err)
-			return err
-		}
-		return nil
-	}, func(ctx context.Context, tx bun.Tx, cause error) error {
-		return taskservice.New(tx).MarkTaskFailed(ctx, taskID)
-	})
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		TaskID:     task.ID,
+		JobType:    models.JobTypeAnalyze,
+		MaxRetries: configuredJobMaxRetries(),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusCreated, task)
 }
@@ -132,20 +129,14 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 		return
 	}
 
-	tenantID, _ := TenantIDFromContext(c)
-	RunAsyncAfterCommitWithFailure(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		if err := taskservice.New(tx).GenerateCases(ctx, taskID); err != nil {
-			slog.Error("task generate failed", "task_id", taskID, "error", err)
-			return err
-		}
-		return nil
-	}, func(ctx context.Context, tx bun.Tx, cause error) error {
-		if err := taskservice.New(tx).MarkGenerationFailed(ctx, taskID, cause); err != nil {
-			slog.Error("task generate failure handling failed", "task_id", taskID, "error", err)
-			return err
-		}
-		return nil
-	})
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		TaskID:     taskID,
+		JobType:    models.JobTypeGenerate,
+		MaxRetries: configuredJobMaxRetries(),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	slog.Info("task generate accepted", "task_id", task.ID)
 
@@ -165,16 +156,14 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	}
 
 	if decision.RerunAnalyze {
-		tenantID, _ := TenantIDFromContext(c)
-		RunAsyncAfterCommitWithFailure(c, h.DB, tenantID, func(ctx context.Context, tx bun.Tx) error {
-			if err := taskservice.New(tx).AnalyzeTask(ctx, taskID); err != nil {
-				slog.Error("task retry analyze failed", "task_id", taskID, "error", err)
-				return err
-			}
-			return nil
-		}, func(ctx context.Context, tx bun.Tx, cause error) error {
-			return taskservice.New(tx).MarkTaskFailed(ctx, taskID)
-		})
+		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+			TaskID:     taskID,
+			JobType:    models.JobTypeAnalyze,
+			MaxRetries: configuredJobMaxRetries(),
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	slog.Info("task retry accepted",
@@ -183,6 +172,14 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusAccepted, decision.Task)
+}
+
+func configuredJobMaxRetries() int {
+	cfg := config.Get()
+	if cfg == nil || cfg.JobRunner.MaxRetries < 0 {
+		return 2
+	}
+	return cfg.JobRunner.MaxRetries
 }
 
 func parseTaskID(c *gin.Context) (int, bool) {

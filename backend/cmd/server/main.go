@@ -16,6 +16,7 @@ import (
 	"caseagent/internal/config"
 	"caseagent/internal/db"
 	"caseagent/internal/logging"
+	jobservice "caseagent/internal/service/job"
 	suggestionservice "caseagent/internal/service/suggestion"
 )
 
@@ -41,6 +42,12 @@ func main() {
 	if days := config.Get().Suggestion.AutoDismissPendingDays; days > 0 {
 		suggestionservice.StartExpiredPendingCleanup(ctx, db.DB, time.Duration(days)*24*time.Hour, 24*time.Hour)
 	}
+	jobRunner := jobservice.NewRunner(
+		jobservice.NewBunStore(db.DB),
+		jobservice.NewTaskExecutor(),
+		jobRunnerOptions(config.Get().JobRunner),
+	)
+	jobRunner.Start(ctx)
 
 	h := handler.New(db.DB)
 	r := router.SetupRouter(h)
@@ -85,4 +92,15 @@ func resolveConfigPath() string {
 	}
 
 	return "configs/config.yaml"
+}
+
+func jobRunnerOptions(cfg config.JobRunnerConfig) jobservice.Options {
+	return jobservice.Options{
+		MaxConcurrency:     cfg.MaxConcurrency,
+		MaxRetries:         cfg.MaxRetries,
+		RetryBackoff:       time.Duration(cfg.RetryBackoffSeconds) * time.Second,
+		PollInterval:       time.Duration(cfg.PollIntervalSeconds) * time.Second,
+		RunningJobTimeout:  time.Duration(cfg.RunningTimeoutSeconds) * time.Second,
+		StateUpdateTimeout: time.Duration(cfg.StateUpdateTimeoutSeconds) * time.Second,
+	}
 }

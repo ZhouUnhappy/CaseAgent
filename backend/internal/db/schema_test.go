@@ -42,4 +42,10 @@ func TestLoadSchemaSQL(t *testing.T) {
 	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS knowledge_update_suggestion_occurrences") {
 		t.Fatalf("expected suggestion occurrence table definition in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS case_generation_jobs") {
+		t.Fatalf("expected case generation jobs table definition in schema, got: %s", schema)
+	}
+	if !strings.Contains(schema, "case_generation_jobs_tenant_isolation") {
+		t.Fatalf("expected case generation jobs RLS policy in schema, got: %s", schema)
+	}
 }

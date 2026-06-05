@@ -40,8 +40,31 @@ func TestRLSIsolation(t *testing.T) {
 	tenantB := insertTestTenant(t, ctx, bunDB, "rls-b")
 	t.Cleanup(func() { cleanupTestTenants(ctx, bunDB, tenantA, tenantB) })
 
+	var taskID int
 	mustTx(t, ctx, bunDB, tenantA, func(ctx context.Context, tx bun.Tx) error {
-		_, err := tx.NewInsert().Model(&models.Project{TenantID: tenantA, Name: "rls-test-a"}).Exec(ctx)
+		project := &models.Project{TenantID: tenantA, Name: "rls-test-a"}
+		if _, err := tx.NewInsert().Model(project).Returning("id").Exec(ctx); err != nil {
+			return err
+		}
+
+		task := &models.CaseGenerationTask{
+			TenantID:    tenantA,
+			ProjectID:   project.ID,
+			DocumentIDs: []int{1},
+			Status:      models.TaskStatusGenerating,
+		}
+		if _, err := tx.NewInsert().Model(task).Returning("id").Exec(ctx); err != nil {
+			return err
+		}
+		taskID = task.ID
+
+		_, err := tx.NewInsert().Model(&models.CaseGenerationJob{
+			TenantID:   tenantA,
+			TaskID:     taskID,
+			JobType:    models.JobTypeGenerate,
+			Status:     models.JobStatusPending,
+			MaxRetries: 1,
+		}).Exec(ctx)
 		return err
 	})
 
@@ -55,12 +78,35 @@ func TestRLSIsolation(t *testing.T) {
 		t.Fatalf("tenant B saw %d projects under RLS; expected 0", count)
 	}
 
+	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*models.CaseGenerationJob)(nil)).Count(ctx)
+		return err
+	})
+	if count != 0 {
+		t.Fatalf("tenant B saw %d case generation jobs under RLS; expected 0", count)
+	}
+
 	crossErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewInsert().Model(&models.Project{TenantID: tenantA, Name: "should-fail"}).Exec(ctx)
 		return err
 	})
 	if crossErr == nil {
 		t.Fatal("cross-tenant INSERT succeeded; WITH CHECK should have blocked it")
+	}
+
+	crossJobErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(&models.CaseGenerationJob{
+			TenantID:   tenantA,
+			TaskID:     taskID,
+			JobType:    models.JobTypeGenerate,
+			Status:     models.JobStatusPending,
+			MaxRetries: 1,
+		}).Exec(ctx)
+		return err
+	})
+	if crossJobErr == nil {
+		t.Fatal("cross-tenant job INSERT succeeded; WITH CHECK should have blocked it")
 	}
 }
 

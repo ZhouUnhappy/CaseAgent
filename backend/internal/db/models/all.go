@@ -9,6 +9,7 @@ var models = []interface{}{
 	&KnowledgeBase{},
 	&TestCase{},
 	&CaseGenerationTask{},
+	&CaseGenerationJob{},
 	&KnowledgeUpdateSuggestionGroup{},
 	&KnowledgeUpdateSuggestionOccurrence{},
 }

@@ -82,13 +82,20 @@
   - 状态更新与 test_cases 持久化：`store.go`
   - 失败阶段归类与 context_gap 记录：`failure.go`
   - Agent / retrieval / suggestion 默认依赖注入点：`dependencies.go`
-- 数据库表：`backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
+- 持久化任务运行器：`backend/internal/service/job/`
+  - handler 只写入 `case_generation_jobs`；worker 统一领取并执行 analyze / generate。
+  - job 记录 job 类型、tenant、task_id、状态、重试次数、最后错误、领取/完成时间。
+  - worker 按 `job_runner.max_concurrency` 限制并发，用 tenant-scoped tx 执行任务，启动时恢复超时 running job。
+- 数据库表：
+  - `backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
+  - `backend/migrations/003_generation_jobs.sql`（`case_generation_jobs` + RLS）
 
 **单元测试**：`backend/internal/service/task/service_test.go`
 - `TestParseGeneratedSectionsSectionedJSON` / `TestParseGeneratedSectionsFlatJSON`
 - `TestDedupeGeneratedSections`
 - `TestAttachCaseContext` / `TestBuildSourceContext`
 - `backend/internal/service/task/lifecycle_test.go` 覆盖 review / generate 状态允许条件
+- `backend/internal/service/job/runner_test.go` 覆盖并发上限、失败重试、启动恢复和 tenant-scoped 执行上下文
 
 **回归脚本**：
 
@@ -141,7 +148,7 @@
 - 知识草稿生成：`backend/internal/agent/knowledge/`、`backend/internal/service/suggestion/draft.go`
 - 生命周期清理：`backend/internal/service/suggestion/cleanup.go`（启动时一次 + 每天一次；阈值见 `backend/configs/config-example.yaml` 的 `suggestion.auto_dismiss_pending_days`）
 - API handler：`backend/internal/api/handler/knowledge_suggestion.go`（`GET/POST/PUT /knowledge-suggestions`、`POST /knowledge-suggestions/:id/draft`）
-- 异步触发：`backend/internal/api/handler/task.go` 在请求事务提交后触发 `AnalyzeTask` / `GenerateCases`；`AnalyzeTask` 末尾同步记录普通 suggestion（best-effort，不阻断 analyze），`GenerateCases` 失败时在失败事务回滚后另开事务标记 task failed 并记录 `context_gap`
+- 异步触发：`backend/internal/api/handler/task.go` 只提交 `case_generation_jobs`；`backend/internal/service/job/` worker 领取后执行 `AnalyzeTask` / `GenerateCases`。`AnalyzeTask` 末尾同步记录普通 suggestion（best-effort，不阻断 analyze），`GenerateCases` 失败且 job 重试耗尽后另开 tenant tx 标记 task failed 并记录 `context_gap`
 - 前端：`frontend/src/views/TaskDetail.vue`（手动反馈）、`frontend/src/views/KnowledgeSuggestions.vue`、`frontend/src/views/KnowledgeBase.vue`（接收 `?type=&name=&from_suggestion_id=` 或兼容 `?create_type=&create_name=` 预填）
 
 **当前能力边界**（写在这里防止误以为是 bug）：
@@ -177,7 +184,7 @@ cd frontend && npm run build
 
 - 规格说明：`docs/spec.md`
 - 配置示例：`backend/configs/config-example.yaml`
-- 数据库迁移：`backend/migrations/001_init.sql`
+- 数据库迁移：`backend/migrations/*.sql`
 - 路由定义：`backend/internal/api/router/router.go`
 - 本地联调脚本：`dev.sh`
 - 回归脚本说明：`scripts/README.md`

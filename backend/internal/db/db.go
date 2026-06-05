@@ -47,6 +47,7 @@ func Init(ctx context.Context) error {
 		&models.KnowledgeBase{},
 		&models.TestCase{},
 		&models.CaseGenerationTask{},
+		&models.CaseGenerationJob{},
 		&models.KnowledgeUpdateSuggestionGroup{},
 		&models.KnowledgeUpdateSuggestionOccurrence{},
 	} {
