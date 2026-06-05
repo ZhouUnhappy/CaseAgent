@@ -95,6 +95,7 @@
   - job 记录 job 类型、tenant、task_id、状态、重试次数、最后错误、领取/完成时间。
   - worker 按 `job_runner.max_concurrency` 限制并发，用 tenant-scoped tx 执行任务，启动时恢复超时 running job。
   - worker 领取 job 后创建 `workflow_runs` / `workflow_steps`，并把 `workflow_run_id` 注入任务执行 context。
+  - 运维 API：`GET /api/v1/jobs` / `GET /api/v1/workflows` 支持按当前 tenant、resource、status、job_type/workflow_type 查询；`POST /api/v1/jobs/:id/{retry,cancel,replay}` 只允许安全状态转移，并写入 `artifacts.artifact_type='intervention'`。
 - Workflow trace：`backend/internal/service/workflow/`
   - Workflow run / step 状态通过 `start/succeed/fail/cancel/replay` 事件做集中转移，非法 transition 在 service 层拒绝。
   - `GenerateCases` 记录 document / knowledge retrieval 摘要、case generation agent 摘要和 generated cases artifact。
@@ -145,6 +146,7 @@
   - `ProjectList.vue` / `ProjectDetail.vue`：项目与文档管理，并提供跳转到生成工作台的入口
   - `TaskDetail.vue`：任务深度排查、Workflow Trace、用例 JSON 编辑
   - `KnowledgeBase.vue` / `KnowledgeSuggestions.vue`：知识库与知识建议沉淀
+  - `OpsWorkbench.vue`：tenant-scoped jobs / workflows 运维视图，支持筛选、重试、取消、重放。
 
 **可观测性**：
 
@@ -152,6 +154,8 @@
 - 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态。
 
 **验证方式**：手工跑全流程；`cd frontend && npm run build` 通过。
+
+**运维权限边界**：当前 retry / cancel / replay 适合 demo、本地调试和单租户可信操作员场景。生产环境应在这些 API 前增加操作者身份、角色权限、二次确认审计字段和更细的资源级授权；跨 tenant 批量处理仍应走独立 admin API，而不是复用 tenant-scoped 业务入口。
 
 ---
 

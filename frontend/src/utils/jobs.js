@@ -21,6 +21,7 @@ export function jobStatusLabel(status) {
     retrying: 'retrying',
     failed: 'failed',
     succeeded: 'succeeded',
+    canceled: 'canceled',
   }[status] || status || '-'
 }
 
@@ -31,6 +32,7 @@ export function jobStatusType(status) {
     retrying: 'warning',
     failed: 'danger',
     succeeded: 'success',
+    canceled: 'info',
   }[status] || 'info'
 }
 

@@ -43,6 +43,12 @@ const routes = [
     component: () => import('../views/KnowledgeSuggestions.vue'),
     meta: { title: '知识建议' },
   },
+  {
+    path: '/ops',
+    name: 'ops',
+    component: () => import('../views/OpsWorkbench.vue'),
+    meta: { title: '运维工作台' },
+  },
 ]
 
 const router = createRouter({

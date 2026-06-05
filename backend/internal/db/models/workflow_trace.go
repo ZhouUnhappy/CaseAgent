@@ -17,6 +17,7 @@ const (
 	ArtifactTypeOutput         = "output"
 	ArtifactTypeGeneratedCases = "generated_cases"
 	ArtifactTypeRetrievalTrace = "retrieval_trace"
+	ArtifactTypeIntervention   = "intervention"
 )
 
 type WorkflowRun struct {

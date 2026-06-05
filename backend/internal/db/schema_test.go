@@ -69,6 +69,9 @@ func TestLoadSchemaSQL(t *testing.T) {
 		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS workflow_run_id") {
 		t.Fatalf("expected generic background job columns in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "ADD CONSTRAINT background_jobs_status_check\n        CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled'))") {
+		t.Fatalf("expected canceled background job status in schema, got: %s", schema)
+	}
 	if !strings.Contains(schema, "ADD COLUMN IF NOT EXISTS index_profile") ||
 		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS index_version") ||
 		!strings.Contains(schema, "document_chunks_index_profile_idx") ||

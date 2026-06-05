@@ -50,6 +50,10 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		biz.PUT("/tasks/:id/generate", h.GenerateCases)
 		biz.POST("/tasks/:id/retry", h.RetryTask)
 		biz.GET("/jobs", h.ListJobs)
+		biz.POST("/jobs/:id/retry", h.RetryJob)
+		biz.POST("/jobs/:id/cancel", h.CancelJob)
+		biz.POST("/jobs/:id/replay", h.ReplayJob)
+		biz.GET("/workflows", h.ListWorkflows)
 
 		biz.GET("/knowledge-suggestions", h.ListKnowledgeSuggestions)
 		biz.POST("/knowledge-suggestions", h.CreateKnowledgeSuggestion)

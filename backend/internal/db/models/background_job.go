@@ -18,6 +18,7 @@ const (
 	JobStatusRunning   = "running"
 	JobStatusSucceeded = "succeeded"
 	JobStatusFailed    = "failed"
+	JobStatusCanceled  = "canceled"
 )
 
 var AllJobTypes = []string{

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Collection, DocumentChecked, FolderOpened, MagicStick } from '@element-plus/icons-vue'
+import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor } from '@element-plus/icons-vue'
 import { useTenantStore } from '../stores/tenant'
 
 const route = useRoute()
@@ -18,6 +18,7 @@ const navItems = [
   { index: '/projects', label: '项目管理', icon: FolderOpened },
   { index: '/knowledge', label: '知识库', icon: Collection },
   { index: '/knowledge-suggestions', label: '知识建议', icon: DocumentChecked },
+  { index: '/ops', label: '运维', icon: Monitor },
 ]
 
 const tenantStore = useTenantStore()
