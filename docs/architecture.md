@@ -70,6 +70,7 @@
 **关键入口**：
 
 - Agent Service（编排）：`backend/internal/service/agent/service.go`
+  - 显式 Agent Graph：`backend/internal/service/agent/graph.go` 定义 functional / ops / failure / boundary 节点、节点结果和失败隔离；Service 根据 graph 输出决定 fallback / refine。
   - 每次 LLM 调用使用 `model.chat.request_timeout_seconds` 做单次超时，并输出 agent start/end/failure 日志，避免真实 provider 慢调用让 task 长期停在 `generating`
 - DeepAgent（协调）：`backend/internal/agent/deep/`
 - 子 Agent：`backend/internal/agent/{functional,ops,failure,boundary}/`

@@ -200,45 +200,21 @@ func configuredChatCallTimeout(appCfg *config.Config) time.Duration {
 // skipped; sibling sub-agents continue running and their outputs still flow
 // through dedupe → refinement → persistence.
 func (s *Service) GenerateCases(ctx context.Context, requirements string, knowledge string) (string, error) {
-	type generator struct {
-		name string
-		run  func(context.Context, string, string) (string, error)
-	}
+	graph := newAgentGraph([]agentGraphNode{
+		{Name: "functional", Run: s.functionalAgent.GenerateFunctionalCases},
+		{Name: "ops", Run: s.opsAgent.GenerateOpsCases},
+		{Name: "failure", Run: s.failureAgent.GenerateFailureCases},
+		{Name: "boundary", Run: s.boundaryAgent.GenerateBoundaryCases},
+	}, s.chatCallTimeout, s.traceRecorder)
 
-	generators := []generator{
-		{name: "functional", run: s.functionalAgent.GenerateFunctionalCases},
-		{name: "ops", run: s.opsAgent.GenerateOpsCases},
-		{name: "failure", run: s.failureAgent.GenerateFailureCases},
-		{name: "boundary", run: s.boundaryAgent.GenerateBoundaryCases},
-	}
-
-	sections := make([]generatedSection, 0, len(generators))
-	for _, g := range generators {
-		output, err := runSubAgentWithRetry(ctx, g.name, s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
-			return g.run(ctx, requirements, knowledge)
-		})
-		if err != nil {
-			slog.Warn("sub-agent failed after retry, continuing without it",
-				"agent", g.name, "error", err)
-			continue
-		}
-
-		parsed, parseErr := parseGeneratedSections(output)
-		if parseErr != nil || len(parsed) == 0 {
-			slog.Warn("sub-agent produced unparseable output, skipping",
-				"agent", g.name, "parse_err", parseErr, "len", len(parsed))
-			continue
-		}
-		sections = append(sections, parsed...)
-	}
-
-	if len(sections) == 0 {
+	graphResult := graph.Run(ctx, requirements, knowledge)
+	if len(graphResult.Sections) == 0 {
 		slog.Warn("all sub-agents produced no usable output; falling back to DeepAgent.GenerateCases",
-			"sub_agent_count", len(generators))
+			"sub_agent_count", len(graphResult.Nodes))
 		return s.generateFallback(ctx, requirements, knowledge)
 	}
 
-	normalized := dedupeGeneratedSections(sections)
+	normalized := dedupeGeneratedSections(graphResult.Sections)
 	if len(normalized) == 0 {
 		slog.Warn("dedupe collapsed all sub-agent sections; falling back to DeepAgent.GenerateCases")
 		return s.generateFallback(ctx, requirements, knowledge)
