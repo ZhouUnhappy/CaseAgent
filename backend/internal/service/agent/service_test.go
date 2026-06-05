@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,18 @@ func (m *stubChatModel) Stream(ctx context.Context, input []*schema.Message, opt
 	return nil, errors.New("stream not implemented")
 }
 
+type routingChatModel struct {
+	generate func([]*schema.Message) (*schema.Message, error)
+}
+
+func (m *routingChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	return m.generate(input)
+}
+
+func (m *routingChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("stream not implemented")
+}
+
 func TestConfiguredChatCallTimeout(t *testing.T) {
 	if got := configuredChatCallTimeout(nil); got != defaultChatCallTimeout {
 		t.Fatalf("nil config timeout = %s, want %s", got, defaultChatCallTimeout)
@@ -325,4 +338,71 @@ func TestGenerateCasesWithFakeTimeoutProvider(t *testing.T) {
 	if FailureStage(err) != GenerationStageDeepAgentFallback {
 		t.Fatalf("FailureStage() = %q, want %q", FailureStage(err), GenerationStageDeepAgentFallback)
 	}
+}
+
+func TestGenerateCasesUsesDeepFallbackWhenAllGraphNodesFail(t *testing.T) {
+	chatModel := &routingChatModel{generate: func(input []*schema.Message) (*schema.Message, error) {
+		prompt := joinedPrompt(input)
+		if strings.Contains(prompt, "测试用例生成专家") {
+			return schema.AssistantMessage(testSectionJSON("功能测试", "deep fallback"), nil), nil
+		}
+		return nil, errors.New("sub-agent unavailable")
+	}}
+	service, err := New(context.Background(), &Config{ChatModel: chatModel, ChatCallTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	output, err := service.GenerateCases(context.Background(), "fake requirements", "fake knowledge")
+	if err != nil {
+		t.Fatalf("GenerateCases() returned error: %v", err)
+	}
+	if !strings.Contains(output, "deep fallback") {
+		t.Fatalf("output = %s, want DeepAgent fallback content", output)
+	}
+}
+
+func TestGenerateCasesReturnsUnrefinedPayloadWhenRefineFails(t *testing.T) {
+	chatModel := &routingChatModel{generate: func(input []*schema.Message) (*schema.Message, error) {
+		prompt := joinedPrompt(input)
+		if strings.Contains(prompt, "总协调 Agent") {
+			return nil, errors.New("refine failed")
+		}
+		switch {
+		case strings.Contains(prompt, "运维测试专家"):
+			return schema.AssistantMessage(testSectionJSON("运维测试", "ops draft"), nil), nil
+		case strings.Contains(prompt, "故障测试专家"):
+			return schema.AssistantMessage(testSectionJSON("故障测试", "failure draft"), nil), nil
+		case strings.Contains(prompt, "边界测试专家"):
+			return schema.AssistantMessage(testSectionJSON("边界测试", "boundary draft"), nil), nil
+		default:
+			return schema.AssistantMessage(testSectionJSON("功能测试", "functional draft"), nil), nil
+		}
+	}}
+	service, err := New(context.Background(), &Config{ChatModel: chatModel, ChatCallTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	output, err := service.GenerateCases(context.Background(), "fake requirements", "fake knowledge")
+	if err != nil {
+		t.Fatalf("GenerateCases() returned error: %v", err)
+	}
+	if !strings.Contains(output, "functional draft") || !strings.Contains(output, "boundary draft") {
+		t.Fatalf("output = %s, want unrefined sub-agent drafts", output)
+	}
+}
+
+func joinedPrompt(messages []*schema.Message) string {
+	var builder strings.Builder
+	for _, message := range messages {
+		if message != nil {
+			builder.WriteString(message.Content)
+		}
+	}
+	return builder.String()
+}
+
+func testSectionJSON(section string, title string) string {
+	return fmt.Sprintf(`[{"section":%q,"cases":[{"title":%q,"priority_id":3,"custom_preconds":"ready","custom_steps_separated":[{"content":"do","expected":"done"}]}]}]`, section, title)
 }

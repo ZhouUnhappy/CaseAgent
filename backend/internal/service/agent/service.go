@@ -4,11 +4,11 @@
 // Responsibility split:
 //
 //   - Service (this package) is the *application-level coordinator*. It owns
-//     the sub-agent instances (functional / ops / failure / boundary), runs
-//     them sequentially, applies retry-once on transient failures, isolates
-//     individual sub-agent failures so they don't block sibling agents,
-//     dedupes the merged sections, and finally hands the consolidated draft
-//     to DeepAgent for refinement. Service does not call the LLM directly.
+//     the ADK/AgentGraph nodes for functional / ops / failure / boundary,
+//     applies retry-once on transient failures, isolates individual node
+//     failures so they don't block sibling agents, dedupes the merged
+//     sections, and finally hands the consolidated draft to DeepAgent for
+//     refinement. Service does not call the LLM directly.
 //
 //   - DeepAgent (backend/internal/agent/deep) is the *agent-level coordinator*
 //     that talks to the chat model. It serves two roles: (a) fallback —
@@ -17,9 +17,8 @@
 //     consolidating the dedup'd sub-agent draft into a single coherent
 //     output before persistence.
 //
-// Sub-agents are intentionally not yet wired through DeepAgent's adk.Agent
-// slot; the current architecture is sequential rather than graph-based, and
-// a follow-up will migrate to native eino adk.Agent coordination.
+// Sub-agents are exposed through eino ADK Agent adapters and consumed by both
+// the application AgentGraph and DeepAgent's fallback coordination path.
 package agent
 
 import (
@@ -53,6 +52,7 @@ type Service struct {
 	opsAgent        *ops.Agent
 	failureAgent    *failure.Agent
 	boundaryAgent   *boundary.Agent
+	subAgents       []adk.Agent
 	chatCallTimeout time.Duration
 	traceRecorder   workflowservice.AgentTraceRecorder
 }
@@ -170,9 +170,12 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		return nil, fmt.Errorf("failed to create boundary agent: %w", err)
 	}
 
-	// Create DeepAgent with sub-agents
-	// TODO: Convert sub-agents to adk.Agent interface
-	var subAgents []adk.Agent
+	subAgents := []adk.Agent{
+		newCaseGenerationADKAgent("functional", "Generate functional test cases", functionalAgent.GenerateFunctionalCases),
+		newCaseGenerationADKAgent("ops", "Generate operations test cases", opsAgent.GenerateOpsCases),
+		newCaseGenerationADKAgent("failure", "Generate failure-mode test cases", failureAgent.GenerateFailureCases),
+		newCaseGenerationADKAgent("boundary", "Generate boundary test cases", boundaryAgent.GenerateBoundaryCases),
+	}
 
 	deepAgent, err := deep.New(ctx, &deep.Config{
 		ChatModel: chatModel,
@@ -189,6 +192,7 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		opsAgent:        opsAgent,
 		failureAgent:    failureAgent,
 		boundaryAgent:   boundaryAgent,
+		subAgents:       subAgents,
 		chatCallTimeout: callTimeout,
 		traceRecorder:   traceRecorder,
 	}, nil
@@ -208,34 +212,40 @@ func configuredChatCallTimeout(appCfg *config.Config) time.Duration {
 // through dedupe → refinement → persistence.
 func (s *Service) GenerateCases(ctx context.Context, requirements string, knowledge string) (string, error) {
 	graph := newAgentGraph([]agentGraphNode{
-		{Name: "functional", Run: s.functionalAgent.GenerateFunctionalCases},
-		{Name: "ops", Run: s.opsAgent.GenerateOpsCases},
-		{Name: "failure", Run: s.failureAgent.GenerateFailureCases},
-		{Name: "boundary", Run: s.boundaryAgent.GenerateBoundaryCases},
+		{Name: "functional", Agent: s.subAgents[0]},
+		{Name: "ops", Agent: s.subAgents[1]},
+		{Name: "failure", Agent: s.subAgents[2]},
+		{Name: "boundary", Agent: s.subAgents[3]},
 	}, s.chatCallTimeout, s.traceRecorder)
 
 	graphResult := graph.Run(ctx, requirements, knowledge)
 	if len(graphResult.Sections) == 0 {
 		slog.Warn("all sub-agents produced no usable output; falling back to DeepAgent.GenerateCases",
 			"sub_agent_count", len(graphResult.Nodes))
-		return s.generateFallback(ctx, requirements, knowledge)
+		return s.generateFallback(ctx, requirements, knowledge, "no_usable_sub_agent_output")
 	}
 
 	normalized := dedupeGeneratedSections(graphResult.Sections)
 	if len(normalized) == 0 {
 		slog.Warn("dedupe collapsed all sub-agent sections; falling back to DeepAgent.GenerateCases")
-		return s.generateFallback(ctx, requirements, knowledge)
+		return s.generateFallback(ctx, requirements, knowledge, "dedupe_empty")
 	}
 
 	payload, err := json.Marshal(normalized)
 	if err != nil {
 		slog.Warn("failed to marshal dedup'd sections; falling back to DeepAgent.GenerateCases", "error", err)
-		return s.generateFallback(ctx, requirements, knowledge)
+		return s.generateFallback(ctx, requirements, knowledge, "marshal_deduped_sections_failed")
 	}
 
 	refined, err := runTimedAgentCall(ctx, "deep_refine", "initial", s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
 		return s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
-	})
+	}, withAgentCallMetadata(map[string]any{
+		"graph_node_type": "coordinator",
+		"trigger_reason":  "sub_agent_sections_ready",
+		"section_count":   len(normalized),
+		"input_chars":     len(requirements) + len(knowledge) + len(payload),
+		"draft_chars":     len(payload),
+	}))
 	if err != nil || strings.TrimSpace(refined) == "" {
 		if err != nil {
 			slog.Warn("DeepAgent.RefineCases failed; returning unrefined dedup'd payload", "error", err)
@@ -252,10 +262,14 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 	return refined, nil
 }
 
-func (s *Service) generateFallback(ctx context.Context, requirements string, knowledge string) (string, error) {
+func (s *Service) generateFallback(ctx context.Context, requirements string, knowledge string, reason string) (string, error) {
 	result, err := runTimedAgentCall(ctx, "deep_fallback", "initial", s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
 		return s.deepAgent.GenerateCases(ctx, requirements, knowledge)
-	})
+	}, withAgentCallMetadata(map[string]any{
+		"graph_node_type": "coordinator",
+		"trigger_reason":  reason,
+		"input_chars":     len(requirements) + len(knowledge),
+	}))
 	if err != nil {
 		return "", generationError(GenerationStageDeepAgentFallback, err)
 	}
@@ -265,8 +279,8 @@ func (s *Service) generateFallback(ctx context.Context, requirements string, kno
 // runSubAgentWithRetry invokes fn once and, on error, retries exactly one
 // more time. It logs the first-attempt error so that intermittent provider
 // failures (rate limits, transient 5xx) are visible in operator logs.
-func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duration, recorder workflowservice.AgentTraceRecorder, fn func(context.Context) (string, error)) (string, error) {
-	output, err := runTimedAgentCall(ctx, name, "initial", timeout, recorder, fn)
+func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duration, recorder workflowservice.AgentTraceRecorder, fn func(context.Context) (string, error), opts ...agentCallOption) (string, error) {
+	output, err := runTimedAgentCall(ctx, name, "initial", timeout, recorder, fn, opts...)
 	if err == nil {
 		return output, nil
 	}
@@ -274,7 +288,26 @@ func runSubAgentWithRetry(ctx context.Context, name string, timeout time.Duratio
 		return "", err
 	}
 	slog.Warn("sub-agent first attempt failed; retrying once", "agent", name, "error", err)
-	return runTimedAgentCall(ctx, name, "retry", timeout, recorder, fn)
+	return runTimedAgentCall(ctx, name, "retry", timeout, recorder, fn, opts...)
+}
+
+type agentCallOptions struct {
+	metadata     map[string]any
+	inputSummary string
+}
+
+type agentCallOption func(*agentCallOptions)
+
+func withAgentCallMetadata(metadata map[string]any) agentCallOption {
+	return func(opts *agentCallOptions) {
+		opts.metadata = mergeMetadata(opts.metadata, metadata)
+	}
+}
+
+func withAgentCallInputSummary(summary string) agentCallOption {
+	return func(opts *agentCallOptions) {
+		opts.inputSummary = summary
+	}
 }
 
 func runTimedAgentCall(
@@ -284,7 +317,18 @@ func runTimedAgentCall(
 	timeout time.Duration,
 	recorder workflowservice.AgentTraceRecorder,
 	fn func(context.Context) (string, error),
+	opts ...agentCallOption,
 ) (string, error) {
+	callOpts := agentCallOptions{metadata: map[string]any{}}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&callOpts)
+		}
+	}
+	callOpts.metadata = mergeMetadata(callOpts.metadata, map[string]any{
+		"attempt": attempt,
+	})
+
 	callCtx := ctx
 	cancel := func() {}
 	if timeout > 0 {
@@ -298,7 +342,7 @@ func runTimedAgentCall(
 		"attempt", attempt,
 		"timeout", timeout.String())
 
-	agentRunID := startTracedAgentRun(ctx, recorder, name, attempt)
+	agentRunID := startTracedAgentRun(ctx, recorder, name, attempt, callOpts.inputSummary, callOpts.metadata)
 	tracedCtx := withModelTrace(callCtx, name, attempt)
 	if agentRunID > 0 {
 		tracedCtx = workflowservice.WithAgentRunID(tracedCtx, agentRunID)
@@ -307,7 +351,7 @@ func runTimedAgentCall(
 	output, err := fn(tracedCtx)
 	elapsed := time.Since(started)
 	if err == nil {
-		finishTracedAgentRun(ctx, recorder, agentRunID, models.WorkflowStatusSucceeded, output, nil, elapsed)
+		finishTracedAgentRun(ctx, recorder, agentRunID, models.WorkflowStatusSucceeded, output, nil, elapsed, callOpts.metadata)
 		slog.Info("agent call completed",
 			"agent", name,
 			"attempt", attempt,
@@ -318,7 +362,7 @@ func runTimedAgentCall(
 	if callCtx.Err() != nil {
 		err = callCtx.Err()
 	}
-	finishTracedAgentRun(ctx, recorder, agentRunID, models.WorkflowStatusFailed, "", err, elapsed)
+	finishTracedAgentRun(ctx, recorder, agentRunID, models.WorkflowStatusFailed, "", err, elapsed, callOpts.metadata)
 	slog.Warn("agent call failed",
 		"agent", name,
 		"attempt", attempt,
@@ -327,7 +371,7 @@ func runTimedAgentCall(
 	return "", err
 }
 
-func startTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTraceRecorder, name string, attempt string) int {
+func startTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTraceRecorder, name string, attempt string, inputSummary string, metadata map[string]any) int {
 	if recorder == nil {
 		return 0
 	}
@@ -335,9 +379,8 @@ func startTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTrac
 		WorkflowRunID: workflowservice.RunIDPointerFromContext(ctx),
 		AgentName:     name,
 		Stage:         attempt,
-		Metadata: map[string]any{
-			"attempt": attempt,
-		},
+		InputSummary:  inputSummary,
+		Metadata:      defaultMetadata(metadata),
 	})
 	if err != nil {
 		slog.Warn("agent run trace start failed", "agent", name, "attempt", attempt, "error", err)
@@ -346,7 +389,7 @@ func startTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTrac
 	return row.ID
 }
 
-func finishTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTraceRecorder, agentRunID int, status string, output string, cause error, elapsed time.Duration) {
+func finishTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTraceRecorder, agentRunID int, status string, output string, cause error, elapsed time.Duration, metadata map[string]any) {
 	if recorder == nil || agentRunID <= 0 {
 		return
 	}
@@ -358,12 +401,30 @@ func finishTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTra
 		Status:        status,
 		OutputSummary: output,
 		LastError:     lastErr,
-		Metadata: map[string]any{
+		Metadata: mergeMetadata(metadata, map[string]any{
 			"elapsed_ms": elapsed.Milliseconds(),
-		},
+		}),
 	}); err != nil {
 		slog.Warn("agent run trace finish failed", "agent_run_id", agentRunID, "status", status, "error", err)
 	}
+}
+
+func defaultMetadata(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return map[string]any{}
+	}
+	return mergeMetadata(metadata, nil)
+}
+
+func mergeMetadata(base map[string]any, extra map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged
 }
 
 func isContextError(err error) bool {
