@@ -616,181 +616,183 @@ function findSelectedJobWithError() {
     </el-empty>
 
     <div v-else class="workspace-grid">
-      <section class="panel document-panel">
-        <header class="panel-head">
-          <div>
-            <span class="step-index">1</span>
-            <h2>需求文档</h2>
-          </div>
-          <el-button type="primary" :icon="Upload" @click="openUpload" :disabled="!selectedProjectId">
-            上传
-          </el-button>
-        </header>
-
-        <el-alert
-          v-if="documents.some((doc) => doc.status === 'processing')"
-          title="有文档正在处理，完成后即可选中生成。"
-          type="warning"
-          :closable="false"
-          class="inline-alert"
-        />
-
-        <el-checkbox-group v-model="selectedDocumentIds" class="doc-list">
-          <div
-            v-for="doc in documents"
-            :key="doc.id"
-            class="doc-row"
-            :class="{ disabled: doc.status !== 'completed' }"
-          >
-            <el-checkbox
-              :value="doc.id"
-              :disabled="doc.status !== 'completed'"
-              class="doc-check"
-            />
-            <div class="doc-main">
-              <span>{{ doc.name }}</span>
-              <small>#{{ doc.id }} · {{ formatDate(doc.updated_at) }}</small>
-            </div>
-            <StatusTag class="doc-status" :status="doc.status" />
-          </div>
-        </el-checkbox-group>
-
-        <el-empty v-if="!documents.length && !documentsLoading" description="暂无需求文档" />
-
-        <div class="panel-footer">
-          <span>{{ completedDocuments.length }} 份文档可用于生成</span>
-          <el-button
-            type="primary"
-            :icon="Plus"
-            :loading="taskCreating"
-            :disabled="!selectedProjectId || selectedDocumentIds.length === 0"
-            @click="createTaskFromDocuments"
-          >
-            创建生成任务
-          </el-button>
-        </div>
-      </section>
-
-      <section class="panel task-panel">
-        <header class="panel-head">
-          <div>
-            <span class="step-index">2</span>
-            <h2>影响范围与生成</h2>
-          </div>
-          <StatusTag v-if="task" :status="task.status" />
-          <el-tag v-else type="info">{{ taskStatusText }}</el-tag>
-        </header>
-
-        <div class="task-list">
-          <button
-            v-for="item in tasks"
-            :key="item.id"
-            class="task-row"
-            :class="{ active: item.id === selectedTaskId }"
-            @click="selectTask(item)"
-          >
-            <div class="task-row-main">
-              <span>任务 #{{ item.id }}</span>
-              <small v-if="latestTaskJob(item)">
-                {{ jobTypeLabel(latestTaskJob(item).job_type) }}
-                {{ jobStatusLabel(latestTaskJob(item).status) }}
-              </small>
-            </div>
-            <StatusTag v-if="!latestTaskJob(item)" :status="item.status" />
-            <el-tag v-else size="small" :type="jobStatusType(latestTaskJob(item).status)">
-              {{ jobStatusLabel(latestTaskJob(item).status) }}
-            </el-tag>
-          </button>
-        </div>
-
-        <el-empty v-if="!tasks.length && !tasksLoading" description="暂无生成任务" />
-
-        <div v-if="task && latestSelectedJob" class="job-summary">
-          <div class="job-summary-main">
-            <strong>{{ jobTypeLabel(latestSelectedJob.job_type) }}</strong>
-            <el-tag size="small" :type="jobStatusType(latestSelectedJob.status)">
-              {{ jobStatusLabel(latestSelectedJob.status) }}
-            </el-tag>
-            <span>retry {{ latestSelectedJob.retry_count }}/{{ latestSelectedJob.max_retries }}</span>
-            <span v-if="latestSelectedJob.status === 'retrying'">
-              next {{ formatDate(latestSelectedJob.run_after) }}
-            </span>
-          </div>
-          <p v-if="selectedJobError" class="job-error">{{ selectedJobError }}</p>
-        </div>
-
-        <div v-if="workspaceTimeline.length" class="mini-timeline">
-          <div
-            v-for="item in workspaceTimeline"
-            :key="item.key"
-            class="mini-timeline-item"
-            :class="item.status"
-          >
-            <span class="mini-dot" />
+      <div class="workspace-side">
+        <section class="panel document-panel">
+          <header class="panel-head">
             <div>
-              <strong>{{ item.label }}</strong>
-              <small>
-                {{ jobStatusLabel(item.status) }}
-                <span v-if="item.retry"> · retry {{ item.retry }}</span>
-                <span> · {{ formatDate(item.time) }}</span>
-              </small>
+              <span class="step-index">1</span>
+              <h2>需求文档</h2>
+            </div>
+            <el-button type="primary" :icon="Upload" @click="openUpload" :disabled="!selectedProjectId">
+              上传
+            </el-button>
+          </header>
+
+          <el-alert
+            v-if="documents.some((doc) => doc.status === 'processing')"
+            title="有文档正在处理，完成后即可选中生成。"
+            type="warning"
+            :closable="false"
+            class="inline-alert"
+          />
+
+          <el-checkbox-group v-model="selectedDocumentIds" class="doc-list">
+            <div
+              v-for="doc in documents"
+              :key="doc.id"
+              class="doc-row"
+              :class="{ disabled: doc.status !== 'completed' }"
+            >
+              <el-checkbox
+                :value="doc.id"
+                :disabled="doc.status !== 'completed'"
+                class="doc-check"
+              />
+              <div class="doc-main">
+                <span>{{ doc.name }}</span>
+                <small>#{{ doc.id }} · {{ formatDate(doc.updated_at) }}</small>
+              </div>
+              <StatusTag class="doc-status" :status="doc.status" />
+            </div>
+          </el-checkbox-group>
+
+          <el-empty v-if="!documents.length && !documentsLoading" description="暂无需求文档" />
+
+          <div class="panel-footer">
+            <span>{{ completedDocuments.length }} 份文档可用于生成</span>
+            <el-button
+              type="primary"
+              :icon="Plus"
+              :loading="taskCreating"
+              :disabled="!selectedProjectId || selectedDocumentIds.length === 0"
+              @click="createTaskFromDocuments"
+            >
+              创建生成任务
+            </el-button>
+          </div>
+        </section>
+
+        <section class="panel task-panel">
+          <header class="panel-head">
+            <div>
+              <span class="step-index">2</span>
+              <h2>影响范围与生成</h2>
+            </div>
+            <StatusTag v-if="task" :status="task.status" />
+            <el-tag v-else type="info">{{ taskStatusText }}</el-tag>
+          </header>
+
+          <div class="task-list">
+            <button
+              v-for="item in tasks"
+              :key="item.id"
+              class="task-row"
+              :class="{ active: item.id === selectedTaskId }"
+              @click="selectTask(item)"
+            >
+              <div class="task-row-main">
+                <span>任务 #{{ item.id }}</span>
+                <small v-if="latestTaskJob(item)">
+                  {{ jobTypeLabel(latestTaskJob(item).job_type) }}
+                  {{ jobStatusLabel(latestTaskJob(item).status) }}
+                </small>
+              </div>
+              <StatusTag v-if="!latestTaskJob(item)" :status="item.status" />
+              <el-tag v-else size="small" :type="jobStatusType(latestTaskJob(item).status)">
+                {{ jobStatusLabel(latestTaskJob(item).status) }}
+              </el-tag>
+            </button>
+          </div>
+
+          <el-empty v-if="!tasks.length && !tasksLoading" description="暂无生成任务" />
+
+          <div v-if="task && latestSelectedJob" class="job-summary">
+            <div class="job-summary-main">
+              <strong>{{ jobTypeLabel(latestSelectedJob.job_type) }}</strong>
+              <el-tag size="small" :type="jobStatusType(latestSelectedJob.status)">
+                {{ jobStatusLabel(latestSelectedJob.status) }}
+              </el-tag>
+              <span>retry {{ latestSelectedJob.retry_count }}/{{ latestSelectedJob.max_retries }}</span>
+              <span v-if="latestSelectedJob.status === 'retrying'">
+                next {{ formatDate(latestSelectedJob.run_after) }}
+              </span>
+            </div>
+            <p v-if="selectedJobError" class="job-error">{{ selectedJobError }}</p>
+          </div>
+
+          <div v-if="workspaceTimeline.length" class="mini-timeline">
+            <div
+              v-for="item in workspaceTimeline"
+              :key="item.key"
+              class="mini-timeline-item"
+              :class="item.status"
+            >
+              <span class="mini-dot" />
+              <div>
+                <strong>{{ item.label }}</strong>
+                <small>
+                  {{ jobStatusLabel(item.status) }}
+                  <span v-if="item.retry"> · retry {{ item.retry }}</span>
+                  <span> · {{ formatDate(item.time) }}</span>
+                </small>
+              </div>
             </div>
           </div>
-        </div>
 
-        <el-form v-if="task" label-position="top" class="review-form">
-          <el-form-item label="受影响产品">
-            <el-select
-              v-model="reviewForm.products"
-              multiple
-              filterable
-              allow-create
-              :disabled="!canReview"
-              placeholder="留空表示不限定"
+          <el-form v-if="task" label-position="top" class="review-form">
+            <el-form-item label="受影响产品">
+              <el-select
+                v-model="reviewForm.products"
+                multiple
+                filterable
+                allow-create
+                :disabled="!canReview"
+                placeholder="留空表示不限定"
+              >
+                <el-option v-for="p in productOptions" :key="p" :value="p" :label="p" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="受影响模块">
+              <el-select
+                v-model="reviewForm.modules"
+                multiple
+                filterable
+                allow-create
+                :disabled="!canReview"
+                placeholder="留空表示不限定"
+              >
+                <el-option v-for="m in moduleOptions" :key="m" :value="m" :label="m" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+
+          <div class="generate-actions">
+            <el-button v-if="canReview" @click="submitReview">确认范围</el-button>
+            <el-button
+              v-if="canGenerate"
+              type="success"
+              :icon="VideoPlay"
+              :loading="generating"
+              @click="startGenerate"
             >
-              <el-option v-for="p in productOptions" :key="p" :value="p" :label="p" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="受影响模块">
-            <el-select
-              v-model="reviewForm.modules"
-              multiple
-              filterable
-              allow-create
-              :disabled="!canReview"
-              placeholder="留空表示不限定"
+              开始生成
+            </el-button>
+            <el-button
+              v-if="canRetry"
+              type="warning"
+              :loading="retrying"
+              @click="retryTask"
             >
-              <el-option v-for="m in moduleOptions" :key="m" :value="m" :label="m" />
-            </el-select>
-          </el-form-item>
-        </el-form>
+              重试
+            </el-button>
+            <el-button :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
+              任务详情
+            </el-button>
+          </div>
 
-        <div class="generate-actions">
-          <el-button v-if="canReview" @click="submitReview">确认范围</el-button>
-          <el-button
-            v-if="canGenerate"
-            type="success"
-            :icon="VideoPlay"
-            :loading="generating"
-            @click="startGenerate"
-          >
-            开始生成
-          </el-button>
-          <el-button
-            v-if="canRetry"
-            type="warning"
-            :loading="retrying"
-            @click="retryTask"
-          >
-            重试
-          </el-button>
-          <el-button :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
-            任务详情
-          </el-button>
-        </div>
-
-        <el-tag v-if="isPolling" type="warning" class="polling-tag">后台处理中，每 3 秒刷新</el-tag>
-      </section>
+          <el-tag v-if="isPolling" type="warning" class="polling-tag">后台处理中，每 3 秒刷新</el-tag>
+        </section>
+      </div>
 
       <section class="panel result-panel">
         <header class="panel-head">
@@ -1079,25 +1081,32 @@ function findSelectedJobWithError() {
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-  grid-template-areas:
-    "task result"
-    "documents result";
+  grid-template-areas: "side result";
   gap: 16px;
-  align-items: stretch;
+  align-items: start;
+}
+.workspace-side {
+  grid-area: side;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
 }
 .panel {
   padding: 16px;
   min-width: 0;
 }
 .document-panel {
-  grid-area: documents;
+  order: 2;
 }
 .task-panel {
-  grid-area: task;
+  order: 1;
 }
 .result-panel {
   grid-area: result;
+  height: clamp(640px, calc(100vh - 240px), 920px);
   min-height: 640px;
+  overflow: auto;
 }
 .panel-head {
   display: flex;
@@ -1341,13 +1350,20 @@ function findSelectedJobWithError() {
 @media (max-width: 1180px) {
   .workspace-grid {
     grid-template-areas:
-      "documents"
-      "task"
+      "side"
       "result";
     grid-template-columns: 1fr;
   }
   .result-panel {
+    height: auto;
     min-height: 520px;
+    overflow: visible;
+  }
+  .document-panel {
+    order: 1;
+  }
+  .task-panel {
+    order: 2;
   }
 }
 @media (max-width: 760px) {
