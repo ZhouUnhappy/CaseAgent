@@ -50,6 +50,18 @@ type RetrievalRunInput struct {
 	Metadata      map[string]any
 }
 
+type ModelCallInput struct {
+	WorkflowRunID *int
+	AgentRunID    *int
+	Provider      string
+	Model         string
+	Status        string
+	PromptChars   int
+	ResponseChars int
+	LastError     string
+	Metadata      map[string]any
+}
+
 type ArtifactInput struct {
 	WorkflowRunID  *int
 	WorkflowStepID *int
@@ -228,6 +240,36 @@ func (s *Service) RecordRetrievalRun(ctx context.Context, input RetrievalRunInpu
 	return row, nil
 }
 
+func (s *Service) RecordModelCall(ctx context.Context, input ModelCallInput) (*models.ModelCall, error) {
+	tenantID, ok := tenantdb.TenantFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("record model call: no tenant in context")
+	}
+	now := time.Now()
+	startedAt := now
+	finishedAt := now
+	row := &models.ModelCall{
+		TenantID:      tenantID,
+		WorkflowRunID: input.WorkflowRunID,
+		AgentRunID:    input.AgentRunID,
+		Provider:      input.Provider,
+		Model:         input.Model,
+		Status:        normalizeStatus(input.Status),
+		PromptChars:   nonNegative(input.PromptChars),
+		ResponseChars: nonNegative(input.ResponseChars),
+		LastError:     truncate(input.LastError, 2000),
+		Metadata:      defaultMap(input.Metadata),
+		StartedAt:     &startedAt,
+		FinishedAt:    &finishedAt,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if _, err := s.db.NewInsert().Model(row).Exec(ctx); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
 func (s *Service) RecordArtifact(ctx context.Context, input ArtifactInput) (*models.Artifact, error) {
 	tenantID, ok := tenantdb.TenantFromContext(ctx)
 	if !ok {
@@ -297,4 +339,11 @@ func truncate(value string, max int) string {
 		return value
 	}
 	return value[:max]
+}
+
+func nonNegative(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }

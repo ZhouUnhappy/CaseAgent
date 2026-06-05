@@ -41,6 +41,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/uptrace/bun"
 )
 
 type Service struct {
@@ -55,6 +56,9 @@ type Service struct {
 type Config struct {
 	ChatModel       model.BaseChatModel // Optional, if not provided will initialize from config
 	ChatCallTimeout time.Duration       // Optional, defaults to model.chat.request_timeout_seconds
+	TraceDB         bun.IDB             // Optional, records workflow model_calls when a workflow run is in context
+	ChatProvider    string              // Optional, used for model_call trace rows when ChatModel is provided
+	ChatModelName   string              // Optional, used for model_call trace rows when ChatModel is provided
 }
 
 const GenerationStageDeepAgentFallback = "deep_agent_fallback"
@@ -103,10 +107,15 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	var chatModel model.BaseChatModel
 	var err error
 	callTimeout := cfg.ChatCallTimeout
+	provider := strings.TrimSpace(cfg.ChatProvider)
+	modelName := strings.TrimSpace(cfg.ChatModelName)
 
 	// If ChatModel is provided, use it; otherwise initialize from config
 	if cfg.ChatModel != nil {
 		chatModel = cfg.ChatModel
+		if provider == "" {
+			provider = "custom"
+		}
 	} else {
 		// Initialize chat model from config
 		appCfg := config.Get()
@@ -114,10 +123,17 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize chat model: %w", err)
 		}
+		if provider == "" {
+			provider = appCfg.Model.Chat.Provider
+		}
+		if modelName == "" {
+			modelName = appCfg.Model.Chat.Model
+		}
 	}
 	if callTimeout == 0 {
 		callTimeout = configuredChatCallTimeout(config.Get())
 	}
+	chatModel = traceChatModel(chatModel, cfg.TraceDB, provider, modelName)
 
 	// Create sub-agents
 	functionalAgent, err := functional.New(ctx, &functional.Config{ChatModel: chatModel})
@@ -289,7 +305,7 @@ func runTimedAgentCall(
 		"attempt", attempt,
 		"timeout", timeout.String())
 
-	output, err := fn(callCtx)
+	output, err := fn(withModelTrace(callCtx, name, attempt))
 	elapsed := time.Since(started)
 	if err == nil {
 		slog.Info("agent call completed",

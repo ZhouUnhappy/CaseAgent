@@ -9,6 +9,8 @@ import (
 
 	"caseagent/internal/ai"
 	"caseagent/internal/config"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 func TestParseGeneratedSections(t *testing.T) {
@@ -60,6 +62,20 @@ func TestDedupeGeneratedSections(t *testing.T) {
 	}
 	if len(got[0].Cases) != 1 {
 		t.Fatalf("expected one case after dedupe, got %d", len(got[0].Cases))
+	}
+}
+
+func TestMessageCharsCountsPromptAndReasoningContent(t *testing.T) {
+	got := messageChars([]*schema.Message{
+		schema.UserMessage("abc"),
+		{
+			Content:          "de",
+			ReasoningContent: "fg",
+		},
+		nil,
+	})
+	if got != 7 {
+		t.Fatalf("messageChars() = %d, want 7", got)
 	}
 }
 

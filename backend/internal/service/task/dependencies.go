@@ -22,13 +22,9 @@ type SuggestionRecorder interface {
 	RecordContextGap(ctx context.Context, input suggestionservice.ContextGapInput) (*suggestionservice.SuggestionGroupView, error)
 }
 
-func defaultCaseGeneratorFactory(ctx context.Context) (CaseGenerator, error) {
-	return agentservice.New(ctx, &agentservice.Config{})
-}
-
 func (s *Service) caseGenerator(ctx context.Context) (CaseGenerator, error) {
 	if s.newCaseGenerator == nil {
-		return defaultCaseGeneratorFactory(ctx)
+		return agentservice.New(ctx, &agentservice.Config{TraceDB: s.db})
 	}
 	return s.newCaseGenerator(ctx)
 }

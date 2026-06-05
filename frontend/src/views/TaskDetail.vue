@@ -140,6 +140,7 @@ const traceSummary = computed(() => {
 })
 const traceRuns = computed(() => trace.value?.workflow_runs || [])
 const traceAgents = computed(() => trace.value?.agent_runs || [])
+const traceModelCalls = computed(() => trace.value?.model_calls || [])
 const traceRetrievals = computed(() => trace.value?.retrieval_runs || [])
 const traceArtifacts = computed(() => trace.value?.artifacts || [])
 const hasTraceData = computed(() =>
@@ -574,6 +575,24 @@ async function submitKnowledgeFeedback() {
           <el-empty v-if="!traceAgents.length && hasTraceData" description="暂无 agent runs" />
         </div>
         <div class="trace-column">
+          <h3>Models</h3>
+          <div v-for="call in traceModelCalls" :key="call.id" class="trace-row">
+            <div class="trace-row-main">
+              <span class="trace-title">{{ call.provider || '-' }} / {{ call.model || '-' }}</span>
+              <el-tag size="small" :type="jobStatusType(call.status)">
+                {{ traceStatusLabel(call.status) }}
+              </el-tag>
+            </div>
+            <div class="muted small">
+              {{ call.prompt_chars }} prompt · {{ call.response_chars }} response
+            </div>
+            <p v-if="call.last_error" class="muted danger trace-error">
+              {{ compactTraceText(call.last_error) }}
+            </p>
+          </div>
+          <el-empty v-if="!traceModelCalls.length && hasTraceData" description="暂无 model calls" />
+        </div>
+        <div class="trace-column">
           <h3>Retrievals</h3>
           <div v-for="retrieval in traceRetrievals" :key="retrieval.id" class="trace-row">
             <div class="trace-row-main">
@@ -908,7 +927,7 @@ async function submitKnowledgeFeedback() {
 }
 .trace-layout {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 .trace-column {
