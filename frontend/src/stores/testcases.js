@@ -3,6 +3,8 @@ import {
   listTestCases,
   updateTestCase,
   submitTestCase,
+  batchUpdateTestCases,
+  batchSubmitTestCases,
   createCaseFeedback,
 } from '../api/testcases'
 
@@ -12,6 +14,7 @@ export const useTestCasesStore = defineStore('testcases', {
     loading: false,
     saving: false,
     feedbackSaving: false,
+    batchSaving: false,
   }),
   actions: {
     async fetch(taskId) {
@@ -37,6 +40,26 @@ export const useTestCasesStore = defineStore('testcases', {
       this.replace(updated)
       return updated
     },
+    async batchUpdate(taskId, payload) {
+      this.batchSaving = true
+      try {
+        const updatedRows = await batchUpdateTestCases(taskId, payload)
+        updatedRows.forEach((row) => this.replace(row))
+        return updatedRows
+      } finally {
+        this.batchSaving = false
+      }
+    },
+    async batchSubmit(taskId, testCaseIds) {
+      this.batchSaving = true
+      try {
+        const updatedRows = await batchSubmitTestCases(taskId, { test_case_ids: testCaseIds })
+        updatedRows.forEach((row) => this.replace(row))
+        return updatedRows
+      } finally {
+        this.batchSaving = false
+      }
+    },
     async feedback(taskId, caseId, payload) {
       this.feedbackSaving = true
       try {
@@ -50,6 +73,7 @@ export const useTestCasesStore = defineStore('testcases', {
       this.loading = false
       this.saving = false
       this.feedbackSaving = false
+      this.batchSaving = false
     },
     replace(updated) {
       const idx = this.items.findIndex((c) => c.id === updated.id)

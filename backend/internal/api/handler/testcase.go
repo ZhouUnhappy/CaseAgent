@@ -9,11 +9,33 @@ import (
 	"caseagent/internal/db/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/uptrace/bun"
 )
 
 type UpdateTestCaseRequest struct {
 	Section string           `json:"section"`
 	Cases   []map[string]any `json:"cases"`
+}
+
+type CaseRefRequest struct {
+	TestCaseID int `json:"test_case_id"`
+	CaseIndex  int `json:"case_index"`
+}
+
+type BatchCasePatchRequest struct {
+	PriorityID       *int      `json:"priority_id"`
+	AffectedProducts *[]string `json:"affected_products"`
+	AffectedModules  *[]string `json:"affected_modules"`
+	DuplicateHidden  *bool     `json:"duplicate_hidden"`
+}
+
+type BatchUpdateTestCasesRequest struct {
+	Cases []CaseRefRequest      `json:"cases"`
+	Patch BatchCasePatchRequest `json:"patch"`
+}
+
+type BatchSubmitTestCasesRequest struct {
+	TestCaseIDs []int `json:"test_case_ids"`
 }
 
 func (h *Handler) ListTestCases(c *gin.Context) {
@@ -70,6 +92,77 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 	c.JSON(http.StatusOK, tc)
 }
 
+func (h *Handler) BatchUpdateTestCases(c *gin.Context) {
+	taskID, ok := parseTaskID(c)
+	if !ok {
+		return
+	}
+	var req BatchUpdateTestCasesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Cases) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cases is required"})
+		return
+	}
+	if !hasBatchPatch(req.Patch) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "patch is required"})
+		return
+	}
+
+	ids := uniqueTestCaseIDs(req.Cases)
+	var sections []models.TestCase
+	if err := DBFromContext(c).NewSelect().
+		Model(&sections).
+		Where("task_id = ?", taskID).
+		Where("id IN (?)", bun.In(ids)).
+		Order("id ASC").
+		Scan(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	sectionsByID := make(map[int]*models.TestCase, len(sections))
+	for idx := range sections {
+		sectionsByID[sections[idx].ID] = &sections[idx]
+	}
+
+	changed := make(map[int]struct{})
+	for _, item := range req.Cases {
+		section := sectionsByID[item.TestCaseID]
+		if section == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
+			return
+		}
+		if item.CaseIndex < 0 || item.CaseIndex >= len(section.Cases) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "case_index out of range"})
+			return
+		}
+		applyBatchCasePatch(section.Cases[item.CaseIndex], req.Patch)
+		changed[section.ID] = struct{}{}
+	}
+
+	now := time.Now()
+	updated := make([]models.TestCase, 0, len(changed))
+	for idx := range sections {
+		if _, ok := changed[sections[idx].ID]; !ok {
+			continue
+		}
+		sections[idx].UpdatedAt = now
+		if _, err := DBFromContext(c).NewUpdate().
+			Model(&sections[idx]).
+			Set("cases = ?", sections[idx].Cases).
+			Set("updated_at = ?", now).
+			Where("id = ?", sections[idx].ID).
+			Exec(c); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		updated = append(updated, sections[idx])
+	}
+	c.JSON(http.StatusOK, updated)
+}
+
 func (h *Handler) SubmitTestCase(c *gin.Context) {
 	id := c.Param("case_id")
 	tc := &models.TestCase{ID: 0}
@@ -94,4 +187,108 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusOK, tc)
+}
+
+func (h *Handler) BatchSubmitTestCases(c *gin.Context) {
+	taskID, ok := parseTaskID(c)
+	if !ok {
+		return
+	}
+	var req BatchSubmitTestCasesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ids := uniqueInts(req.TestCaseIDs)
+	if len(ids) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "test_case_ids is required"})
+		return
+	}
+
+	var updated []models.TestCase
+	if err := DBFromContext(c).NewSelect().
+		Model(&updated).
+		Where("task_id = ?", taskID).
+		Where("id IN (?)", bun.In(ids)).
+		Order("id ASC").
+		Scan(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if len(updated) != len(ids) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
+		return
+	}
+
+	now := time.Now()
+	if _, err := DBFromContext(c).NewUpdate().
+		Model((*models.TestCase)(nil)).
+		Set("status = ?", models.TestCaseStatusSubmitted).
+		Set("updated_at = ?", now).
+		Where("task_id = ?", taskID).
+		Where("id IN (?)", bun.In(ids)).
+		Exec(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	for idx := range updated {
+		updated[idx].Status = models.TestCaseStatusSubmitted
+		updated[idx].UpdatedAt = now
+	}
+
+	c.JSON(http.StatusOK, updated)
+}
+
+func hasBatchPatch(patch BatchCasePatchRequest) bool {
+	return patch.PriorityID != nil ||
+		patch.AffectedProducts != nil ||
+		patch.AffectedModules != nil ||
+		patch.DuplicateHidden != nil
+}
+
+func applyBatchCasePatch(row map[string]any, patch BatchCasePatchRequest) {
+	if patch.PriorityID != nil {
+		row["priority_id"] = *patch.PriorityID
+	}
+	if patch.AffectedProducts != nil {
+		row["affected_products"] = append([]string{}, (*patch.AffectedProducts)...)
+	}
+	if patch.AffectedModules != nil {
+		row["affected_modules"] = append([]string{}, (*patch.AffectedModules)...)
+	}
+	if patch.DuplicateHidden != nil {
+		row["duplicate_hidden"] = *patch.DuplicateHidden
+	}
+}
+
+func uniqueTestCaseIDs(items []CaseRefRequest) []int {
+	ids := make([]int, 0, len(items))
+	seen := map[int]struct{}{}
+	for _, item := range items {
+		if item.TestCaseID <= 0 {
+			continue
+		}
+		if _, ok := seen[item.TestCaseID]; ok {
+			continue
+		}
+		seen[item.TestCaseID] = struct{}{}
+		ids = append(ids, item.TestCaseID)
+	}
+	return ids
+}
+
+func uniqueInts(values []int) []int {
+	ids := make([]int, 0, len(values))
+	seen := map[int]struct{}{}
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		ids = append(ids, value)
+	}
+	return ids
 }
