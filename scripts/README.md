@@ -38,7 +38,7 @@ export CASEAGENT_PSQL_DSN='postgres://user:pass@localhost:5432/caseagent?sslmode
 
 ### `demo_bootstrap.sh`
 
-**用途**：创建稳定演示数据。脚本会创建 / 复用 `demo-caseagent` tenant，上传仓库内 `testdata/i1/{requirement,product_knowledge,module_knowledge}.md`，等待文档与知识处理完成，创建任务，提交影响范围 review，触发生成，并校验 completed task 至少包含 1 条用例和 model_call trace。
+**用途**：创建或重置稳定演示数据。默认 `bootstrap` 会创建 / 复用 `demo-caseagent` tenant，上传仓库内 `testdata/i1/{requirement,product_knowledge,module_knowledge}.md`，等待文档与知识处理完成，创建任务，提交影响范围 review，触发生成，并校验 completed task 至少包含 1 条用例和 model_call trace。`reset` 会删除 demo tenant 下由该脚本创建的 demo project（通过 API 级联清理 document / task / test cases）和 demo knowledge；`fresh` 会先 reset 再 bootstrap。
 
 **前置**：
 
@@ -48,12 +48,19 @@ export CASEAGENT_PSQL_DSN='postgres://user:pass@localhost:5432/caseagent?sslmode
 
 **输入**：默认读 `testdata/i1/{requirement,product_knowledge,module_knowledge}.md`，可用 `CASEAGENT_DEMO_*_FIXTURE` 覆盖。默认产品 / 模块名分别为 `CaseAgent Cloud` / `控制平面`，可用 `CASEAGENT_DEMO_PRODUCT_NAME` / `CASEAGENT_DEMO_MODULE_NAME` 覆盖。
 
-**输出**：stdout 打印 `tenant_slug`、`project_id`、`document_id`、knowledge id、`task_id`、前端 `frontend_url`、case/section/trace 计数，以及前端 localStorage tenant 提示。
+**输出**：stdout 打印 `api_url`、`tenant_slug`、`run_token`、`project_id`、`document_id`、knowledge id、`task_id`、前端 `frontend_url`、case/section/trace 计数，以及前端 localStorage tenant 提示；失败时 stderr 会打印 action、API URL、tenant slug、run token、已创建的 project/document/task id，并尽量附带 task / trace 快照。
 
-**清理方式**：脚本每次用新的 `run_token` 命名项目并把 knowledge metadata 写入 `aliases=["CaseAgent demo fixture"]`。演示数据只进入 `demo-caseagent` tenant；如需清理，可在设置 `CASEAGENT_PSQL_DSN` 后按 run_token 删除，或通过 API 删除输出的 project 与 knowledge id。
+**清理方式**：脚本每次用新的 `run_token` 命名项目并把 knowledge metadata 写入 `aliases=["CaseAgent demo fixture"]`。演示数据只进入 `demo-caseagent` tenant；工程演示前推荐直接使用 `fresh` 恢复到稳定样例。
 
 ```bash
+# 创建一轮新的 demo 数据
 bash scripts/demo_bootstrap.sh
+
+# 只清理 demo project / knowledge
+bash scripts/demo_bootstrap.sh reset
+
+# 清理后重新创建，并输出新的 task URL
+bash scripts/demo_bootstrap.sh fresh
 ```
 
 ## 数据闭环（i1_*）

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bootstrap a stable public demo run.
+# Bootstrap or reset a stable public demo run.
 #
 # Default tenant: demo-caseagent. This script only uses repository fixtures and
 # keeps demo data out of private corpus tenants.
@@ -22,6 +22,7 @@ TENANT_SLUG="${CASEAGENT_TENANT_SLUG:-demo-caseagent}"
 POLL_ATTEMPTS="${CASEAGENT_DEMO_POLL_ATTEMPTS:-240}"
 POLL_INTERVAL_SECONDS="${CASEAGENT_DEMO_POLL_INTERVAL_SECONDS:-2}"
 RUN_TOKEN="${CASEAGENT_DEMO_RUN_TOKEN:-demo-$(date +%Y%m%d%H%M%S)-$RANDOM}"
+ACTION="${1:-bootstrap}"
 
 REQUIREMENT_FIXTURE="${CASEAGENT_DEMO_REQUIREMENT_FIXTURE:-$ROOT_DIR/testdata/i1/requirement.md}"
 PRODUCT_KNOWLEDGE_FIXTURE="${CASEAGENT_DEMO_PRODUCT_KNOWLEDGE_FIXTURE:-$ROOT_DIR/testdata/i1/product_knowledge.md}"
@@ -29,12 +30,44 @@ MODULE_KNOWLEDGE_FIXTURE="${CASEAGENT_DEMO_MODULE_KNOWLEDGE_FIXTURE:-$ROOT_DIR/t
 
 PRODUCT_NAME="${CASEAGENT_DEMO_PRODUCT_NAME:-CaseAgent Cloud}"
 MODULE_NAME="${CASEAGENT_DEMO_MODULE_NAME:-控制平面}"
+PROJECT_PREFIX="${CASEAGENT_DEMO_PROJECT_PREFIX:-Demo CaseAgent}"
+KNOWLEDGE_ALIAS="${CASEAGENT_DEMO_KNOWLEDGE_ALIAS:-CaseAgent demo fixture}"
 
 PROJECT_ID=""
 DOCUMENT_ID=""
 PRODUCT_KNOWLEDGE_ID=""
 MODULE_KNOWLEDGE_ID=""
 TASK_ID=""
+
+on_error() {
+    local status="$1"
+    local line="$2"
+
+    {
+        printf '\nDemo script failed\n'
+        printf -- '- action: `%s`\n' "$ACTION"
+        printf -- '- exit_status: `%s`\n' "$status"
+        printf -- '- line: `%s`\n' "$line"
+        printf -- '- api_url: `%s`\n' "$BASE_URL"
+        printf -- '- tenant_slug: `%s`\n' "$TENANT_SLUG"
+        printf -- '- run_token: `%s`\n' "$RUN_TOKEN"
+        printf -- '- project_id: `%s`\n' "${PROJECT_ID:-}"
+        printf -- '- document_id: `%s`\n' "${DOCUMENT_ID:-}"
+        printf -- '- task_id: `%s`\n' "${TASK_ID:-}"
+        if [ -n "${TASK_ID:-}" ]; then
+            printf -- '- task_snapshot: '
+            get_json "/tasks/$TASK_ID" 2>/dev/null || true
+            printf '\n'
+            printf -- '- trace_snapshot: '
+            get_json "/tasks/$TASK_ID/trace" 2>/dev/null || true
+            printf '\n'
+        fi
+    } >&2
+
+    exit "$status"
+}
+
+trap 'on_error "$?" "$LINENO"' ERR
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -52,6 +85,28 @@ require_file() {
 
 log() {
     printf '[demo-bootstrap] %s\n' "$1"
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  bash scripts/demo_bootstrap.sh [bootstrap|reset|fresh]
+
+Commands:
+  bootstrap  Create/reuse the demo tenant, import fixed fixtures, create a task,
+             review impact scope, trigger generation, and print demo URLs.
+  reset      Delete demo projects and demo knowledge from the demo tenant.
+  fresh      Run reset, then bootstrap.
+
+Environment:
+  CASEAGENT_BASE_URL                 Default: http://localhost:40003/api/v1
+  CASEAGENT_FRONTEND_URL             Default: http://localhost:40002
+  CASEAGENT_TENANT_SLUG              Default: demo-caseagent
+  CASEAGENT_DEMO_RUN_TOKEN           Default: demo-<timestamp>-<random>
+  CASEAGENT_DEMO_*_FIXTURE           Override fixed markdown fixtures.
+  CASEAGENT_DEMO_PRODUCT_NAME        Default: CaseAgent Cloud
+  CASEAGENT_DEMO_MODULE_NAME         Default: 控制平面
+EOF
 }
 
 post_json() {
@@ -84,6 +139,43 @@ get_json() {
     curl --fail --silent --show-error --noproxy '*' \
         -H "X-Tenant-ID: $TENANT_SLUG" \
         "$BASE_URL$path"
+}
+
+delete_json() {
+    local path="$1"
+
+    curl --fail --silent --show-error --noproxy '*' \
+        -H "X-Tenant-ID: $TENANT_SLUG" \
+        -X DELETE \
+        "$BASE_URL$path"
+}
+
+count_lines() {
+    local text="$1"
+    if [ -z "$text" ]; then
+        printf '0'
+        return
+    fi
+    printf '%s\n' "$text" | sed '/^$/d' | wc -l | tr -d ' '
+}
+
+demo_project_ids() {
+    get_json '/projects' | jq -r --arg prefix "$PROJECT_PREFIX " '
+        .[]
+        | select(
+            ((.name // "") | startswith($prefix)) or
+            ((.description // "") | contains("scripts/demo_bootstrap.sh"))
+          )
+        | .id
+    '
+}
+
+demo_knowledge_ids() {
+    get_json '/knowledge' | jq -r --arg alias "$KNOWLEDGE_ALIAS" '
+        .[]
+        | select(((.metadata.aliases // []) | index($alias)) != null)
+        | .id
+    '
 }
 
 poll_resource_completed() {
@@ -142,7 +234,7 @@ poll_task_status() {
 create_project() {
     local payload
     payload="$(jq -n \
-        --arg name "Demo CaseAgent $RUN_TOKEN" \
+        --arg name "$PROJECT_PREFIX $RUN_TOKEN" \
         --arg description "Created by scripts/demo_bootstrap.sh (run_token=$RUN_TOKEN)" \
         '{name: $name, description: $description}')"
 
@@ -189,13 +281,14 @@ upload_knowledge() {
         --arg type "$knowledge_type" \
         --arg name "$knowledge_name" \
         --arg run_token "$RUN_TOKEN" \
+        --arg alias "$KNOWLEDGE_ALIAS" \
         --rawfile content "$fixture" \
         '{
             type: $type,
             name: $name,
             content: $content,
             metadata: {
-                aliases: ["CaseAgent demo fixture"],
+                aliases: [$alias],
                 run_token: $run_token
             }
         }')"
@@ -276,7 +369,10 @@ assert_demo_ready() {
     fi
 
     printf '\nDemo ready\n'
+    printf -- '- action: `%s`\n' "$ACTION"
+    printf -- '- api_url: `%s`\n' "$BASE_URL"
     printf -- '- tenant_slug: `%s`\n' "$TENANT_SLUG"
+    printf -- '- run_token: `%s`\n' "$RUN_TOKEN"
     printf -- '- project_id: `%s`\n' "$PROJECT_ID"
     printf -- '- document_id: `%s`\n' "$DOCUMENT_ID"
     printf -- '- product_knowledge_id: `%s`\n' "$PRODUCT_KNOWLEDGE_ID"
@@ -290,9 +386,42 @@ assert_demo_ready() {
     printf -- '- local_storage_hint: `localStorage.setItem("caseagent.tenant_slug", "%s")`\n' "$TENANT_SLUG"
 }
 
-main() {
-    require_command curl
-    require_command jq
+reset_demo() {
+    log "resetting demo data in tenant=$TENANT_SLUG"
+    ensure_tenant "$TENANT_SLUG" "CaseAgent Demo"
+
+    local project_ids knowledge_ids deleted_projects deleted_knowledge
+    project_ids="$(demo_project_ids)"
+    knowledge_ids="$(demo_knowledge_ids)"
+    deleted_projects=0
+    deleted_knowledge=0
+
+    while IFS= read -r project_id; do
+        [ -z "$project_id" ] && continue
+        log "deleting demo project $project_id"
+        delete_json "/projects/$project_id" >/dev/null
+        deleted_projects=$((deleted_projects + 1))
+    done <<<"$project_ids"
+
+    while IFS= read -r knowledge_id; do
+        [ -z "$knowledge_id" ] && continue
+        log "deleting demo knowledge $knowledge_id"
+        delete_json "/knowledge/$knowledge_id" >/dev/null
+        deleted_knowledge=$((deleted_knowledge + 1))
+    done <<<"$knowledge_ids"
+
+    printf '\nDemo reset complete\n'
+    printf -- '- action: `reset`\n'
+    printf -- '- api_url: `%s`\n' "$BASE_URL"
+    printf -- '- tenant_slug: `%s`\n' "$TENANT_SLUG"
+    printf -- '- matched_projects: `%s`\n' "$(count_lines "$project_ids")"
+    printf -- '- matched_knowledge: `%s`\n' "$(count_lines "$knowledge_ids")"
+    printf -- '- deleted_projects: `%s`\n' "$deleted_projects"
+    printf -- '- deleted_knowledge: `%s`\n' "$deleted_knowledge"
+    printf -- '- cleanup_scope: `projects/documents/tasks/test_cases via API cascade; demo knowledge via API`\n'
+}
+
+bootstrap_demo() {
     require_file "$REQUIREMENT_FIXTURE"
     require_file "$PRODUCT_KNOWLEDGE_FIXTURE"
     require_file "$MODULE_KNOWLEDGE_FIXTURE"
@@ -307,6 +436,31 @@ main() {
     review_task_scope
     generate_cases
     assert_demo_ready
+}
+
+main() {
+    require_command curl
+    require_command jq
+
+    case "$ACTION" in
+        bootstrap | "")
+            bootstrap_demo
+            ;;
+        reset)
+            reset_demo
+            ;;
+        fresh)
+            reset_demo
+            bootstrap_demo
+            ;;
+        -h | --help | help)
+            usage
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
 }
 
 main "$@"
