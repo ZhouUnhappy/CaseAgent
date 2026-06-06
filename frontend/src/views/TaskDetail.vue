@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
-import { Check, Download, EditPen, Refresh, View } from '@element-plus/icons-vue'
+import { ChatDotRound, Check, Download, EditPen, Refresh, View, Warning } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
 import { getTaskTrace } from '../api/tasks'
@@ -24,7 +24,12 @@ const knowledgeStore = useKnowledgeStore()
 const suggestionStore = useKnowledgeSuggestionsStore()
 
 const { current: task } = storeToRefs(tasksStore)
-const { items: cases, loading: casesLoading, saving: casesSaving } = storeToRefs(casesStore)
+const {
+  items: cases,
+  loading: casesLoading,
+  saving: casesSaving,
+  feedbackSaving,
+} = storeToRefs(casesStore)
 const { items: knowledge } = storeToRefs(knowledgeStore)
 
 const reviewForm = reactive({ products: [], modules: [] })
@@ -40,6 +45,14 @@ const editorVisible = ref(false)
 const editorBuffer = ref('')
 const provenanceVisible = ref(false)
 const provenanceCase = ref(null)
+const qualityFeedbackVisible = ref(false)
+const qualityFeedbackForm = reactive({
+  test_case_id: 0,
+  case_index: 0,
+  case_title: '',
+  feedback_type: 'useful',
+  note: '',
+})
 const feedbackVisible = ref(false)
 const feedbackForm = reactive({
   candidate_type: 'module',
@@ -49,6 +62,13 @@ const feedbackForm = reactive({
   source_case_title: '',
   note: '',
 })
+const qualityFeedbackOptions = [
+  { value: 'useful', label: '有用' },
+  { value: 'duplicate', label: '重复' },
+  { value: 'missing_steps', label: '缺步骤' },
+  { value: 'requirement_mismatch', label: '不符合需求' },
+  { value: 'knowledge_missing', label: '知识缺失' },
+]
 
 const productOptions = computed(() =>
   knowledge.value.filter((k) => k.type === 'product').map((k) => k.name),
@@ -137,6 +157,7 @@ const traceSummary = computed(() => {
     modelCalls: value.model_calls?.length || 0,
     retrievals: value.retrieval_runs?.length || 0,
     artifacts: value.artifacts?.length || 0,
+    feedback: feedbackCountTotal(value.feedback_summary),
     lastError: latestTraceError(value),
   }
 })
@@ -153,7 +174,8 @@ const hasTraceData = computed(() =>
       traceSummary.value.agents ||
       traceSummary.value.modelCalls ||
       traceSummary.value.retrievals ||
-      traceSummary.value.artifacts,
+      traceSummary.value.artifacts ||
+      traceSummary.value.feedback,
   ),
 )
 const traceCostSummary = computed(() => {
@@ -361,6 +383,19 @@ function findCaseProvenance(section, row, index) {
   )
 }
 
+function feedbackTypeLabel(type) {
+  return qualityFeedbackOptions.find((item) => item.value === type)?.label || type || '-'
+}
+
+function feedbackCountTotal(counts) {
+  if (!counts) return 0
+  return Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0)
+}
+
+function caseFeedbackCount(section, row, index) {
+  return feedbackCountTotal(findCaseProvenance(section, row, index)?.feedback_counts)
+}
+
 function openCaseProvenance(section, row, index) {
   const match = findCaseProvenance(section, row, index)
   provenanceCase.value = match || {
@@ -375,6 +410,8 @@ function openCaseProvenance(section, row, index) {
     knowledge_hits: section.source_context?.knowledge_hits || [],
     agent_runs: section.source_context?.agent_runs || [],
     model_calls: section.source_context?.model_calls || [],
+    feedback: [],
+    feedback_counts: {},
   }
   provenanceVisible.value = true
 }
@@ -387,6 +424,10 @@ function provenanceArray(key) {
 function provenanceModelCalls() {
   const calls = provenanceArray('model_calls')
   return calls.length ? calls : traceModelCalls.value
+}
+
+function provenanceFeedbackRows() {
+  return Array.isArray(provenanceCase.value?.feedback) ? provenanceCase.value.feedback : []
 }
 
 function provenanceAgentRuns() {
@@ -461,6 +502,32 @@ async function submitSection(section) {
   try {
     await casesStore.submit(taskId.value, section.id)
     notifySuccess('已提交')
+  } catch {
+    /* 错误已弹窗 */
+  }
+}
+
+function openQualityFeedback(section, row, index) {
+  Object.assign(qualityFeedbackForm, {
+    test_case_id: section.id,
+    case_index: index,
+    case_title: row.title || section.section || '',
+    feedback_type: 'useful',
+    note: '',
+  })
+  qualityFeedbackVisible.value = true
+}
+
+async function submitQualityFeedback() {
+  try {
+    await casesStore.feedback(taskId.value, qualityFeedbackForm.test_case_id, {
+      case_index: qualityFeedbackForm.case_index,
+      feedback_type: qualityFeedbackForm.feedback_type,
+      note: qualityFeedbackForm.note.trim(),
+    })
+    qualityFeedbackVisible.value = false
+    notifySuccess('用例质量反馈已提交')
+    loadTrace().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -702,11 +769,27 @@ async function submitKnowledgeFeedback() {
                 >调试</el-button>
               </template>
             </el-table-column>
-            <el-table-column label="反馈" width="120" align="center">
-              <template #default="{ row }">
-                <el-button size="small" @click="openKnowledgeFeedback(section, row)">
-                  知识缺失
-                </el-button>
+            <el-table-column label="反馈" width="190" align="center">
+              <template #default="{ row, $index }">
+                <div class="case-feedback-actions">
+                  <el-button
+                    size="small"
+                    :icon="ChatDotRound"
+                    @click="openQualityFeedback(section, row, $index)"
+                  >
+                    质量
+                    <span v-if="caseFeedbackCount(section, row, $index)">
+                      ({{ caseFeedbackCount(section, row, $index) }})
+                    </span>
+                  </el-button>
+                  <el-button
+                    size="small"
+                    :icon="Warning"
+                    @click="openKnowledgeFeedback(section, row)"
+                  >
+                    知识
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -740,6 +823,9 @@ async function submitKnowledgeFeedback() {
         <el-tag size="small" type="info">{{ traceSummary.agents }} agents</el-tag>
         <el-tag size="small" type="info">{{ traceSummary.modelCalls }} model calls</el-tag>
         <el-tag size="small" type="success">{{ traceCostSummary.tokens }} tokens</el-tag>
+        <el-tag v-if="traceSummary.feedback" size="small" type="warning">
+          {{ traceSummary.feedback }} feedback
+        </el-tag>
         <el-tag v-if="traceCostSummary.fallbacks" size="small" type="warning">
           {{ traceCostSummary.fallbacks }} fallback
         </el-tag>
@@ -893,6 +979,29 @@ async function submitKnowledgeFeedback() {
           <el-tag size="small" type="info">{{ provenanceCase.section }}</el-tag>
           <el-tag size="small">case #{{ provenanceCase.case_index + 1 }}</el-tag>
           <el-tag size="small" type="success">{{ provenanceTokenTotal() }} tokens</el-tag>
+          <el-tag
+            v-for="(count, type) in provenanceCase.feedback_counts || {}"
+            :key="type"
+            size="small"
+            type="warning"
+          >
+            {{ feedbackTypeLabel(type) }} {{ count }}
+          </el-tag>
+        </div>
+
+        <div v-if="provenanceFeedbackRows().length" class="provenance-block">
+          <h3>Feedback</h3>
+          <div
+            v-for="item in provenanceFeedbackRows()"
+            :key="item.id"
+            class="trace-row"
+          >
+            <div class="trace-row-main">
+              <span class="trace-title">{{ feedbackTypeLabel(item.feedback_type) }}</span>
+              <span class="muted small">{{ formatDate(item.created_at) }}</span>
+            </div>
+            <p v-if="item.note" class="trace-snippet">{{ item.note }}</p>
+          </div>
         </div>
 
         <div class="provenance-block">
@@ -1012,6 +1121,47 @@ async function submitKnowledgeFeedback() {
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="casesSaving" @click="saveEditor">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="qualityFeedbackVisible"
+      title="用例质量反馈"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="用例">
+          <el-input v-model="qualityFeedbackForm.case_title" disabled />
+        </el-form-item>
+        <el-form-item label="反馈类型">
+          <el-radio-group v-model="qualityFeedbackForm.feedback_type" class="feedback-type-group">
+            <el-radio
+              v-for="option in qualityFeedbackOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="qualityFeedbackForm.note"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="qualityFeedbackVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="feedbackSaving"
+          @click="submitQualityFeedback"
+        >提交</el-button>
       </template>
     </el-dialog>
 
@@ -1258,6 +1408,19 @@ async function submitKnowledgeFeedback() {
 }
 .chip {
   margin-right: 4px;
+}
+.case-feedback-actions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.case-feedback-actions :deep(.el-button) {
+  margin-left: 0;
+}
+.feedback-type-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
 }
 .source-ctx {
   margin-top: 12px;

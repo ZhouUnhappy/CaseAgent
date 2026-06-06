@@ -8,6 +8,7 @@ var models = []interface{}{
 	&DocumentChunk{},
 	&KnowledgeBase{},
 	&TestCase{},
+	&TestCaseFeedback{},
 	&CaseGenerationTask{},
 	&BackgroundJob{},
 	&WorkflowRun{},

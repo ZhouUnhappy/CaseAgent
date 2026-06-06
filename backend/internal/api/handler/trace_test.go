@@ -53,8 +53,27 @@ func TestBuildCaseProvenanceViewsLinksCasesToTraceRows(t *testing.T) {
 			},
 		},
 	}
+	feedbackRows := []models.TestCaseFeedback{
+		{
+			ID:            701,
+			TestCaseID:    10,
+			CaseIndex:     0,
+			CaseTitle:     "验证创建成功",
+			FeedbackType:  models.CaseFeedbackUseful,
+			Note:          "可以作为冒烟用例",
+			PromptID:      "functional_cases",
+			PromptVersion: "v1",
+		},
+		{
+			ID:           702,
+			TestCaseID:   10,
+			CaseIndex:    0,
+			CaseTitle:    "验证创建成功",
+			FeedbackType: models.CaseFeedbackDuplicate,
+		},
+	}
 
-	views := buildCaseProvenanceViews(testCases, agentRuns, modelCalls)
+	views := buildCaseProvenanceViews(testCases, agentRuns, modelCalls, feedbackRows)
 	if len(views) != 1 {
 		t.Fatalf("views = %#v, want one row", views)
 	}
@@ -70,5 +89,15 @@ func TestBuildCaseProvenanceViewsLinksCasesToTraceRows(t *testing.T) {
 	}
 	if view.DocumentQueries == nil || view.KnowledgeHits == nil {
 		t.Fatalf("expected retrieval provenance in view: %#v", view)
+	}
+	if len(view.Feedback) != 2 {
+		t.Fatalf("expected feedback rows in provenance: %#v", view.Feedback)
+	}
+	if view.FeedbackCounts[models.CaseFeedbackUseful] != 1 ||
+		view.FeedbackCounts[models.CaseFeedbackDuplicate] != 1 {
+		t.Fatalf("unexpected feedback counts: %#v", view.FeedbackCounts)
+	}
+	if got := feedbackCounts(feedbackRows); got[models.CaseFeedbackUseful] != 1 || got[models.CaseFeedbackDuplicate] != 1 {
+		t.Fatalf("unexpected task feedback summary: %#v", got)
 	}
 }

@@ -49,6 +49,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 
 		biz.GET("/tasks/:id", h.GetTask)
 		biz.GET("/tasks/:id/trace", h.GetTaskTrace)
+		biz.GET("/tasks/:id/feedback", h.ListTaskFeedback)
 		biz.PUT("/tasks/:id/review", h.ReviewAffected)
 		biz.PUT("/tasks/:id/generate", h.GenerateCases)
 		biz.POST("/tasks/:id/retry", h.RetryTask)
@@ -91,6 +92,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 			cases.GET("", h.ListTestCases)
 			cases.PUT("/:case_id", h.UpdateTestCase)
 			cases.PUT("/:case_id/submit", h.SubmitTestCase)
+			cases.POST("/:case_id/feedback", h.CreateCaseFeedback)
 		}
 	}
 

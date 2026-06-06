@@ -59,6 +59,7 @@ func TestLoadSchemaSQL(t *testing.T) {
 		"model_calls",
 		"retrieval_runs",
 		"artifacts",
+		"test_case_feedback",
 	} {
 		if !strings.Contains(schema, "CREATE TABLE IF NOT EXISTS "+table) {
 			t.Fatalf("expected %s table definition in schema, got: %s", table, schema)

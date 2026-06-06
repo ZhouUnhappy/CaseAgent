@@ -41,6 +41,8 @@ func TestRLSIsolation(t *testing.T) {
 	t.Cleanup(func() { cleanupTestTenants(ctx, bunDB, tenantA, tenantB) })
 
 	var taskID int
+	var testCaseID int
+	var modelCallID int
 	mustTx(t, ctx, bunDB, tenantA, func(ctx context.Context, tx bun.Tx) error {
 		project := &models.Project{TenantID: tenantA, Name: "rls-test-a"}
 		if _, err := tx.NewInsert().Model(project).Returning("id").Exec(ctx); err != nil {
@@ -92,6 +94,25 @@ func TestRLSIsolation(t *testing.T) {
 		}
 		taskID = task.ID
 
+		testCase := &models.TestCase{
+			TenantID: tenantA,
+			TaskID:   taskID,
+			Section:  "rls-section",
+			Cases: []map[string]any{
+				{"title": "rls generated case"},
+			},
+			Status: models.TestCaseStatusDraft,
+			SourceContext: map[string]any{
+				"model_calls": []map[string]any{
+					{"id": 0, "status": models.WorkflowStatusSucceeded, "prompt_id": "rls_prompt", "prompt_version": "v1"},
+				},
+			},
+		}
+		if _, err := tx.NewInsert().Model(testCase).Returning("id").Exec(ctx); err != nil {
+			return err
+		}
+		testCaseID = testCase.ID
+
 		if _, err := tx.NewInsert().Model(&models.BackgroundJob{
 			TenantID:   tenantA,
 			TaskID:     intPointer(taskID),
@@ -102,12 +123,46 @@ func TestRLSIsolation(t *testing.T) {
 			return err
 		}
 
-		_, err := tx.NewInsert().Model(&models.WorkflowRun{
+		workflowRun := &models.WorkflowRun{
 			TenantID:     tenantA,
 			WorkflowType: models.JobTypeGenerate,
 			ResourceType: "task",
 			ResourceID:   taskID,
 			Status:       models.WorkflowStatusRunning,
+		}
+		if _, err := tx.NewInsert().Model(workflowRun).Returning("id").Exec(ctx); err != nil {
+			return err
+		}
+		modelCall := &models.ModelCall{
+			TenantID:      tenantA,
+			WorkflowRunID: intPointer(workflowRun.ID),
+			Provider:      "fake",
+			Model:         "valid_json",
+			Status:        models.WorkflowStatusSucceeded,
+			PromptChars:   120,
+			ResponseChars: 240,
+			Metadata: map[string]any{
+				"prompt_id":      "rls_prompt",
+				"prompt_version": "v1",
+			},
+		}
+		if _, err := tx.NewInsert().Model(modelCall).Returning("id").Exec(ctx); err != nil {
+			return err
+		}
+		modelCallID = modelCall.ID
+
+		_, err := tx.NewInsert().Model(&models.TestCaseFeedback{
+			TenantID:             tenantA,
+			TaskID:               taskID,
+			TestCaseID:           testCaseID,
+			CaseIndex:            0,
+			CaseTitle:            "rls generated case",
+			FeedbackType:         models.CaseFeedbackUseful,
+			Note:                 "visible to tenant A only",
+			SourceContextSummary: map[string]any{"model_call_count": 1},
+			PromptID:             "rls_prompt",
+			PromptVersion:        "v1",
+			ModelCallID:          intPointer(modelCallID),
 		}).Exec(ctx)
 		return err
 	})
@@ -158,6 +213,15 @@ func TestRLSIsolation(t *testing.T) {
 		t.Fatalf("tenant B saw %d workflow runs under RLS; expected 0", count)
 	}
 
+	mustTx(t, ctx, bunDB, tenantB, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*models.TestCaseFeedback)(nil)).Count(ctx)
+		return err
+	})
+	if count != 0 {
+		t.Fatalf("tenant B saw %d case feedback rows under RLS; expected 0", count)
+	}
+
 	crossErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewInsert().Model(&models.Project{TenantID: tenantA, Name: "should-fail"}).Exec(ctx)
 		return err
@@ -192,6 +256,22 @@ func TestRLSIsolation(t *testing.T) {
 	})
 	if crossWorkflowErr == nil {
 		t.Fatal("cross-tenant workflow INSERT succeeded; WITH CHECK should have blocked it")
+	}
+
+	crossFeedbackErr := db.RunInTenantTx(db.WithTenant(ctx, tenantB), bunDB, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(&models.TestCaseFeedback{
+			TenantID:             tenantA,
+			TaskID:               taskID,
+			TestCaseID:           testCaseID,
+			CaseIndex:            0,
+			FeedbackType:         models.CaseFeedbackDuplicate,
+			SourceContextSummary: map[string]any{},
+			ModelCallID:          intPointer(modelCallID),
+		}).Exec(ctx)
+		return err
+	})
+	if crossFeedbackErr == nil {
+		t.Fatal("cross-tenant feedback INSERT succeeded; WITH CHECK should have blocked it")
 	}
 }
 

@@ -46,6 +46,7 @@ func Init(ctx context.Context) error {
 		&models.DocumentChunk{},
 		&models.KnowledgeBase{},
 		&models.TestCase{},
+		&models.TestCaseFeedback{},
 		&models.CaseGenerationTask{},
 		&models.BackgroundJob{},
 		&models.WorkflowRun{},

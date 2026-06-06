@@ -3,6 +3,7 @@ import {
   listTestCases,
   updateTestCase,
   submitTestCase,
+  createCaseFeedback,
 } from '../api/testcases'
 
 export const useTestCasesStore = defineStore('testcases', {
@@ -10,6 +11,7 @@ export const useTestCasesStore = defineStore('testcases', {
     items: [],
     loading: false,
     saving: false,
+    feedbackSaving: false,
   }),
   actions: {
     async fetch(taskId) {
@@ -35,10 +37,19 @@ export const useTestCasesStore = defineStore('testcases', {
       this.replace(updated)
       return updated
     },
+    async feedback(taskId, caseId, payload) {
+      this.feedbackSaving = true
+      try {
+        return await createCaseFeedback(taskId, caseId, payload)
+      } finally {
+        this.feedbackSaving = false
+      }
+    },
     clear() {
       this.items = []
       this.loading = false
       this.saving = false
+      this.feedbackSaving = false
     },
     replace(updated) {
       const idx = this.items.findIndex((c) => c.id === updated.id)

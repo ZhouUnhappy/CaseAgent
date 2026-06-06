@@ -10,27 +10,31 @@ import (
 )
 
 type taskTraceView struct {
-	WorkflowRuns   []models.WorkflowRun  `json:"workflow_runs"`
-	Steps          []models.WorkflowStep `json:"steps"`
-	AgentRuns      []models.AgentRun     `json:"agent_runs"`
-	ModelCalls     []models.ModelCall    `json:"model_calls"`
-	RetrievalRuns  []models.RetrievalRun `json:"retrieval_runs"`
-	Artifacts      []models.Artifact     `json:"artifacts"`
-	CaseProvenance []caseProvenanceView  `json:"case_provenance"`
+	WorkflowRuns    []models.WorkflowRun      `json:"workflow_runs"`
+	Steps           []models.WorkflowStep     `json:"steps"`
+	AgentRuns       []models.AgentRun         `json:"agent_runs"`
+	ModelCalls      []models.ModelCall        `json:"model_calls"`
+	RetrievalRuns   []models.RetrievalRun     `json:"retrieval_runs"`
+	Artifacts       []models.Artifact         `json:"artifacts"`
+	CaseProvenance  []caseProvenanceView      `json:"case_provenance"`
+	Feedback        []models.TestCaseFeedback `json:"feedback"`
+	FeedbackSummary map[string]int            `json:"feedback_summary"`
 }
 
 type caseProvenanceView struct {
-	TestCaseID       int                   `json:"test_case_id"`
-	Section          string                `json:"section"`
-	CaseIndex        int                   `json:"case_index"`
-	CaseTitle        string                `json:"case_title"`
-	SourceContext    map[string]any        `json:"source_context,omitempty"`
-	DocumentQueries  any                   `json:"document_queries,omitempty"`
-	KnowledgeQueries any                   `json:"knowledge_queries,omitempty"`
-	DocumentHits     any                   `json:"document_hits,omitempty"`
-	KnowledgeHits    any                   `json:"knowledge_hits,omitempty"`
-	AgentRuns        []agentRunProvenance  `json:"agent_runs"`
-	ModelCalls       []modelCallProvenance `json:"model_calls"`
+	TestCaseID       int                       `json:"test_case_id"`
+	Section          string                    `json:"section"`
+	CaseIndex        int                       `json:"case_index"`
+	CaseTitle        string                    `json:"case_title"`
+	SourceContext    map[string]any            `json:"source_context,omitempty"`
+	DocumentQueries  any                       `json:"document_queries,omitempty"`
+	KnowledgeQueries any                       `json:"knowledge_queries,omitempty"`
+	DocumentHits     any                       `json:"document_hits,omitempty"`
+	KnowledgeHits    any                       `json:"knowledge_hits,omitempty"`
+	AgentRuns        []agentRunProvenance      `json:"agent_runs"`
+	ModelCalls       []modelCallProvenance     `json:"model_calls"`
+	Feedback         []models.TestCaseFeedback `json:"feedback,omitempty"`
+	FeedbackCounts   map[string]int            `json:"feedback_counts,omitempty"`
 }
 
 type agentRunProvenance struct {
@@ -158,7 +162,15 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 		Scan(c); err != nil {
 		return err
 	}
-	view.CaseProvenance = buildCaseProvenanceViews(testCases, view.AgentRuns, view.ModelCalls)
+	if err := db.NewSelect().
+		Model(&view.Feedback).
+		Where("task_id = ?", taskID).
+		Order("created_at DESC", "id DESC").
+		Scan(c); err != nil {
+		return err
+	}
+	view.FeedbackSummary = feedbackCounts(view.Feedback)
+	view.CaseProvenance = buildCaseProvenanceViews(testCases, view.AgentRuns, view.ModelCalls, view.Feedback)
 	return nil
 }
 
@@ -167,13 +179,15 @@ func newTaskTraceView(runs []models.WorkflowRun) taskTraceView {
 		runs = []models.WorkflowRun{}
 	}
 	return taskTraceView{
-		WorkflowRuns:   runs,
-		Steps:          []models.WorkflowStep{},
-		AgentRuns:      []models.AgentRun{},
-		ModelCalls:     []models.ModelCall{},
-		RetrievalRuns:  []models.RetrievalRun{},
-		Artifacts:      []models.Artifact{},
-		CaseProvenance: []caseProvenanceView{},
+		WorkflowRuns:    runs,
+		Steps:           []models.WorkflowStep{},
+		AgentRuns:       []models.AgentRun{},
+		ModelCalls:      []models.ModelCall{},
+		RetrievalRuns:   []models.RetrievalRun{},
+		Artifacts:       []models.Artifact{},
+		CaseProvenance:  []caseProvenanceView{},
+		Feedback:        []models.TestCaseFeedback{},
+		FeedbackSummary: map[string]int{},
 	}
 }
 
@@ -193,7 +207,7 @@ func agentRunIDs(runs []models.AgentRun) []int {
 	return ids
 }
 
-func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.AgentRun, modelCalls []models.ModelCall) []caseProvenanceView {
+func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.AgentRun, modelCalls []models.ModelCall, feedbackRows []models.TestCaseFeedback) []caseProvenanceView {
 	agentByID := make(map[int]models.AgentRun, len(agentRuns))
 	for _, agent := range agentRuns {
 		agentByID[agent.ID] = agent
@@ -202,6 +216,7 @@ func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.Ag
 	for _, call := range modelCalls {
 		modelByID[call.ID] = call
 	}
+	feedbackByCase := groupFeedbackByCase(feedbackRows)
 
 	rows := make([]caseProvenanceView, 0)
 	for _, section := range testCases {
@@ -219,6 +234,7 @@ func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.Ag
 			}
 		}
 		for idx, item := range section.Cases {
+			caseFeedback := feedbackByCase[caseFeedbackKey{TestCaseID: section.ID, CaseIndex: idx}]
 			rows = append(rows, caseProvenanceView{
 				TestCaseID:       section.ID,
 				Section:          section.Section,
@@ -231,10 +247,37 @@ func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.Ag
 				KnowledgeHits:    sourceValue(source, "knowledge_hits"),
 				AgentRuns:        agentProvenance(agentIDs, agentByID),
 				ModelCalls:       modelProvenance(modelIDs, modelByID),
+				Feedback:         caseFeedback,
+				FeedbackCounts:   feedbackCounts(caseFeedback),
 			})
 		}
 	}
 	return rows
+}
+
+type caseFeedbackKey struct {
+	TestCaseID int
+	CaseIndex  int
+}
+
+func groupFeedbackByCase(rows []models.TestCaseFeedback) map[caseFeedbackKey][]models.TestCaseFeedback {
+	grouped := make(map[caseFeedbackKey][]models.TestCaseFeedback)
+	for _, row := range rows {
+		key := caseFeedbackKey{TestCaseID: row.TestCaseID, CaseIndex: row.CaseIndex}
+		grouped[key] = append(grouped[key], row)
+	}
+	return grouped
+}
+
+func feedbackCounts(rows []models.TestCaseFeedback) map[string]int {
+	counts := map[string]int{}
+	for _, row := range rows {
+		if row.FeedbackType == "" {
+			continue
+		}
+		counts[row.FeedbackType]++
+	}
+	return counts
 }
 
 func agentProvenance(ids []int, agentByID map[int]models.AgentRun) []agentRunProvenance {
