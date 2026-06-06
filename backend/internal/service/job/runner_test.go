@@ -88,6 +88,38 @@ func TestRunOneExhaustsRetriesAndCallsFailureHandler(t *testing.T) {
 	}
 }
 
+func TestRunOneDoesNotRetryNonRetryableError(t *testing.T) {
+	store := newFakeStore([]int{7}, []*models.BackgroundJob{
+		{
+			ID:         21,
+			TenantID:   7,
+			TaskID:     testID(201),
+			JobType:    models.JobTypeGenerate,
+			Status:     models.JobStatusPending,
+			MaxRetries: 2,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+	})
+	executor := &scriptedExecutor{failuresLeft: 10, err: nonRetryableTestError{err: errors.New("budget exhausted")}}
+	runner := NewRunner(store, executor, Options{RetryBackoff: 0})
+
+	ran, err := runner.RunOne(context.Background())
+	if err != nil || !ran {
+		t.Fatalf("RunOne ran=%v err=%v", ran, err)
+	}
+
+	job := store.job(21)
+	if job.Status != models.JobStatusFailed {
+		t.Fatalf("job status = %q, want failed", job.Status)
+	}
+	if job.RetryCount != 0 {
+		t.Fatalf("retry_count = %d, want no retry", job.RetryCount)
+	}
+	if got := executor.failureTenantIDs(); len(got) != 1 || got[0] != 7 {
+		t.Fatalf("failure handler tenant ids = %#v", got)
+	}
+}
+
 func TestRunOneRecordsWorkflowAndPropagatesRunID(t *testing.T) {
 	store := newFakeStore([]int{3}, []*models.BackgroundJob{
 		{
@@ -188,6 +220,63 @@ func TestStartHonorsMaxConcurrency(t *testing.T) {
 	}
 	if got := store.runningCount(); got != 2 {
 		t.Fatalf("running jobs = %d, want 2", got)
+	}
+
+	cancel()
+	executor.releaseAll()
+}
+
+func TestStartHonorsTenantMaxConcurrency(t *testing.T) {
+	jobs := []*models.BackgroundJob{
+		{
+			ID:         1,
+			TenantID:   1,
+			TaskID:     testID(1),
+			JobType:    models.JobTypeGenerate,
+			Status:     models.JobStatusPending,
+			MaxRetries: 0,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+		{
+			ID:         2,
+			TenantID:   1,
+			TaskID:     testID(2),
+			JobType:    models.JobTypeGenerate,
+			Status:     models.JobStatusPending,
+			MaxRetries: 0,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+		{
+			ID:         3,
+			TenantID:   2,
+			TaskID:     testID(3),
+			JobType:    models.JobTypeGenerate,
+			Status:     models.JobStatusPending,
+			MaxRetries: 0,
+			RunAfter:   time.Now().Add(-time.Second),
+		},
+	}
+	store := newFakeStore([]int{1, 2}, jobs)
+	executor := newBlockingExecutor()
+	runner := NewRunner(store, executor, Options{
+		MaxConcurrency:       3,
+		TenantMaxConcurrency: 1,
+		PollInterval:         10 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	executor.waitStarted(t, 2)
+	time.Sleep(30 * time.Millisecond)
+	if got := executor.maxActive(); got > 2 {
+		t.Fatalf("max active executions = %d, want <= 2 with tenant cap", got)
+	}
+	if got := store.runningCountByTenant(1); got != 1 {
+		t.Fatalf("tenant 1 running jobs = %d, want 1", got)
+	}
+	if got := store.runningCountByTenant(2); got != 1 {
+		t.Fatalf("tenant 2 running jobs = %d, want 1", got)
 	}
 
 	cancel()
@@ -454,6 +543,18 @@ func (s *fakeStore) runningCountByType(jobType string) int {
 	return count
 }
 
+func (s *fakeStore) runningCountByTenant(tenantID int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, job := range s.jobs {
+		if job.TenantID == tenantID && job.Status == models.JobStatusRunning {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *fakeStore) recoverCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -591,4 +692,20 @@ func (e *blockingExecutor) releaseAll() {
 	e.releaseMu.Do(func() {
 		close(e.release)
 	})
+}
+
+type nonRetryableTestError struct {
+	err error
+}
+
+func (e nonRetryableTestError) Error() string {
+	return e.err.Error()
+}
+
+func (e nonRetryableTestError) Unwrap() error {
+	return e.err
+}
+
+func (e nonRetryableTestError) NonRetryable() bool {
+	return true
 }

@@ -83,6 +83,10 @@ func (e *GenerationFailureError) Unwrap() error {
 	return e.Err
 }
 
+func (e *GenerationFailureError) NonRetryable() bool {
+	return e != nil && agentservice.IsTerminalGuardrailError(e.Err)
+}
+
 func generationFailure(stage string, format string, args ...any) error {
 	return &GenerationFailureError{
 		Stage: stage,

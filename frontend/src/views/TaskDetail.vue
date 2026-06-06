@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
-import { Check, Download, EditPen, Refresh } from '@element-plus/icons-vue'
+import { Check, Download, EditPen, Refresh, View } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
 import { getTaskTrace } from '../api/tasks'
@@ -38,6 +38,8 @@ const traceLoading = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
+const provenanceVisible = ref(false)
+const provenanceCase = ref(null)
 const feedbackVisible = ref(false)
 const feedbackForm = reactive({
   candidate_type: 'module',
@@ -143,6 +145,7 @@ const traceAgents = computed(() => trace.value?.agent_runs || [])
 const traceModelCalls = computed(() => trace.value?.model_calls || [])
 const traceRetrievals = computed(() => trace.value?.retrieval_runs || [])
 const traceArtifacts = computed(() => trace.value?.artifacts || [])
+const traceCaseProvenance = computed(() => trace.value?.case_provenance || [])
 const hasTraceData = computed(() =>
   Boolean(
     traceSummary.value.workflows ||
@@ -153,6 +156,15 @@ const hasTraceData = computed(() =>
       traceSummary.value.artifacts,
   ),
 )
+const traceCostSummary = computed(() => {
+  const calls = traceModelCalls.value
+  return {
+    tokens: calls.reduce((sum, call) => sum + modelCallTokens(call), 0),
+    fallbacks: calls.filter((call) => call.metadata?.provider_role === 'fallback').length,
+    guardrails: calls.filter((call) => call.metadata?.guardrail_event).length,
+    rateLimits: calls.filter((call) => String(call.last_error || '').toLowerCase().includes('rate limit')).length,
+  }
+})
 
 onMounted(async () => {
   await loadTask()
@@ -326,6 +338,64 @@ function artifactLabel(artifact) {
   if (payload.section_count !== undefined) counts.push(`${payload.section_count} sections`)
   if (payload.case_count !== undefined) counts.push(`${payload.case_count} cases`)
   return counts.length ? counts.join(' · ') : artifact.artifact_type
+}
+
+function modelCallTokens(call) {
+  const cost = call.metadata?.cost || {}
+  return Number(cost.total_tokens || cost.estimated_total_tokens || Math.ceil(((call.prompt_chars || 0) + (call.response_chars || 0)) / 4) || 0)
+}
+
+function modelCallSignal(call) {
+  const metadata = call.metadata || {}
+  if (metadata.guardrail_event === 'budget_exceeded') return '预算耗尽'
+  if (metadata.guardrail_event === 'circuit_open') return '熔断短路'
+  if (metadata.provider_role === 'fallback') return 'fallback'
+  if (String(call.last_error || '').toLowerCase().includes('rate limit')) return '限流'
+  return ''
+}
+
+function findCaseProvenance(section, row, index) {
+  return traceCaseProvenance.value.find((item) =>
+    item.test_case_id === section.id &&
+    (item.case_index === index || item.case_title === row.title),
+  )
+}
+
+function openCaseProvenance(section, row, index) {
+  const match = findCaseProvenance(section, row, index)
+  provenanceCase.value = match || {
+    test_case_id: section.id,
+    section: section.section,
+    case_index: index,
+    case_title: row.title || '',
+    source_context: section.source_context || {},
+    document_queries: section.source_context?.document_queries || [],
+    knowledge_queries: section.source_context?.knowledge_queries || [],
+    document_hits: section.source_context?.document_hits || [],
+    knowledge_hits: section.source_context?.knowledge_hits || [],
+    agent_runs: section.source_context?.agent_runs || [],
+    model_calls: section.source_context?.model_calls || [],
+  }
+  provenanceVisible.value = true
+}
+
+function provenanceArray(key) {
+  const value = provenanceCase.value?.[key] ?? provenanceCase.value?.source_context?.[key]
+  return Array.isArray(value) ? value : []
+}
+
+function provenanceModelCalls() {
+  const calls = provenanceArray('model_calls')
+  return calls.length ? calls : traceModelCalls.value
+}
+
+function provenanceAgentRuns() {
+  const runs = provenanceArray('agent_runs')
+  return runs.length ? runs : traceAgents.value
+}
+
+function provenanceTokenTotal() {
+  return provenanceModelCalls().reduce((sum, call) => sum + modelCallTokens(call), 0)
 }
 
 function priorityLabel(id) {
@@ -623,6 +693,15 @@ async function submitKnowledgeFeedback() {
             <el-table-column label="步骤数" width="90">
               <template #default="{ row }">{{ (row.custom_steps_separated || []).length }}</template>
             </el-table-column>
+            <el-table-column label="依据" width="110" align="center">
+              <template #default="{ row, $index }">
+                <el-button
+                  size="small"
+                  :icon="View"
+                  @click="openCaseProvenance(section, row, $index)"
+                >调试</el-button>
+              </template>
+            </el-table-column>
             <el-table-column label="反馈" width="120" align="center">
               <template #default="{ row }">
                 <el-button size="small" @click="openKnowledgeFeedback(section, row)">
@@ -660,6 +739,16 @@ async function submitKnowledgeFeedback() {
         <el-tag size="small" type="info">{{ traceSummary.steps }} steps</el-tag>
         <el-tag size="small" type="info">{{ traceSummary.agents }} agents</el-tag>
         <el-tag size="small" type="info">{{ traceSummary.modelCalls }} model calls</el-tag>
+        <el-tag size="small" type="success">{{ traceCostSummary.tokens }} tokens</el-tag>
+        <el-tag v-if="traceCostSummary.fallbacks" size="small" type="warning">
+          {{ traceCostSummary.fallbacks }} fallback
+        </el-tag>
+        <el-tag v-if="traceCostSummary.guardrails" size="small" type="danger">
+          {{ traceCostSummary.guardrails }} guardrail
+        </el-tag>
+        <el-tag v-if="traceCostSummary.rateLimits" size="small" type="warning">
+          {{ traceCostSummary.rateLimits }} rate limit
+        </el-tag>
         <el-tag size="small" type="info">{{ traceSummary.retrievals }} retrievals</el-tag>
         <el-tag size="small" type="info">{{ traceSummary.artifacts }} artifacts</el-tag>
       </div>
@@ -750,8 +839,11 @@ async function submitKnowledgeFeedback() {
                   </el-tag>
                 </div>
                 <div class="muted small">
-                  {{ call.prompt_chars }} prompt · {{ call.response_chars }} response
+                  {{ call.prompt_chars }} prompt · {{ call.response_chars }} response · {{ modelCallTokens(call) }} tokens
                 </div>
+                <el-tag v-if="modelCallSignal(call)" size="small" type="warning" class="trace-signal">
+                  {{ modelCallSignal(call) }}
+                </el-tag>
                 <p v-if="call.last_error" class="muted danger trace-error">
                   {{ compactTraceText(call.last_error) }}
                 </p>
@@ -790,6 +882,115 @@ async function submitKnowledgeFeedback() {
         </el-collapse-item>
       </el-collapse>
     </el-card>
+
+    <el-dialog
+      v-model="provenanceVisible"
+      :title="`生成依据: ${provenanceCase?.case_title || ''}`"
+      width="860px"
+    >
+      <div v-if="provenanceCase" class="provenance-view">
+        <div class="provenance-tags">
+          <el-tag size="small" type="info">{{ provenanceCase.section }}</el-tag>
+          <el-tag size="small">case #{{ provenanceCase.case_index + 1 }}</el-tag>
+          <el-tag size="small" type="success">{{ provenanceTokenTotal() }} tokens</el-tag>
+        </div>
+
+        <div class="provenance-block">
+          <h3>Queries</h3>
+          <div class="query-list">
+            <el-tag
+              v-for="query in provenanceArray('document_queries')"
+              :key="`doc-${query}`"
+              size="small"
+              type="info"
+            >doc: {{ query }}</el-tag>
+            <el-tag
+              v-for="query in provenanceArray('knowledge_queries')"
+              :key="`kb-${query}`"
+              size="small"
+            >kb: {{ query }}</el-tag>
+          </div>
+        </div>
+
+        <div class="provenance-grid">
+          <div class="provenance-block">
+            <h3>Documents</h3>
+            <div v-for="doc in provenanceArray('document_hits')" :key="`${doc.document_id}-${doc.rank}`" class="trace-row">
+              <div class="trace-row-main">
+                <span class="trace-title">{{ doc.name || `document #${doc.document_id}` }}</span>
+                <el-tag size="small" type="info">rank {{ doc.rank }}</el-tag>
+              </div>
+              <div class="muted small">score {{ doc.best_score ?? '-' }}</div>
+              <p
+                v-for="chunk in doc.top_chunks || []"
+                :key="`${chunk.rank}-${chunk.query}`"
+                class="trace-snippet"
+              >
+                [{{ chunk.rank }} · {{ chunk.score }}] {{ chunk.text }}
+              </p>
+            </div>
+            <el-empty v-if="!provenanceArray('document_hits').length" description="暂无文档命中" />
+          </div>
+
+          <div class="provenance-block">
+            <h3>Knowledge</h3>
+            <div v-for="hit in provenanceArray('knowledge_hits')" :key="`${hit.id}-${hit.rank}`" class="trace-row">
+              <div class="trace-row-main">
+                <span class="trace-title">{{ hit.name || `knowledge #${hit.id}` }}</span>
+                <el-tag size="small">{{ hit.type || 'knowledge' }}</el-tag>
+              </div>
+              <div class="muted small">rank {{ hit.rank }} · score {{ hit.score ?? '-' }}</div>
+              <div class="query-list mini">
+                <el-tag v-for="query in hit.hit_queries || []" :key="query" size="small" type="info">
+                  {{ query }}
+                </el-tag>
+              </div>
+            </div>
+            <el-empty v-if="!provenanceArray('knowledge_hits').length" description="暂无知识命中" />
+          </div>
+        </div>
+
+        <div class="provenance-grid">
+          <div class="provenance-block">
+            <h3>Agents</h3>
+            <div v-for="agent in provenanceAgentRuns()" :key="agent.id" class="trace-row">
+              <div class="trace-row-main">
+                <span class="trace-title">{{ agent.agent || agent.agent_name }}</span>
+                <el-tag size="small" :type="jobStatusType(agent.status)">
+                  {{ traceStatusLabel(agent.status) }}
+                </el-tag>
+              </div>
+              <div class="muted small">{{ agent.stage || agent.attempt || '-' }}</div>
+            </div>
+          </div>
+
+          <div class="provenance-block">
+            <h3>Model Calls</h3>
+            <div v-for="call in provenanceModelCalls()" :key="call.id" class="trace-row">
+              <div class="trace-row-main">
+                <span class="trace-title">{{ call.provider || '-' }} / {{ call.model || '-' }}</span>
+                <el-tag size="small" :type="jobStatusType(call.status)">
+                  {{ traceStatusLabel(call.status) }}
+                </el-tag>
+              </div>
+              <div class="muted small">
+                #{{ call.id }} · {{ call.agent || call.metadata?.agent || '-' }} ·
+                {{ call.prompt_id || call.metadata?.prompt_id || '-' }}@{{ call.prompt_version || call.metadata?.prompt_version || '-' }}
+              </div>
+              <div class="muted small">
+                {{ call.prompt_chars }} prompt · {{ call.response_chars }} response · {{ modelCallTokens(call) }} tokens
+              </div>
+              <el-tag v-if="modelCallSignal(call)" size="small" type="warning" class="trace-signal">
+                {{ modelCallSignal(call) }}
+              </el-tag>
+              <p v-if="call.last_error" class="muted danger trace-error">
+                {{ compactTraceText(call.last_error) }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
 
     <el-dialog
       v-model="editorVisible"
@@ -980,6 +1181,37 @@ async function submitKnowledgeFeedback() {
   margin-bottom: 8px;
   word-break: break-word;
 }
+.trace-signal {
+  margin-top: 6px;
+}
+.provenance-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.provenance-tags,
+.query-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.query-list.mini {
+  margin-top: 6px;
+}
+.provenance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.provenance-block {
+  min-width: 0;
+}
+.provenance-block h3 {
+  margin: 0 0 8px;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
+}
 .job-timeline {
   padding: 4px 0 0;
 }
@@ -1073,6 +1305,9 @@ async function submitKnowledgeFeedback() {
   .trace-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .provenance-grid {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 720px) {
   .task-meta,
@@ -1082,7 +1317,8 @@ async function submitKnowledgeFeedback() {
     flex-direction: column;
   }
   .trace-summary-grid,
-  .trace-layout {
+  .trace-layout,
+  .provenance-grid {
     grid-template-columns: 1fr;
   }
 }

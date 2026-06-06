@@ -64,6 +64,7 @@ type Config struct {
 	TraceRecorder   workflowservice.AgentTraceRecorder
 	ChatProvider    string // Optional, used for model_call trace rows when ChatModel is provided
 	ChatModelName   string // Optional, used for model_call trace rows when ChatModel is provided
+	Guardrails      GuardrailConfig
 	PromptRegistry  *prompts.Registry
 }
 
@@ -115,6 +116,7 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	callTimeout := cfg.ChatCallTimeout
 	provider := strings.TrimSpace(cfg.ChatProvider)
 	modelName := strings.TrimSpace(cfg.ChatModelName)
+	guardrails := cfg.Guardrails
 
 	// If ChatModel is provided, use it; otherwise initialize from config
 	if cfg.ChatModel != nil {
@@ -135,6 +137,10 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		if modelName == "" {
 			modelName = appCfg.Model.Chat.Model
 		}
+		guardrails, err = configuredGuardrails(ctx, appCfg.Model.Chat, guardrails)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if callTimeout == 0 {
 		callTimeout = configuredChatCallTimeout(config.Get())
@@ -143,7 +149,13 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 	if traceRecorder == nil && cfg.TraceDB != nil {
 		traceRecorder = workflowservice.NewRecorder(cfg.TraceDB)
 	}
-	chatModel = traceChatModel(chatModel, traceRecorder, provider, modelName)
+	fallbackModel := guardrails.FallbackChatModel
+	if fallbackModel != nil {
+		fallbackModel = traceChatModel(fallbackModel, traceRecorder, guardrails.FallbackProvider, guardrails.FallbackModelName, "fallback")
+		guardrails.FallbackChatModel = fallbackModel
+	}
+	chatModel = traceChatModel(chatModel, traceRecorder, provider, modelName, "primary")
+	chatModel = guardChatModel(chatModel, traceRecorder, provider, modelName, guardrails)
 	promptRegistry := cfg.PromptRegistry
 	if promptRegistry == nil {
 		promptRegistry = prompts.DefaultRegistry()
@@ -203,6 +215,50 @@ func configuredChatCallTimeout(appCfg *config.Config) time.Duration {
 		return defaultChatCallTimeout
 	}
 	return time.Duration(appCfg.Model.Chat.RequestTimeoutSeconds) * time.Second
+}
+
+func configuredGuardrails(ctx context.Context, chatCfg config.ChatModelConfig, overrides GuardrailConfig) (GuardrailConfig, error) {
+	guardrails := overrides
+	if guardrails.TaskBudgetTokens == 0 {
+		guardrails.TaskBudgetTokens = chatCfg.TaskBudgetTokens
+	}
+	if guardrails.ProviderTimeout == 0 && chatCfg.ProviderTimeoutSeconds > 0 {
+		guardrails.ProviderTimeout = time.Duration(chatCfg.ProviderTimeoutSeconds) * time.Second
+	}
+	if guardrails.FailureThreshold == 0 {
+		guardrails.FailureThreshold = chatCfg.CircuitBreakerFailureThreshold
+	}
+	if guardrails.CircuitOpenCooldown == 0 && chatCfg.CircuitBreakerCooldownSeconds > 0 {
+		guardrails.CircuitOpenCooldown = time.Duration(chatCfg.CircuitBreakerCooldownSeconds) * time.Second
+	}
+	if guardrails.FallbackChatModel != nil || strings.TrimSpace(chatCfg.Fallback.Provider) == "" {
+		return guardrails, nil
+	}
+
+	fallbackCfg := chatFallbackToChatConfig(chatCfg.Fallback)
+	fallbackModel, err := ai.NewChatModel(ctx, fallbackCfg)
+	if err != nil {
+		return guardrails, fmt.Errorf("failed to initialize fallback chat model: %w", err)
+	}
+	guardrails.FallbackChatModel = fallbackModel
+	guardrails.FallbackProvider = fallbackCfg.Provider
+	guardrails.FallbackModelName = fallbackCfg.Model
+	if guardrails.FallbackProviderTimeout == 0 && chatCfg.Fallback.ProviderTimeoutSeconds > 0 {
+		guardrails.FallbackProviderTimeout = time.Duration(chatCfg.Fallback.ProviderTimeoutSeconds) * time.Second
+	}
+	return guardrails, nil
+}
+
+func chatFallbackToChatConfig(cfg config.ChatFallbackConfig) config.ChatModelConfig {
+	return config.ChatModelConfig{
+		Provider:  cfg.Provider,
+		Model:     cfg.Model,
+		APIKey:    cfg.APIKey,
+		AccessKey: cfg.AccessKey,
+		SecretKey: cfg.SecretKey,
+		BaseURL:   cfg.BaseURL,
+		Region:    cfg.Region,
+	}
 }
 
 // GenerateCases runs each sub-agent (with retry-once on transient failure),
@@ -377,6 +433,7 @@ func startTracedAgentRun(ctx context.Context, recorder workflowservice.AgentTrac
 	}
 	row, err := recorder.StartAgentRun(ctx, workflowservice.StartAgentRunInput{
 		WorkflowRunID: workflowservice.RunIDPointerFromContext(ctx),
+		TaskID:        workflowservice.TaskIDPointerFromContext(ctx),
 		AgentName:     name,
 		Stage:         attempt,
 		InputSummary:  inputSummary,

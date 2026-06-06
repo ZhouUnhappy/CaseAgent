@@ -161,3 +161,31 @@ func TestOpenAICompatibleChatConfigKeepsCustomBaseURL(t *testing.T) {
 		t.Fatalf("unexpected BaseURL: %q", cfg.BaseURL)
 	}
 }
+
+func TestEstimateUsageFallsBackToCharacterTokens(t *testing.T) {
+	usage := EstimateMessageUsage(
+		[]*schema.Message{schema.UserMessage("12345678")},
+		schema.AssistantMessage("1234", nil),
+	)
+	if usage.EstimatedPromptTokens != 2 || usage.EstimatedCompletionTokens != 1 || usage.EstimatedTotalTokens != 3 {
+		t.Fatalf("unexpected estimated tokens: %#v", usage)
+	}
+	if AccountedTokens(usage) != 3 || usage.TokenSource != "estimated_chars" {
+		t.Fatalf("unexpected accounted usage: %#v", usage)
+	}
+}
+
+func TestEstimateUsagePrefersProviderTokenUsage(t *testing.T) {
+	message := schema.AssistantMessage("ok", nil)
+	message.ResponseMeta = &schema.ResponseMeta{
+		Usage: &schema.TokenUsage{
+			PromptTokens:     11,
+			CompletionTokens: 7,
+			TotalTokens:      18,
+		},
+	}
+	usage := EstimateMessageUsage([]*schema.Message{schema.UserMessage("prompt")}, message)
+	if usage.TokenSource != "provider_usage" || usage.TotalTokens != 18 || AccountedTokens(usage) != 18 {
+		t.Fatalf("unexpected provider usage: %#v", usage)
+	}
+}

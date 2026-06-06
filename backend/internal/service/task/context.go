@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"caseagent/internal/db/models"
+	agentservice "caseagent/internal/service/agent"
 	retrievalservice "caseagent/internal/service/retrieval"
 )
 
@@ -18,6 +19,7 @@ func buildSourceContext(documentQueries, knowledgeQueries []string,
 	documentHits []retrievalservice.DocumentResult,
 	knowledgeHits []retrievalservice.KnowledgeResult,
 	knowledgeShipped []models.KnowledgeBase,
+	modelCalls []agentservice.ModelCallTrace,
 ) map[string]any {
 	docs := make([]map[string]any, 0, len(documentHits))
 	for _, hit := range documentHits {
@@ -68,6 +70,43 @@ func buildSourceContext(documentQueries, knowledgeQueries []string,
 		shippedNames = append(shippedNames, entry.Name)
 	}
 
+	traceModelCalls := make([]map[string]any, 0, len(modelCalls))
+	agentRuns := make([]map[string]any, 0, len(modelCalls))
+	seenAgentRuns := make(map[int]struct{}, len(modelCalls))
+	for _, call := range modelCalls {
+		item := map[string]any{
+			"id":                     call.ID,
+			"agent_run_id":           call.AgentRunID,
+			"agent":                  call.Agent,
+			"attempt":                call.Attempt,
+			"provider":               call.Provider,
+			"model":                  call.Model,
+			"provider_role":          call.ProviderRole,
+			"status":                 call.Status,
+			"prompt_id":              call.PromptID,
+			"prompt_version":         call.PromptVersion,
+			"prompt_chars":           call.PromptChars,
+			"response_chars":         call.ResponseChars,
+			"estimated_total_tokens": call.EstimatedTotalToken,
+			"total_tokens":           call.TotalTokens,
+			"token_source":           call.TokenSource,
+			"last_error":             call.LastError,
+		}
+		traceModelCalls = append(traceModelCalls, item)
+		if call.AgentRunID <= 0 {
+			continue
+		}
+		if _, ok := seenAgentRuns[call.AgentRunID]; ok {
+			continue
+		}
+		seenAgentRuns[call.AgentRunID] = struct{}{}
+		agentRuns = append(agentRuns, map[string]any{
+			"id":      call.AgentRunID,
+			"agent":   call.Agent,
+			"attempt": call.Attempt,
+		})
+	}
+
 	return map[string]any{
 		"document_queries":        documentQueries,
 		"knowledge_queries":       knowledgeQueries,
@@ -75,6 +114,8 @@ func buildSourceContext(documentQueries, knowledgeQueries []string,
 		"knowledge_hits":          kbHits,
 		"knowledge_shipped_ids":   shippedIDs,
 		"knowledge_shipped_names": shippedNames,
+		"agent_runs":              agentRuns,
+		"model_calls":             traceModelCalls,
 	}
 }
 

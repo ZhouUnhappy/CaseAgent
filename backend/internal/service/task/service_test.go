@@ -223,6 +223,22 @@ func TestBuildSourceContext(t *testing.T) {
 		docHits,
 		kbHits,
 		shipped,
+		[]agentservice.ModelCallTrace{
+			{
+				ID:                  501,
+				AgentRunID:          301,
+				Agent:               "functional",
+				Attempt:             "initial",
+				Provider:            "fake",
+				Model:               "valid_json",
+				ProviderRole:        "primary",
+				Status:              "succeeded",
+				PromptID:            "functional_cases",
+				PromptVersion:       "v1",
+				EstimatedTotalToken: 42,
+				TokenSource:         "estimated_chars",
+			},
+		},
 	)
 
 	docQueries, ok := ctx["document_queries"].([]string)
@@ -270,6 +286,15 @@ func TestBuildSourceContext(t *testing.T) {
 	if !ok || len(shippedNames) != 3 || shippedNames[0] != "Product-A" {
 		t.Fatalf("unexpected knowledge_shipped_names: %#v", ctx["knowledge_shipped_names"])
 	}
+
+	modelCalls, ok := ctx["model_calls"].([]map[string]any)
+	if !ok || len(modelCalls) != 1 || modelCalls[0]["id"] != 501 || modelCalls[0]["prompt_version"] != "v1" {
+		t.Fatalf("unexpected model_calls provenance: %#v", ctx["model_calls"])
+	}
+	agentRuns, ok := ctx["agent_runs"].([]map[string]any)
+	if !ok || len(agentRuns) != 1 || agentRuns[0]["id"] != 301 {
+		t.Fatalf("unexpected agent_runs provenance: %#v", ctx["agent_runs"])
+	}
 }
 
 func TestGenerationFailureStageAndContextGapEligibility(t *testing.T) {
@@ -296,5 +321,15 @@ func TestGenerationFailureStageAndContextGapEligibility(t *testing.T) {
 	}
 	if !ShouldRecordContextGap(agentErr) {
 		t.Fatal("deep agent fallback failures should record context_gap")
+	}
+}
+
+func TestGenerationFailureNonRetryableForGuardrailErrors(t *testing.T) {
+	err := generationFailure(GenerationStageAgentGenerate, "failed to generate cases: %w", agentservice.ErrModelBudgetExceeded)
+	var nonRetryable interface {
+		NonRetryable() bool
+	}
+	if !errors.As(err, &nonRetryable) || !nonRetryable.NonRetryable() {
+		t.Fatalf("guardrail generation failure should be non-retryable: %v", err)
 	}
 }

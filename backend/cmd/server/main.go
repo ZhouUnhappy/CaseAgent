@@ -103,12 +103,13 @@ func jobRunnerOptions(cfg config.JobRunnerConfig) jobservice.Options {
 		}
 	}
 	return jobservice.Options{
-		MaxConcurrency:     cfg.MaxConcurrency,
-		MaxRetries:         cfg.MaxRetries,
-		RetryBackoff:       time.Duration(cfg.RetryBackoffSeconds) * time.Second,
-		PollInterval:       time.Duration(cfg.PollIntervalSeconds) * time.Second,
-		RunningJobTimeout:  time.Duration(cfg.RunningTimeoutSeconds) * time.Second,
-		StateUpdateTimeout: time.Duration(cfg.StateUpdateTimeoutSeconds) * time.Second,
-		JobTypes:           jobTypes,
+		MaxConcurrency:       cfg.MaxConcurrency,
+		TenantMaxConcurrency: cfg.TenantMaxConcurrency,
+		MaxRetries:           cfg.MaxRetries,
+		RetryBackoff:         time.Duration(cfg.RetryBackoffSeconds) * time.Second,
+		PollInterval:         time.Duration(cfg.PollIntervalSeconds) * time.Second,
+		RunningJobTimeout:    time.Duration(cfg.RunningTimeoutSeconds) * time.Second,
+		StateUpdateTimeout:   time.Duration(cfg.StateUpdateTimeoutSeconds) * time.Second,
+		JobTypes:             jobTypes,
 	}
 }

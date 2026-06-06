@@ -76,40 +76,86 @@ func validateDatabase(cfg DatabaseConfig) error {
 }
 
 func validateChat(cfg ChatModelConfig) error {
+	if err := validateChatGuardrails("model.chat", cfg.RequestTimeoutSeconds, cfg.ProviderTimeoutSeconds, cfg.TaskBudgetTokens, cfg.CircuitBreakerFailureThreshold, cfg.CircuitBreakerCooldownSeconds); err != nil {
+		return err
+	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if _, ok := supportedChatProviders[provider]; !ok {
 		return fmt.Errorf("config validation: unsupported model.chat.provider %q", cfg.Provider)
 	}
+	if err := validateChatProvider("model.chat", provider, cfg.Model, cfg.APIKey, cfg.AccessKey, cfg.SecretKey, cfg.BaseURL); err != nil {
+		return err
+	}
+	if err := validateChatFallback(cfg.Fallback); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateChatProvider(path string, provider string, model string, apiKey string, accessKey string, secretKey string, baseURL string) error {
 	if provider == "fake" {
-		if _, ok := supportedFakeScenarios[strings.TrimSpace(cfg.Model)]; !ok {
-			return fmt.Errorf("config validation: unsupported fake chat scenario %q", cfg.Model)
+		if _, ok := supportedFakeScenarios[strings.TrimSpace(model)]; !ok {
+			return fmt.Errorf("config validation: unsupported fake chat scenario %q", model)
 		}
 		return nil
 	}
-	if strings.TrimSpace(cfg.Model) == "" {
-		return fmt.Errorf("config validation: model.chat.model is required")
+	if strings.TrimSpace(model) == "" {
+		return fmt.Errorf("config validation: %s.model is required", path)
 	}
 	switch provider {
 	case "ark":
-		if strings.TrimSpace(cfg.BaseURL) == "" {
-			return fmt.Errorf("config validation: model.chat.base_url is required for ark")
+		if strings.TrimSpace(baseURL) == "" {
+			return fmt.Errorf("config validation: %s.base_url is required for ark", path)
 		}
-		if !hasAPIKeyOrAccessPair(cfg.APIKey, cfg.AccessKey, cfg.SecretKey) {
-			return fmt.Errorf("config validation: model.chat requires api_key or access_key/secret_key")
+		if !hasAPIKeyOrAccessPair(apiKey, accessKey, secretKey) {
+			return fmt.Errorf("config validation: %s requires api_key or access_key/secret_key", path)
 		}
 	case "deepseek":
-		if strings.TrimSpace(cfg.APIKey) == "" {
-			return fmt.Errorf("config validation: model.chat.api_key is required for deepseek")
+		if strings.TrimSpace(apiKey) == "" {
+			return fmt.Errorf("config validation: %s.api_key is required for deepseek", path)
 		}
 	case "openai":
-		if strings.TrimSpace(cfg.BaseURL) == "" {
-			return fmt.Errorf("config validation: model.chat.base_url is required for openai")
+		if strings.TrimSpace(baseURL) == "" {
+			return fmt.Errorf("config validation: %s.base_url is required for openai", path)
 		}
-		if strings.TrimSpace(cfg.APIKey) == "" {
-			return fmt.Errorf("config validation: model.chat.api_key is required for openai")
+		if strings.TrimSpace(apiKey) == "" {
+			return fmt.Errorf("config validation: %s.api_key is required for openai", path)
 		}
 	}
 	return nil
+}
+
+func validateChatGuardrails(path string, requestTimeoutSeconds int, providerTimeoutSeconds int, taskBudgetTokens int, failureThreshold int, cooldownSeconds int) error {
+	if requestTimeoutSeconds < 0 {
+		return fmt.Errorf("config validation: %s.request_timeout_seconds must be >= 0", path)
+	}
+	if providerTimeoutSeconds < 0 {
+		return fmt.Errorf("config validation: %s.provider_timeout_seconds must be >= 0", path)
+	}
+	if taskBudgetTokens < 0 {
+		return fmt.Errorf("config validation: %s.task_budget_tokens must be >= 0", path)
+	}
+	if failureThreshold < 0 {
+		return fmt.Errorf("config validation: %s.circuit_breaker_failure_threshold must be >= 0", path)
+	}
+	if cooldownSeconds < 0 {
+		return fmt.Errorf("config validation: %s.circuit_breaker_cooldown_seconds must be >= 0", path)
+	}
+	return nil
+}
+
+func validateChatFallback(cfg ChatFallbackConfig) error {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "" {
+		return nil
+	}
+	if _, ok := supportedChatProviders[provider]; !ok {
+		return fmt.Errorf("config validation: unsupported model.chat.fallback.provider %q", cfg.Provider)
+	}
+	if cfg.ProviderTimeoutSeconds < 0 {
+		return fmt.Errorf("config validation: model.chat.fallback.provider_timeout_seconds must be >= 0")
+	}
+	return validateChatProvider("model.chat.fallback", provider, cfg.Model, cfg.APIKey, cfg.AccessKey, cfg.SecretKey, cfg.BaseURL)
 }
 
 func validateEmbedding(cfg EmbeddingModelConfig) error {
@@ -148,6 +194,9 @@ func validateEmbedding(cfg EmbeddingModelConfig) error {
 func validateJobRunner(cfg JobRunnerConfig) error {
 	if cfg.MaxConcurrency <= 0 {
 		return fmt.Errorf("config validation: job_runner.max_concurrency must be > 0")
+	}
+	if cfg.TenantMaxConcurrency < 0 {
+		return fmt.Errorf("config validation: job_runner.tenant_max_concurrency must be >= 0")
 	}
 	if cfg.MaxRetries < 0 {
 		return fmt.Errorf("config validation: job_runner.max_retries must be >= 0")

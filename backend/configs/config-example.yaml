@@ -29,6 +29,20 @@ model:
     # Long-running calls fail fast so async tasks can enter failed state and
     # record a context_gap instead of staying in generating forever.
     request_timeout_seconds: 60
+    # Optional guardrails. Zero values mean disabled/unlimited.
+    provider_timeout_seconds: 0
+    task_budget_tokens: 0
+    circuit_breaker_failure_threshold: 0
+    circuit_breaker_cooldown_seconds: 60
+    fallback:
+      provider: ""
+      model: ""
+      api_key: ""
+      access_key: ""
+      secret_key: ""
+      base_url: ""
+      region: ""
+      provider_timeout_seconds: 0
     # DeepSeek example:
     # provider: deepseek
     # model: deepseek-v4-pro
@@ -53,6 +67,8 @@ suggestion:
 
 job_runner:
   max_concurrency: 2
+  # Optional per-tenant concurrency cap across background jobs. 0 means unlimited.
+  tenant_max_concurrency: 0
   max_retries: 2
   retry_backoff_seconds: 5
   poll_interval_seconds: 2

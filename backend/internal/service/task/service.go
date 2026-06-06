@@ -74,6 +74,7 @@ func (s *Service) AnalyzeTask(ctx context.Context, taskID int) (err error) {
 }
 
 func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
+	ctx = workflowservice.WithTaskID(ctx, taskID)
 	if err = s.updateTaskStatus(ctx, taskID, models.TaskStatusGenerating); err != nil {
 		return err
 	}
@@ -116,6 +117,8 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	}
 
 	knowledgeContext := formatKnowledgeContext(knowledgeEntries)
+	modelCallCollector := agentservice.NewModelCallCollector()
+	ctx = agentservice.WithModelCallCollector(ctx, modelCallCollector)
 	rawCases, err := agentSvc.GenerateCases(ctx, requirementsContext, knowledgeContext)
 	recordAgentTrace(ctx, s.workflowRecorder(), taskID, runID, requirementsContext, knowledgeContext, rawCases, err)
 	if err != nil {
@@ -143,6 +146,7 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 		documentHits,
 		retrievedHits,
 		knowledgeEntries,
+		modelCallCollector.Calls(),
 	)
 
 	if err = s.persistGeneratedCases(ctx, taskID, sections, sourceContext); err != nil {

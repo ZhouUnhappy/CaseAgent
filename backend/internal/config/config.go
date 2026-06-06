@@ -36,14 +36,30 @@ type ModelConfig struct {
 }
 
 type ChatModelConfig struct {
-	Provider              string `mapstructure:"provider"`
-	Model                 string `mapstructure:"model"`
-	APIKey                string `mapstructure:"api_key"`
-	AccessKey             string `mapstructure:"access_key"`
-	SecretKey             string `mapstructure:"secret_key"`
-	BaseURL               string `mapstructure:"base_url"`
-	Region                string `mapstructure:"region"`
-	RequestTimeoutSeconds int    `mapstructure:"request_timeout_seconds"`
+	Provider                       string             `mapstructure:"provider"`
+	Model                          string             `mapstructure:"model"`
+	APIKey                         string             `mapstructure:"api_key"`
+	AccessKey                      string             `mapstructure:"access_key"`
+	SecretKey                      string             `mapstructure:"secret_key"`
+	BaseURL                        string             `mapstructure:"base_url"`
+	Region                         string             `mapstructure:"region"`
+	RequestTimeoutSeconds          int                `mapstructure:"request_timeout_seconds"`
+	ProviderTimeoutSeconds         int                `mapstructure:"provider_timeout_seconds"`
+	TaskBudgetTokens               int                `mapstructure:"task_budget_tokens"`
+	CircuitBreakerFailureThreshold int                `mapstructure:"circuit_breaker_failure_threshold"`
+	CircuitBreakerCooldownSeconds  int                `mapstructure:"circuit_breaker_cooldown_seconds"`
+	Fallback                       ChatFallbackConfig `mapstructure:"fallback"`
+}
+
+type ChatFallbackConfig struct {
+	Provider               string `mapstructure:"provider"`
+	Model                  string `mapstructure:"model"`
+	APIKey                 string `mapstructure:"api_key"`
+	AccessKey              string `mapstructure:"access_key"`
+	SecretKey              string `mapstructure:"secret_key"`
+	BaseURL                string `mapstructure:"base_url"`
+	Region                 string `mapstructure:"region"`
+	ProviderTimeoutSeconds int    `mapstructure:"provider_timeout_seconds"`
 }
 
 type EmbeddingModelConfig struct {
@@ -68,6 +84,7 @@ type SuggestionConfig struct {
 
 type JobRunnerConfig struct {
 	MaxConcurrency            int                            `mapstructure:"max_concurrency"`
+	TenantMaxConcurrency      int                            `mapstructure:"tenant_max_concurrency"`
 	MaxRetries                int                            `mapstructure:"max_retries"`
 	RetryBackoffSeconds       int                            `mapstructure:"retry_backoff_seconds"`
 	PollIntervalSeconds       int                            `mapstructure:"poll_interval_seconds"`
@@ -88,8 +105,13 @@ func Load(configPath string) error {
 	viper.SetConfigType("yaml")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.SetDefault("model.chat.request_timeout_seconds", 60)
+	viper.SetDefault("model.chat.provider_timeout_seconds", 0)
+	viper.SetDefault("model.chat.task_budget_tokens", 0)
+	viper.SetDefault("model.chat.circuit_breaker_failure_threshold", 0)
+	viper.SetDefault("model.chat.circuit_breaker_cooldown_seconds", 60)
 	viper.SetDefault("suggestion.auto_dismiss_pending_days", 30)
 	viper.SetDefault("job_runner.max_concurrency", 2)
+	viper.SetDefault("job_runner.tenant_max_concurrency", 0)
 	viper.SetDefault("job_runner.max_retries", 2)
 	viper.SetDefault("job_runner.retry_backoff_seconds", 5)
 	viper.SetDefault("job_runner.poll_interval_seconds", 2)

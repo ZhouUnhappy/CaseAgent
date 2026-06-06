@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -393,6 +394,95 @@ func TestGenerateCasesReturnsUnrefinedPayloadWhenRefineFails(t *testing.T) {
 	}
 }
 
+func TestGuardedChatModelBudgetExhaustedShortCircuits(t *testing.T) {
+	recorder := &fakeAgentTraceRecorder{}
+	primary := &countingChatModel{content: "ok"}
+	guarded := guardChatModel(primary, recorder, "fake", "primary", GuardrailConfig{TaskBudgetTokens: 1})
+
+	_, err := guarded.Generate(withModelTrace(context.Background(), "functional", "initial"), []*schema.Message{schema.UserMessage("this prompt is longer than one token")})
+	if !errors.Is(err, ErrModelBudgetExceeded) {
+		t.Fatalf("Generate() error = %v, want budget exhausted", err)
+	}
+	if primary.calls() != 0 {
+		t.Fatalf("primary calls = %d, want 0", primary.calls())
+	}
+	if len(recorder.modelCalls) != 1 {
+		t.Fatalf("model calls = %#v, want guardrail failure row", recorder.modelCalls)
+	}
+	if recorder.modelCalls[0].Metadata["guardrail_event"] != GuardrailEventBudgetExceeded {
+		t.Fatalf("guardrail event = %#v", recorder.modelCalls[0].Metadata["guardrail_event"])
+	}
+}
+
+func TestGuardedChatModelProviderTimeout(t *testing.T) {
+	primary := &blockingChatModel{}
+	guarded := guardChatModel(primary, nil, "fake", "slow", GuardrailConfig{ProviderTimeout: time.Millisecond})
+
+	started := time.Now()
+	_, err := guarded.Generate(context.Background(), []*schema.Message{schema.UserMessage("prompt")})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Generate() error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("provider timeout took too long: %s", elapsed)
+	}
+}
+
+func TestGuardedChatModelFallbackSuccess(t *testing.T) {
+	primary := &countingChatModel{err: errors.New("primary unavailable")}
+	fallback := &countingChatModel{content: "fallback ok"}
+	guarded := guardChatModel(primary, nil, "fake", "primary", GuardrailConfig{FallbackChatModel: fallback})
+
+	result, err := guarded.Generate(context.Background(), []*schema.Message{schema.UserMessage("prompt")})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if result.Content != "fallback ok" {
+		t.Fatalf("result = %q, want fallback output", result.Content)
+	}
+	if primary.calls() != 1 || fallback.calls() != 1 {
+		t.Fatalf("calls primary=%d fallback=%d, want 1/1", primary.calls(), fallback.calls())
+	}
+}
+
+func TestGuardedChatModelFallbackFailure(t *testing.T) {
+	primary := &countingChatModel{err: errors.New("primary unavailable")}
+	fallback := &countingChatModel{err: errors.New("fallback unavailable")}
+	guarded := guardChatModel(primary, nil, "fake", "primary", GuardrailConfig{FallbackChatModel: fallback})
+
+	_, err := guarded.Generate(context.Background(), []*schema.Message{schema.UserMessage("prompt")})
+	if err == nil || !strings.Contains(err.Error(), "fallback unavailable") {
+		t.Fatalf("Generate() error = %v, want fallback error", err)
+	}
+	if primary.calls() != 1 || fallback.calls() != 1 {
+		t.Fatalf("calls primary=%d fallback=%d, want 1/1", primary.calls(), fallback.calls())
+	}
+}
+
+func TestGuardedChatModelCircuitBreakerShortCircuit(t *testing.T) {
+	recorder := &fakeAgentTraceRecorder{}
+	primary := &countingChatModel{err: errors.New("primary unavailable")}
+	guarded := guardChatModel(primary, recorder, "fake", "primary", GuardrailConfig{
+		FailureThreshold:    1,
+		CircuitOpenCooldown: time.Minute,
+	})
+
+	_, firstErr := guarded.Generate(withModelTrace(context.Background(), "functional", "initial"), []*schema.Message{schema.UserMessage("prompt")})
+	if firstErr == nil {
+		t.Fatal("first Generate() expected primary failure")
+	}
+	_, secondErr := guarded.Generate(withModelTrace(context.Background(), "functional", "retry"), []*schema.Message{schema.UserMessage("prompt")})
+	if !errors.Is(secondErr, ErrModelCircuitOpen) {
+		t.Fatalf("second Generate() error = %v, want circuit open", secondErr)
+	}
+	if primary.calls() != 1 {
+		t.Fatalf("primary calls = %d, want only first call", primary.calls())
+	}
+	if len(recorder.modelCalls) != 1 || recorder.modelCalls[0].Metadata["guardrail_event"] != GuardrailEventCircuitOpen {
+		t.Fatalf("guardrail model calls = %#v", recorder.modelCalls)
+	}
+}
+
 func joinedPrompt(messages []*schema.Message) string {
 	var builder strings.Builder
 	for _, message := range messages {
@@ -405,4 +495,43 @@ func joinedPrompt(messages []*schema.Message) string {
 
 func testSectionJSON(section string, title string) string {
 	return fmt.Sprintf(`[{"section":%q,"cases":[{"title":%q,"priority_id":3,"custom_preconds":"ready","custom_steps_separated":[{"content":"do","expected":"done"}]}]}]`, section, title)
+}
+
+type countingChatModel struct {
+	mu      sync.Mutex
+	content string
+	err     error
+	count   int
+}
+
+func (m *countingChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	m.mu.Lock()
+	m.count++
+	m.mu.Unlock()
+	if m.err != nil {
+		return nil, m.err
+	}
+	return schema.AssistantMessage(m.content, nil), nil
+}
+
+func (m *countingChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("stream not implemented")
+}
+
+func (m *countingChatModel) calls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.count
+}
+
+type blockingChatModel struct{}
+
+func (m *blockingChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (m *blockingChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }

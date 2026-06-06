@@ -16,6 +16,7 @@ type contextKey string
 
 const runIDContextKey contextKey = "workflow_run_id"
 const agentRunIDContextKey contextKey = "agent_run_id"
+const taskIDContextKey contextKey = "task_id"
 
 type Service struct {
 	db bun.IDB
@@ -127,6 +128,25 @@ func AgentRunIDFromContext(ctx context.Context) (int, bool) {
 
 func AgentRunIDPointerFromContext(ctx context.Context) *int {
 	if id, ok := AgentRunIDFromContext(ctx); ok {
+		return &id
+	}
+	return nil
+}
+
+func WithTaskID(ctx context.Context, taskID int) context.Context {
+	if taskID <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, taskIDContextKey, taskID)
+}
+
+func TaskIDFromContext(ctx context.Context) (int, bool) {
+	value, ok := ctx.Value(taskIDContextKey).(int)
+	return value, ok && value > 0
+}
+
+func TaskIDPointerFromContext(ctx context.Context) *int {
+	if id, ok := TaskIDFromContext(ctx); ok {
 		return &id
 	}
 	return nil

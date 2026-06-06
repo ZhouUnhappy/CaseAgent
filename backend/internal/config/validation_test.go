@@ -63,6 +63,33 @@ func TestValidateRejectsUnknownJobTypeOverride(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsChatGuardrailsAndFallback(t *testing.T) {
+	cfg := minimalValidConfig()
+	cfg.Model.Chat.TaskBudgetTokens = 8000
+	cfg.Model.Chat.ProviderTimeoutSeconds = 20
+	cfg.Model.Chat.CircuitBreakerFailureThreshold = 3
+	cfg.Model.Chat.CircuitBreakerCooldownSeconds = 30
+	cfg.Model.Chat.Fallback = ChatFallbackConfig{
+		Provider: "fake",
+		Model:    "valid_json",
+	}
+	cfg.JobRunner.TenantMaxConcurrency = 1
+
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate() returned error: %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidChatGuardrailRange(t *testing.T) {
+	cfg := minimalValidConfig()
+	cfg.Model.Chat.TaskBudgetTokens = -1
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "task_budget_tokens") {
+		t.Fatalf("Validate() error = %v, want task_budget_tokens error", err)
+	}
+}
+
 func minimalValidConfig() *Config {
 	return &Config{
 		Server: ServerConfig{Mode: "debug", Port: 40003},

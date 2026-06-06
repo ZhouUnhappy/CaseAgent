@@ -15,17 +15,29 @@
 
 ## 后续目标
 
-### 1. 模型成本与稳定性控制
+### 1. 用例质量反馈闭环（无需算法工程师）
 
-**Trigger** —— demo 开始持续使用真实模型 provider 或多人试用时，出现 token / 请求成本不可控、provider 限流/超时导致任务失败或长时间卡住，或需要按 tenant / task 设置模型调用预算与降级策略。
+**Trigger** —— 多人试用开始真实审核生成用例，频繁出现“这条有用 / 重复 / 缺步骤 / 不符合需求 / 知识缺失”等人工判断，需要把这些反馈沉淀为可查询样本，而不是只停留在聊天或临时备注里。
 
-**DoD** —— 后端在 `backend/internal/ai/`、`backend/internal/service/agent/`、`backend/internal/service/job/` 增加模型调用 guardrail：记录每个 task / tenant 的 prompt、completion、总 token 或可替代字符估算成本；支持配置单任务预算、tenant 并发上限、provider 超时、失败熔断和可选 fallback provider；预算耗尽或熔断时任务进入可解释失败状态并写入 workflow trace / model_calls metadata；前端 `/tasks/:id` 或 `/ops` 能看到成本、限流、熔断、fallback 结果；新增后端测试覆盖预算耗尽、provider 超时、fallback 成功/失败、熔断短路；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
+**DoD** —— 后端新增用例级反馈模型、API 与服务逻辑，反馈至少关联 `task_id`、`test_case_id`、case index/title、反馈类型、备注、`source_context` 摘要、prompt id/version、model call id；前端 `frontend/src/views/TaskDetail.vue` 在每条用例旁提供轻量反馈入口，支持标记有用、重复、缺步骤、不符合需求、知识缺失；`GET /api/v1/tasks/:id/trace` 或 `/ops` 能汇总反馈计数与失败/低质原因；新增后端测试覆盖反馈写入、查询、tenant 隔离与 trace 关联；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
 
-### 2. 检索与生成可调试性
+### 2. 运维成本与稳定性看板
 
-**Trigger** —— demo 用户开始追问“为什么生成了这条用例 / 为什么没有生成那条用例”，或 prompt、检索参数、知识库内容调整后，需要从单条用例反查 query、命中 chunk、agent、prompt version、model call 和 source_context 证据链。
+**Trigger** —— demo 进入多人或多 tenant 试用后，需要定期回答“哪个 tenant / provider / task 最耗 token、fallback 是否频繁、熔断/限流是否影响生成成功率、平均耗时是否变差”。
 
-**DoD** —— 后端把生成结果与检索/Agent/模型调用 trace 建立可查询关联：`test_cases.source_context` 或 workflow artifacts 能定位到相关 document/knowledge chunk、retrieval query、rank/score、agent run、prompt id/version、model call id；`GET /api/v1/tasks/:id/trace` 或新增只读 endpoint 返回 case-level provenance；前端 `frontend/src/views/TaskDetail.vue` 在每条用例旁提供“生成依据/调试”入口，展示命中的知识/文档片段、query、score、agent 与 model call 摘要；新增后端测试覆盖 provenance 写入与 trace API 输出，前端构建通过；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
+**DoD** —— 后端基于 `workflow_runs`、`agent_runs`、`model_calls`、`background_jobs` 增加只读聚合 API，支持按 tenant、时间范围、provider、model、workflow/task 过滤，返回 token/字符成本、调用次数、成功率、失败 stage、fallback 次数、限流/熔断/预算耗尽次数、平均/分位耗时；前端 `frontend/src/views/OpsWorkbench.vue` 增加成本与稳定性视图；新增后端测试覆盖聚合口径、空数据、过滤条件与 tenant 隔离；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
+
+### 3. 生成策略 Profile 与轻量评测
+
+**Trigger** —— prompt、检索参数、模型 provider 或预算策略开始频繁调整，需要在没有算法工程师的情况下，也能用固定样本比较不同策略对召回、成本、失败率和人工反馈的影响。
+
+**DoD** —— 后端引入 generation profile 配置与持久化记录，至少覆盖 provider/model、prompt registry version、document/knowledge topK、多 query 数量、chunk 展示上限、预算/timeout/fallback 策略；每次任务在 workflow metadata / trace 中记录 profile id/version；新增脚本或测试数据目录维护一批固定需求、知识与期望覆盖点，能运行离线轻量评测并输出 JSON/Markdown 报告，包含生成数量、去重后数量、成本、失败 stage、命中 source_context 和人工反馈统计；新增测试覆盖 profile 解析、默认值、trace 写入；`cd backend && go test ./...`、相关评测脚本、`cd frontend && npm run build` 通过。
+
+### 4. 用例审核体验升级
+
+**Trigger** —— 试用用户开始一次性审核几十条以上用例，单条 JSON 编辑、逐段提交和缺少筛选导致审核成本明显高于生成成本。
+
+**DoD** —— 前端 `frontend/src/views/TaskDetail.vue` 支持按 section、优先级、影响产品/模块、反馈状态、生成依据筛选用例；支持批量提交、批量修改优先级/影响范围、重复用例合并或隐藏；编辑体验从整段 JSON 扩展为结构化行内编辑或侧边编辑器，并保留 JSON 高级编辑入口；后端补齐批量更新/提交 API 与测试，确保 tenant 隔离和状态流转正确；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
 
 ## 备忘：暂不做的事
 
@@ -33,6 +45,5 @@
 - 质量评估产品化：暂不做 prompt 全文对比、prompt/model A/B 看板或质量趋势产品页；现阶段保留脚本生成的质量报告即可。
 - 权限、操作者与审计：当前仍按可信本地 demo / 小范围试用处理，不引入登录、RBAC、操作者审计、危险操作二次确认。
 - 知识库治理扩展：暂不做重复知识检测、冲突内容提示、过期知识提醒、知识覆盖率、chunk 来源高亮、知识变更影响任务分析。
-- 用例审核体验升级：暂不做批量编辑、结构化 diff、版本历史、复杂筛选或外部测试管理系统导出。
 - API 契约与自动化回归：暂不引入 OpenAPI、生成式 API client 或 Playwright 主流程 e2e。
 - Demo 初始化与重置：现阶段继续使用 `scripts/demo_bootstrap.sh` 等脚本，不新增演示数据控制台或一键 reset 页面。

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	"caseagent/internal/db/models"
@@ -28,13 +29,14 @@ type Executor interface {
 }
 
 type Options struct {
-	MaxConcurrency     int
-	MaxRetries         int
-	PollInterval       time.Duration
-	RetryBackoff       time.Duration
-	RunningJobTimeout  time.Duration
-	StateUpdateTimeout time.Duration
-	JobTypes           map[string]JobTypeOptions
+	MaxConcurrency       int
+	TenantMaxConcurrency int
+	MaxRetries           int
+	PollInterval         time.Duration
+	RetryBackoff         time.Duration
+	RunningJobTimeout    time.Duration
+	StateUpdateTimeout   time.Duration
+	JobTypes             map[string]JobTypeOptions
 }
 
 type JobTypeOptions struct {
@@ -43,16 +45,19 @@ type JobTypeOptions struct {
 }
 
 type Runner struct {
-	store    Store
-	executor Executor
-	options  Options
+	store        Store
+	executor     Executor
+	options      Options
+	mu           sync.Mutex
+	tenantActive map[int]int
 }
 
 func NewRunner(store Store, executor Executor, options Options) *Runner {
 	return &Runner{
-		store:    store,
-		executor: executor,
-		options:  normalizeOptions(options),
+		store:        store,
+		executor:     executor,
+		options:      normalizeOptions(options),
+		tenantActive: map[int]int{},
 	}
 }
 
@@ -147,12 +152,18 @@ func (r *Runner) claimNext(ctx context.Context, jobType string) (*models.Backgro
 		return nil, err
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, tenantID := range tenantIDs {
+		if r.tenantLimitReachedLocked(tenantID) {
+			continue
+		}
 		job, err := r.store.ClaimNext(ctx, tenantID, jobType)
 		if err != nil {
 			return nil, err
 		}
 		if job != nil {
+			r.tenantActive[tenantID]++
 			return job, nil
 		}
 	}
@@ -160,6 +171,7 @@ func (r *Runner) claimNext(ctx context.Context, jobType string) (*models.Backgro
 }
 
 func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
+	defer r.releaseTenant(job.TenantID)
 	slog.Info("background job started",
 		"job_id", job.ID,
 		"job_type", job.JobType,
@@ -201,7 +213,7 @@ func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 		return
 	}
 
-	if job.RetryCount < job.MaxRetries {
+	if job.RetryCount < job.MaxRetries && shouldRetry(err) {
 		r.finishWorkflow(job, workflow, workflowservice.TransitionFail, err)
 		nextRun := time.Now().Add(r.options.RetryBackoff)
 		if markErr := r.markRetry(job, err, nextRun); markErr != nil {
@@ -286,6 +298,9 @@ func normalizeOptions(options Options) Options {
 	if options.MaxConcurrency <= 0 {
 		options.MaxConcurrency = defaultMaxConcurrency
 	}
+	if options.TenantMaxConcurrency < 0 {
+		options.TenantMaxConcurrency = 0
+	}
 	if options.MaxRetries < 0 {
 		options.MaxRetries = defaultMaxRetries
 	}
@@ -305,6 +320,20 @@ func normalizeOptions(options Options) Options {
 		options.JobTypes = map[string]JobTypeOptions{}
 	}
 	return options
+}
+
+func (r *Runner) tenantLimitReachedLocked(tenantID int) bool {
+	return r.options.TenantMaxConcurrency > 0 && r.tenantActive[tenantID] >= r.options.TenantMaxConcurrency
+}
+
+func (r *Runner) releaseTenant(tenantID int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tenantActive[tenantID] <= 1 {
+		delete(r.tenantActive, tenantID)
+		return
+	}
+	r.tenantActive[tenantID]--
 }
 
 func (r *Runner) markSucceeded(job *models.BackgroundJob) error {
@@ -331,4 +360,16 @@ func (r *Runner) markFailed(job *models.BackgroundJob, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.StateUpdateTimeout)
 	defer cancel()
 	return r.store.MarkFailed(ctx, job.TenantID, job.ID, cause)
+}
+
+type nonRetryableError interface {
+	NonRetryable() bool
+}
+
+func shouldRetry(cause error) bool {
+	var nonRetryable nonRetryableError
+	if errors.As(cause, &nonRetryable) && nonRetryable.NonRetryable() {
+		return false
+	}
+	return true
 }
