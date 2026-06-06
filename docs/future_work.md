@@ -34,15 +34,7 @@
 
 ## 后续目标（只含前后端可独立交付）
 
-### 1. 运维成本与稳定性表格
-
-**需要角色**：前端工程师、后端工程师。
-
-**Trigger**：demo 进入多人或多 tenant 试用后，需要定期回答“哪个 tenant / provider / task 最耗 token、fallback 是否频繁、熔断/限流是否影响生成成功率、平均耗时是否变差”。
-
-**DoD**：后端基于 `workflow_runs`、`agent_runs`、`model_calls`、`background_jobs` 增加只读聚合 API，支持按 tenant、时间范围、provider、model、workflow/task 过滤，返回 token/字符成本、调用次数、成功率、失败 stage、fallback 次数、限流/熔断/预算耗尽次数、平均耗时；前端 `frontend/src/views/OpsWorkbench.vue` 增加以表格、筛选器和摘要卡片为主的成本与稳定性视图；只做普通 SQL 聚合和页面展示，不引入 BI、数据仓库或复杂趋势分析；新增后端测试覆盖聚合口径、空数据、过滤条件与 tenant 隔离；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
-
-### 2. 生成策略 Profile 与脚本报告
+### 1. 生成策略 Profile 与脚本报告
 
 **需要角色**：后端工程师，可由前端工程师辅助展示 trace/profile 信息。
 
@@ -50,7 +42,7 @@
 
 **DoD**：后端引入 generation profile 配置与持久化记录，至少覆盖 provider/model、prompt registry version、document/knowledge topK、多 query 数量、chunk 展示上限、预算/timeout/fallback 策略；每次任务在 workflow metadata / trace 中记录 profile id/version；新增脚本和测试数据目录维护一批固定需求与知识，脚本运行后输出 JSON/Markdown 报告，包含生成数量、去重后数量、成本、失败 stage、命中 source_context 和人工反馈统计；不实现自动覆盖率评分、rerank 训练或 LLM-as-judge；新增测试覆盖 profile 解析、默认值、trace 写入；`cd backend && go test ./...`、相关脚本、`cd frontend && npm run build` 通过。
 
-### 3. 用例审核体验升级
+### 2. 用例审核体验升级
 
 **需要角色**：前端工程师、后端工程师。
 
@@ -58,7 +50,7 @@
 
 **DoD**：前端 `frontend/src/views/TaskDetail.vue` 支持按 section、优先级、影响产品/模块、反馈状态、生成依据筛选用例；支持批量提交、批量修改优先级/影响范围、手工标记重复用例并隐藏；编辑体验从整段 JSON 扩展为结构化行内编辑或侧边编辑器，并保留 JSON 高级编辑入口；后端补齐批量更新/提交 API 与测试，确保 tenant 隔离和状态流转正确；不实现自动语义重复检测；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
 
-### 4. Demo 初始化与重置脚本增强
+### 3. Demo 初始化与重置脚本增强
 
 **需要角色**：后端工程师。
 

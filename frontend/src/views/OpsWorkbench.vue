@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Close, CopyDocument, Refresh, RefreshRight, View } from '@element-plus/icons-vue'
 import { cancelJob, listJobs, replayJob, retryJob } from '../api/jobs'
+import { getOpsMetrics } from '../api/ops'
 import { listWorkflows } from '../api/workflows'
 import { useTenantStore } from '../stores/tenant'
 import { notifySuccess } from '../utils/error'
@@ -14,12 +15,15 @@ const router = useRouter()
 const tenantStore = useTenantStore()
 const { activeItems: tenants, currentSlug, loading: tenantLoading } = storeToRefs(tenantStore)
 
-const activeTab = ref('jobs')
+const activeTab = ref('metrics')
 const jobs = ref([])
 const workflows = ref([])
+const metrics = ref(null)
 const jobsLoading = ref(false)
 const workflowsLoading = ref(false)
+const metricsLoading = ref(false)
 const actingJobId = ref(0)
+const metricsRange = ref([])
 
 const jobFilters = reactive({
   tenant: currentSlug.value,
@@ -36,6 +40,14 @@ const workflowFilters = reactive({
   resource_type: '',
   resource_id: '',
   job_id: '',
+})
+
+const metricsFilters = reactive({
+  tenant: currentSlug.value,
+  provider: '',
+  model: '',
+  workflow_type: '',
+  task_id: '',
 })
 
 const jobTypeOptions = [
@@ -59,6 +71,12 @@ const workflowResourceOptions = [
   { value: 'knowledge', label: 'Knowledge' },
 ]
 
+const metricsSummary = computed(() => metrics.value?.summary || {})
+const modelMetrics = computed(() => metrics.value?.by_model || [])
+const workflowMetrics = computed(() => metrics.value?.by_workflow || [])
+const failureStages = computed(() => metrics.value?.failure_stages || [])
+const jobStatuses = computed(() => metrics.value?.job_statuses || [])
+
 const currentTenantLabel = computed(() => {
   const tenant = tenants.value.find((item) => item.slug === currentSlug.value)
   return tenant ? `${tenant.name} (${tenant.slug})` : currentSlug.value || '-'
@@ -77,6 +95,7 @@ function applyTenant(slug) {
   tenantStore.setCurrent(slug)
   jobFilters.tenant = slug
   workflowFilters.tenant = slug
+  metricsFilters.tenant = slug
   refreshAll()
 }
 
@@ -100,12 +119,32 @@ function buildWorkflowParams() {
   return params
 }
 
+function buildMetricsParams() {
+  const params = {}
+  if (metricsRange.value?.[0]) params.from = metricsRange.value[0]
+  if (metricsRange.value?.[1]) params.to = metricsRange.value[1]
+  if (metricsFilters.provider) params.provider = metricsFilters.provider.trim()
+  if (metricsFilters.model) params.model = metricsFilters.model.trim()
+  if (metricsFilters.workflow_type) params.workflow_type = metricsFilters.workflow_type
+  if (metricsFilters.task_id) params.task_id = Number(metricsFilters.task_id)
+  return params
+}
+
 async function loadJobs() {
   jobsLoading.value = true
   try {
     jobs.value = await listJobs(buildJobParams())
   } finally {
     jobsLoading.value = false
+  }
+}
+
+async function loadMetrics() {
+  metricsLoading.value = true
+  try {
+    metrics.value = await getOpsMetrics(buildMetricsParams())
+  } finally {
+    metricsLoading.value = false
   }
 }
 
@@ -119,6 +158,7 @@ async function loadWorkflows() {
 }
 
 function refreshAll() {
+  loadMetrics().catch(() => {})
   loadJobs().catch(() => {})
   loadWorkflows().catch(() => {})
 }
@@ -144,6 +184,18 @@ function resetWorkflowFilters() {
     job_id: '',
   })
   loadWorkflows().catch(() => {})
+}
+
+function resetMetricsFilters() {
+  metricsRange.value = []
+  Object.assign(metricsFilters, {
+    tenant: currentSlug.value,
+    provider: '',
+    model: '',
+    workflow_type: '',
+    task_id: '',
+  })
+  loadMetrics().catch(() => {})
 }
 
 function resourceLabel(job) {
@@ -198,6 +250,21 @@ function openTask(job) {
 function workflowResourceLabel(run) {
   return `${run.resource_type || '-'} #${run.resource_id || '-'}`
 }
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString()
+}
+
+function formatPercent(value) {
+  return `${Math.round(Number(value || 0) * 100)}%`
+}
+
+function formatDuration(ms) {
+  const value = Number(ms || 0)
+  if (!value) return '-'
+  if (value < 1000) return `${value} ms`
+  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`
+}
 </script>
 
 <template>
@@ -228,6 +295,157 @@ function workflowResourceLabel(run) {
     </header>
 
     <el-tabs v-model="activeTab" class="ops-tabs">
+      <el-tab-pane label="Cost & Stability" name="metrics">
+        <div class="filter-bar">
+          <el-date-picker
+            v-model="metricsRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="from"
+            end-placeholder="to"
+            class="date-range"
+          />
+          <el-select v-model="metricsFilters.workflow_type" clearable placeholder="workflow_type" class="filter-control">
+            <el-option v-for="item in jobTypeOptions" :key="item" :label="jobTypeLabel(item)" :value="item" />
+          </el-select>
+          <el-input v-model="metricsFilters.provider" clearable placeholder="provider" class="filter-control" />
+          <el-input v-model="metricsFilters.model" clearable placeholder="model" class="filter-control" />
+          <el-input v-model="metricsFilters.task_id" clearable placeholder="task id" class="id-input" />
+          <el-button type="primary" :icon="Refresh" :loading="metricsLoading" @click="loadMetrics">查询</el-button>
+          <el-button @click="resetMetricsFilters">重置</el-button>
+        </div>
+
+        <div class="metric-grid" v-loading="metricsLoading">
+          <div class="metric-panel">
+            <span class="metric-label">Accounted tokens</span>
+            <strong>{{ formatNumber(metricsSummary.accounted_tokens) }}</strong>
+            <span class="metric-foot">{{ formatNumber(metricsSummary.prompt_chars) }} prompt chars</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Model success</span>
+            <strong>{{ formatPercent(metricsSummary.model_success_rate) }}</strong>
+            <span class="metric-foot">{{ formatNumber(metricsSummary.model_calls) }} calls</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Workflow success</span>
+            <strong>{{ formatPercent(metricsSummary.workflow_success_rate) }}</strong>
+            <span class="metric-foot">{{ formatNumber(metricsSummary.workflow_runs) }} runs</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Fallbacks</span>
+            <strong>{{ formatNumber(metricsSummary.fallbacks) }}</strong>
+            <span class="metric-foot">{{ formatNumber(metricsSummary.rate_limits) }} rate limits</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Guardrails</span>
+            <strong>{{ formatNumber((metricsSummary.circuit_open || 0) + (metricsSummary.budget_exceeded || 0)) }}</strong>
+            <span class="metric-foot">
+              {{ formatNumber(metricsSummary.circuit_open) }} circuit · {{ formatNumber(metricsSummary.budget_exceeded) }} budget
+            </span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Avg duration</span>
+            <strong>{{ formatDuration(metricsSummary.average_workflow_ms) }}</strong>
+            <span class="metric-foot">{{ formatDuration(metricsSummary.average_model_latency_ms) }} model</span>
+          </div>
+        </div>
+
+        <div class="metrics-section">
+          <h3>Model Cost</h3>
+          <el-table :data="modelMetrics" v-loading="metricsLoading" stripe class="ops-table">
+            <el-table-column prop="provider" label="Provider" min-width="120" />
+            <el-table-column prop="model" label="Model" min-width="150" />
+            <el-table-column label="Calls" width="92">
+              <template #default="{ row }">{{ formatNumber(row.calls) }}</template>
+            </el-table-column>
+            <el-table-column label="Success" width="100">
+              <template #default="{ row }">{{ formatPercent(row.success_rate) }}</template>
+            </el-table-column>
+            <el-table-column label="Tokens" min-width="120">
+              <template #default="{ row }">{{ formatNumber(row.accounted_tokens) }}</template>
+            </el-table-column>
+            <el-table-column label="Chars" min-width="140">
+              <template #default="{ row }">{{ formatNumber(row.prompt_chars + row.response_chars) }}</template>
+            </el-table-column>
+            <el-table-column label="Signals" min-width="190">
+              <template #default="{ row }">
+                <el-tag v-if="row.fallbacks" size="small" type="warning" class="chip">{{ row.fallbacks }} fallback</el-tag>
+                <el-tag v-if="row.rate_limits" size="small" type="danger" class="chip">{{ row.rate_limits }} rate</el-tag>
+                <el-tag v-if="row.circuit_open" size="small" type="danger" class="chip">{{ row.circuit_open }} circuit</el-tag>
+                <el-tag v-if="row.budget_exceeded" size="small" type="danger" class="chip">{{ row.budget_exceeded }} budget</el-tag>
+                <span v-if="!row.fallbacks && !row.rate_limits && !row.circuit_open && !row.budget_exceeded" class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Avg Latency" width="120">
+              <template #default="{ row }">{{ formatDuration(row.average_model_latency_ms) }}</template>
+            </el-table-column>
+            <template #empty>暂无 model cost 数据</template>
+          </el-table>
+        </div>
+
+        <div class="metrics-section">
+          <h3>Workflow Stability</h3>
+          <el-table :data="workflowMetrics" v-loading="metricsLoading" stripe class="ops-table">
+            <el-table-column prop="workflow_type" label="Workflow" min-width="150">
+              <template #default="{ row }">{{ jobTypeLabel(row.workflow_type) }}</template>
+            </el-table-column>
+            <el-table-column label="Runs" width="90">
+              <template #default="{ row }">{{ formatNumber(row.runs) }}</template>
+            </el-table-column>
+            <el-table-column label="Success" width="100">
+              <template #default="{ row }">{{ formatPercent(row.success_rate) }}</template>
+            </el-table-column>
+            <el-table-column label="Model Calls" width="120">
+              <template #default="{ row }">{{ formatNumber(row.model_calls) }}</template>
+            </el-table-column>
+            <el-table-column label="Tokens" min-width="120">
+              <template #default="{ row }">{{ formatNumber(row.accounted_tokens) }}</template>
+            </el-table-column>
+            <el-table-column label="Failures" min-width="150">
+              <template #default="{ row }">
+                {{ formatNumber(row.failed_agents) }} agents · {{ formatNumber(row.failed_jobs) }} jobs
+              </template>
+            </el-table-column>
+            <el-table-column label="Avg Duration" width="130">
+              <template #default="{ row }">{{ formatDuration(row.average_duration_ms) }}</template>
+            </el-table-column>
+            <template #empty>暂无 workflow stability 数据</template>
+          </el-table>
+        </div>
+
+        <div class="metrics-split">
+          <div class="metrics-section">
+            <h3>Failure Stages</h3>
+            <el-table :data="failureStages" v-loading="metricsLoading" stripe class="ops-table">
+              <el-table-column prop="agent" label="Agent" min-width="120" />
+              <el-table-column prop="stage" label="Stage" min-width="140" />
+              <el-table-column label="Failures" width="100">
+                <template #default="{ row }">{{ formatNumber(row.failures) }}</template>
+              </el-table-column>
+              <el-table-column prop="last_error" label="Last Error" min-width="220" show-overflow-tooltip />
+              <template #empty>暂无失败 stage</template>
+            </el-table>
+          </div>
+          <div class="metrics-section">
+            <h3>Job Statuses</h3>
+            <el-table :data="jobStatuses" v-loading="metricsLoading" stripe class="ops-table">
+              <el-table-column label="Type" min-width="150">
+                <template #default="{ row }">{{ jobTypeLabel(row.type) }}</template>
+              </el-table-column>
+              <el-table-column label="Status" min-width="120">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="jobStatusType(row.status)">{{ jobStatusLabel(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="Count" width="100">
+                <template #default="{ row }">{{ formatNumber(row.count) }}</template>
+              </el-table-column>
+              <template #empty>暂无 job 状态数据</template>
+            </el-table>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane label="Jobs" name="jobs">
         <div class="filter-bar">
           <el-select v-model="jobFilters.job_type" clearable placeholder="job_type" class="filter-control">
@@ -410,8 +628,71 @@ function workflowResourceLabel(run) {
   width: 140px;
 }
 
+.date-range {
+  width: 260px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.metric-panel {
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.metric-panel strong {
+  display: block;
+  margin-top: 4px;
+  color: #111827;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.metric-label,
+.metric-foot {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.metric-foot {
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metrics-section {
+  min-width: 0;
+  margin-top: 16px;
+}
+
+.metrics-section h3 {
+  margin: 0 0 10px;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.metrics-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .ops-table {
   width: 100%;
+}
+
+.chip {
+  margin-right: 4px;
 }
 
 .muted {
@@ -420,5 +701,24 @@ function workflowResourceLabel(run) {
 
 .small {
   font-size: 12px;
+}
+
+@media (max-width: 1280px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .metric-grid,
+  .metrics-split {
+    grid-template-columns: 1fr;
+  }
+
+  .date-range,
+  .filter-control,
+  .id-input {
+    width: 100%;
+  }
 }
 </style>

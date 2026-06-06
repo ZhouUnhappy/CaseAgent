@@ -58,6 +58,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		biz.POST("/jobs/:id/cancel", h.CancelJob)
 		biz.POST("/jobs/:id/replay", h.ReplayJob)
 		biz.GET("/workflows", h.ListWorkflows)
+		biz.GET("/ops/metrics", h.GetOpsMetrics)
 
 		biz.GET("/knowledge-suggestions", h.ListKnowledgeSuggestions)
 		biz.POST("/knowledge-suggestions", h.CreateKnowledgeSuggestion)
