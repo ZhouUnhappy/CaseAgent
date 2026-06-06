@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"caseagent/internal/db/models"
+	"caseagent/internal/generation"
 	agentservice "caseagent/internal/service/agent"
 	retrievalservice "caseagent/internal/service/retrieval"
 )
@@ -294,6 +295,15 @@ func TestBuildSourceContext(t *testing.T) {
 	agentRuns, ok := ctx["agent_runs"].([]map[string]any)
 	if !ok || len(agentRuns) != 1 || agentRuns[0]["id"] != 301 {
 		t.Fatalf("unexpected agent_runs provenance: %#v", ctx["agent_runs"])
+	}
+
+	profile := generation.Profile{ID: "caseagent-generation-default", Version: "v1-test"}
+	attachGenerationProfile(ctx, profile)
+	if ctx["generation_profile_id"] != profile.ID || ctx["generation_profile_version"] != profile.Version {
+		t.Fatalf("generation profile not attached to source_context: %#v", ctx)
+	}
+	if got, ok := ctx["generation_profile"].(generation.Profile); !ok || got.Version != profile.Version {
+		t.Fatalf("generation profile payload = %#v, want profile", ctx["generation_profile"])
 	}
 }
 

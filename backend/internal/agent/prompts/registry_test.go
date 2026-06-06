@@ -40,6 +40,25 @@ func TestRegistryMissingVersionReturnsError(t *testing.T) {
 	}
 }
 
+func TestRegistryDefaultVersionsReturnsCopy(t *testing.T) {
+	registry, err := NewRegistry([]Template{
+		{ID: "demo.prompt", Version: "v1", Body: "old {{.Name}}"},
+		{ID: "demo.prompt", Version: "v2", Body: "new {{.Name}}", Default: true},
+	})
+	if err != nil {
+		t.Fatalf("NewRegistry() returned error: %v", err)
+	}
+
+	versions := registry.DefaultVersions()
+	if versions["demo.prompt"] != "v2" {
+		t.Fatalf("DefaultVersions() = %#v, want demo.prompt v2", versions)
+	}
+	versions["demo.prompt"] = "mutated"
+	if registry.DefaultVersions()["demo.prompt"] != "v2" {
+		t.Fatalf("DefaultVersions returned internal map")
+	}
+}
+
 func TestDefaultPromptsKeepFakeProviderSentinels(t *testing.T) {
 	cases := []struct {
 		id     ID

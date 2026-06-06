@@ -296,14 +296,15 @@ HTML
   byId('headerChips').innerHTML = [
     ['tenant', report.tenant],
     ['status', metrics.terminal_status],
+    ['profile', `${metrics.generation_profile_id || '-'}@${metrics.generation_profile_version || '-'}`],
     ['base', report.base_url],
   ].map(([label, value]) => `<span class="chip">${escapeHtml(label)}: ${escapeHtml(value || '-')}</span>`).join('');
 
   byId('metaGrid').innerHTML = [
     card('E2E report', report.e2e_report || '-', ''),
+    card('generation profile', `${metrics.generation_profile_id || '-'}@${metrics.generation_profile_version || '-'}`, ''),
     card('duplicate max', thresholds.duplicate_title_count_max ?? '-', ''),
     card('field min', thresholds.field_complete_rate_min ?? '-', ''),
-    card('source min', thresholds.source_context_coverage_min ?? '-', ''),
   ].join('');
 
   const fieldOk = Number(metrics.field_complete_rate) >= Number(thresholds.field_complete_rate_min ?? 0);
@@ -425,6 +426,7 @@ metrics="$(jq -n \
     | ([ $case_rows[] | select(((.affected_products // []) | length) > 0) ] | length) as $product_hit_count
     | ([ $case_rows[] | select(((.affected_modules // []) | length) > 0) ] | length) as $module_hit_count
     | ([ $cases[] | select(.source_context != null and (.source_context | type) == "object") ] | length) as $sections_with_source_context
+    | (($cases[0].source_context.generation_profile // {}) ) as $generation_profile
     | ($trace.model_calls // []) as $model_calls
     | ([ $model_calls[] | (.prompt_chars // 0) ] | add // 0) as $model_prompt_chars
     | ([ $model_calls[] | (.response_chars // 0) ] | add // 0) as $model_response_chars
@@ -442,6 +444,9 @@ metrics="$(jq -n \
     | {
         task_id: $task.id,
         terminal_status: $task.status,
+        generation_profile: $generation_profile,
+        generation_profile_id: ($generation_profile.id // $cases[0].source_context.generation_profile_id // "unknown"),
+        generation_profile_version: ($generation_profile.version // $cases[0].source_context.generation_profile_version // "unknown"),
         section_count: $section_count,
         case_count: $case_count,
         duplicate_title_count: $duplicate_title_count,

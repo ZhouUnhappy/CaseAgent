@@ -34,15 +34,7 @@
 
 ## 后续目标（只含前后端可独立交付）
 
-### 1. 生成策略 Profile 与脚本报告
-
-**需要角色**：后端工程师，可由前端工程师辅助展示 trace/profile 信息。
-
-**Trigger**：prompt、检索参数、模型 provider 或预算策略开始频繁调整，需要用固定样本比较不同策略对生成数量、成本、失败率和人工反馈的影响，但团队只有前后端工程师，暂不做算法评测平台。
-
-**DoD**：后端引入 generation profile 配置与持久化记录，至少覆盖 provider/model、prompt registry version、document/knowledge topK、多 query 数量、chunk 展示上限、预算/timeout/fallback 策略；每次任务在 workflow metadata / trace 中记录 profile id/version；新增脚本和测试数据目录维护一批固定需求与知识，脚本运行后输出 JSON/Markdown 报告，包含生成数量、去重后数量、成本、失败 stage、命中 source_context 和人工反馈统计；不实现自动覆盖率评分、rerank 训练或 LLM-as-judge；新增测试覆盖 profile 解析、默认值、trace 写入；`cd backend && go test ./...`、相关脚本、`cd frontend && npm run build` 通过。
-
-### 2. 用例审核体验升级
+### 1. 用例审核体验升级
 
 **需要角色**：前端工程师、后端工程师。
 
@@ -50,7 +42,7 @@
 
 **DoD**：前端 `frontend/src/views/TaskDetail.vue` 支持按 section、优先级、影响产品/模块、反馈状态、生成依据筛选用例；支持批量提交、批量修改优先级/影响范围、手工标记重复用例并隐藏；编辑体验从整段 JSON 扩展为结构化行内编辑或侧边编辑器，并保留 JSON 高级编辑入口；后端补齐批量更新/提交 API 与测试，确保 tenant 隔离和状态流转正确；不实现自动语义重复检测；`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
 
-### 3. Demo 初始化与重置脚本增强
+### 2. Demo 初始化与重置脚本增强
 
 **需要角色**：后端工程师。
 

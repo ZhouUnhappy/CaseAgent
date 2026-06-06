@@ -98,6 +98,17 @@ func DefaultRegistry() *Registry {
 	return defaultRegistry
 }
 
+func (r *Registry) DefaultVersions() map[ID]string {
+	if r == nil {
+		r = DefaultRegistry()
+	}
+	versions := make(map[ID]string, len(r.defaults))
+	for id, version := range r.defaults {
+		versions[id] = version
+	}
+	return versions
+}
+
 func (r *Registry) Render(id ID, data any) (Rendered, error) {
 	if r == nil {
 		r = DefaultRegistry()

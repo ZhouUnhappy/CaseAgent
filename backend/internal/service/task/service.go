@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"caseagent/internal/db/models"
+	"caseagent/internal/generation"
 	agentservice "caseagent/internal/service/agent"
 	retrievalservice "caseagent/internal/service/retrieval"
 	workflowservice "caseagent/internal/service/workflow"
@@ -89,6 +90,9 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	if err != nil {
 		return err
 	}
+	profile := generation.CurrentProfile()
+	runID := workflowservice.RunIDPointerFromContext(ctx)
+	recordGenerationProfileTrace(ctx, s.db, runID, profile)
 
 	requirements, err := s.loadRequirements(ctx, task.ProjectID, task.DocumentIDs)
 	if err != nil {
@@ -103,7 +107,6 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 	retrievedHits := retrieveKnowledgeFallback(ctx, retriever, requirements, task.AffectedProducts, task.AffectedModules)
 	knowledgeEntries = mergeKnowledgeEntries(knowledgeEntries, knowledgeResultsToBaseEntries(retrievedHits))
 	requirementsContext, documentHits := buildRequirementsContext(ctx, retriever, requirements, task.DocumentIDs, task.AffectedProducts, task.AffectedModules)
-	runID := workflowservice.RunIDPointerFromContext(ctx)
 	recordRetrievalTrace(ctx, s.workflowRecorder(), taskID, runID,
 		buildDocumentQueries(requirements, task.AffectedProducts, task.AffectedModules),
 		documentHits,
@@ -148,6 +151,7 @@ func (s *Service) GenerateCases(ctx context.Context, taskID int) (err error) {
 		knowledgeEntries,
 		modelCallCollector.Calls(),
 	)
+	attachGenerationProfile(sourceContext, profile)
 
 	if err = s.persistGeneratedCases(ctx, taskID, sections, sourceContext); err != nil {
 		return err
@@ -219,6 +223,44 @@ func recordAgentTrace(ctx context.Context, recorder *workflowservice.Recorder, t
 	}); err != nil {
 		slog.Warn("agent trace record failed", "task_id", taskID, "error", err)
 	}
+}
+
+func recordGenerationProfileTrace(ctx context.Context, db bun.IDB, runID *int, profile generation.Profile) {
+	if db == nil || runID == nil || *runID <= 0 {
+		return
+	}
+	run := new(models.WorkflowRun)
+	if err := db.NewSelect().
+		Model(run).
+		Column("id", "metadata").
+		Where("id = ?", *runID).
+		Scan(ctx); err != nil {
+		slog.Warn("generation profile workflow trace load failed", "workflow_run_id", *runID, "error", err)
+		return
+	}
+	metadata := map[string]any{}
+	for key, value := range run.Metadata {
+		metadata[key] = value
+	}
+	metadata["generation_profile"] = profile
+	metadata["generation_profile_id"] = profile.ID
+	metadata["generation_profile_version"] = profile.Version
+	if _, err := db.NewUpdate().
+		Model((*models.WorkflowRun)(nil)).
+		Set("metadata = ?", metadata).
+		Where("id = ?", *runID).
+		Exec(ctx); err != nil {
+		slog.Warn("generation profile workflow trace update failed", "workflow_run_id", *runID, "error", err)
+	}
+}
+
+func attachGenerationProfile(sourceContext map[string]any, profile generation.Profile) {
+	if sourceContext == nil {
+		return
+	}
+	sourceContext["generation_profile"] = profile
+	sourceContext["generation_profile_id"] = profile.ID
+	sourceContext["generation_profile_version"] = profile.Version
 }
 
 func recordGeneratedCasesArtifact(ctx context.Context, recorder *workflowservice.Recorder, taskID int, runID *int, sections []generatedSection, sourceContext map[string]any) {
