@@ -50,6 +50,12 @@ const routes = [
     meta: { title: '运维工作台' },
   },
   {
+    path: '/demo',
+    name: 'demo',
+    component: () => import('../views/DemoConsole.vue'),
+    meta: { title: 'Demo 控制台' },
+  },
+  {
     path: '/tenants',
     name: 'tenants',
     component: () => import('../views/TenantManagement.vue'),

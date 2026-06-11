@@ -41,6 +41,8 @@ export CASEAGENT_PSQL_DSN='postgres://user:pass@localhost:5432/caseagent?sslmode
 
 **用途**：创建或重置稳定演示数据。默认 `bootstrap` 会创建 / 复用 `demo-caseagent` tenant，上传仓库内 `testdata/i1/{requirement,product_knowledge,module_knowledge}.md`，等待文档与知识处理完成，创建任务，提交影响范围 review，触发生成，并校验 completed task 至少包含 1 条用例和 model_call trace。`reset` 会删除 demo tenant 下由该脚本创建的 demo project（通过 API 级联清理 document / task / test cases）和 demo knowledge；`fresh` 会先 reset 再 bootstrap。
 
+前端也提供 `Demo 控制台` 页面，对应 tenant-scoped API：`POST /api/v1/demo/reset`、`POST /api/v1/demo/bootstrap`、`POST /api/v1/demo/fresh`。API bootstrap 只读取同一组公开 fixture，同步处理 document / knowledge 后创建 analyze job，并返回 project/task URL；脚本入口继续保留，用于需要完整 analyze → review → generate 并校验 completed task 的录屏或回归。
+
 **前置**：
 
 - 后端和 worker 已启动。
@@ -51,7 +53,7 @@ export CASEAGENT_PSQL_DSN='postgres://user:pass@localhost:5432/caseagent?sslmode
 
 **输出**：stdout 打印 `api_url`、`tenant_slug`、`run_token`、`project_id`、`document_id`、knowledge id、`task_id`、前端 `frontend_url`、case/section/trace 计数，以及前端 localStorage tenant 提示；失败时 stderr 会打印 action、API URL、tenant slug、run token、已创建的 project/document/task id，并尽量附带 task / trace 快照。
 
-**清理方式**：脚本每次用新的 `run_token` 命名项目并把 knowledge metadata 写入 `aliases=["CaseAgent demo fixture"]`。演示数据只进入 `demo-caseagent` tenant；工程演示前推荐直接使用 `fresh` 恢复到稳定样例。
+**清理方式**：脚本每次用新的 `run_token` 命名项目并把 knowledge `source` 写为 `demo`，metadata 写入 `aliases=["CaseAgent demo fixture"]`。演示数据只进入 `demo-caseagent` tenant；工程演示前推荐直接使用 `fresh` 恢复到稳定样例。
 
 ```bash
 # 创建一轮新的 demo 数据

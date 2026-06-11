@@ -107,6 +107,9 @@ npm run dev
 - `GET /api/v1/ops/quality` - 质量复盘聚合，展示 prompt/profile 对比、反馈趋势和报告 artifact 历史
 - `GET /api/v1/ops/retention/cleanup` - 诊断数据保留策略 dry-run，返回候选行数与字节估算
 - `POST /api/v1/ops/retention/cleanup` - 执行 tenant-scoped 诊断数据清理
+- `POST /api/v1/demo/reset` - 清理当前 tenant 的 demo project / knowledge
+- `POST /api/v1/demo/bootstrap` - 使用公开 fixture 创建 demo project / document / knowledge / task
+- `POST /api/v1/demo/fresh` - 先 reset 再 bootstrap，并返回 project/task URL
 - `GET /api/v1/tasks/:id/diagnostics` - 导出单任务诊断包 JSON，默认脱敏 artifact content、长 prompt/metadata 和原始 source_context
 - `GET /api/v1/maintenance/vector-health` - 查看向量健康状态
 - `POST /api/v1/maintenance/reindex` - 批量重建异常向量

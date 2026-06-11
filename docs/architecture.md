@@ -106,6 +106,7 @@
   - 诊断包：`GET /api/v1/tasks/:id/diagnostics` 返回 task、test_cases、workflow/agent/model/retrieval trace、feedback、错误摘要和 source_context 摘要；默认脱敏 artifact content、敏感 metadata key、长 prompt/metadata 和原始 source_context 查询正文。
   - 生命周期治理：`retention.trace_retention_days` 配置默认保留天数；`GET /api/v1/ops/retention/cleanup` 返回 tenant-scoped dry-run 行数 / 字节估算，`POST /api/v1/ops/retention/cleanup` 清理过期终态诊断明细、脱敏 `test_cases.source_context`，保留 `case_generation_tasks` / `test_cases` 最终状态和 `intervention` 审计 artifact，并新增 retention cleanup intervention 摘要。
   - 知识库治理：`knowledge_base.source` / `expires_at` / `duplicate_of_id` 记录来源、过期时间和人工重复标记；列表 API 支持 `type` / `source` / `expired` / `duplicate` 筛选；检索和生成只使用 completed、未过期、非重复条目；`GET /api/v1/knowledge/:id/impacted-tasks` 使用普通 SQL 从 `test_cases.source_context` 查询受影响任务。
+  - Demo 控制台：`POST /api/v1/demo/{reset,bootstrap,fresh}` 在当前 tenant 内清理或创建演示数据；bootstrap 只读取 `testdata/i1` 公开 fixture，同步处理 document / knowledge 后创建 analyze job，并返回 project/task path 与 URL。前端 `frontend/src/views/DemoConsole.vue` 提供一键 Reset + Bootstrap 页面。
   - 前端：`frontend/src/views/TaskDetail.vue` 展示 job timeline 与 Workflow Trace 面板，用于 demo 排查生成链路。
 - 数据库表：
   - `backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）

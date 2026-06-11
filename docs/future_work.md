@@ -42,12 +42,6 @@
 - **Trigger**：API 调整频率下降，出现外部调用方，或前端接口字段回归开始频繁阻塞联调。
 - **DoD**：维护 OpenAPI 或等价契约文件；前端 API client 由契约生成或至少有契约校验；新增 1-3 条 Playwright 主流程验证，覆盖 tenant 选择、任务创建、用例审核提交；`cd frontend && npm run build` 与后端相关测试通过。
 
-### Demo 控制台
-
-- **需要角色**：前端工程师、后端工程师。
-- **Trigger**：非工程同学频繁准备演示数据，或 `scripts/demo_bootstrap.sh fresh` 的使用成本明显阻碍试用。
-- **DoD**：新增 tenant-scoped demo reset/bootstrap API，前端提供一键 reset 页面；只使用公开 fixture，不读取私有路径；操作结果展示 project/task URL；保留脚本入口；补 handler 测试和脚本文档。
-
 ## 暂不纳入计划
 
 - 自动 OCR / 图片识别：README 已声明“输入文档中的图片内容已在正文以文字描述覆盖”。除非这个约定被破坏，否则不引入。

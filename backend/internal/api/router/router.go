@@ -66,6 +66,13 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		biz.GET("/ops/retention/cleanup", h.GetRetentionCleanupPlan)
 		biz.POST("/ops/retention/cleanup", h.RunRetentionCleanup)
 
+		demo := biz.Group("/demo")
+		{
+			demo.POST("/reset", h.ResetDemo)
+			demo.POST("/bootstrap", h.BootstrapDemo)
+			demo.POST("/fresh", h.FreshDemo)
+		}
+
 		biz.GET("/knowledge-suggestions", h.ListKnowledgeSuggestions)
 		biz.POST("/knowledge-suggestions", h.CreateKnowledgeSuggestion)
 		biz.POST("/knowledge-suggestions/:id/draft", h.DraftKnowledgeSuggestion)

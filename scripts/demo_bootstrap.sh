@@ -287,6 +287,7 @@ upload_knowledge() {
             type: $type,
             name: $name,
             content: $content,
+            source: "demo",
             metadata: {
                 aliases: [$alias],
                 run_token: $run_token
