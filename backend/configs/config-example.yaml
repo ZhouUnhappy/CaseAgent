@@ -65,6 +65,11 @@ model:
 suggestion:
   auto_dismiss_pending_days: 30
 
+retention:
+  # Default age window used by /api/v1/ops/retention/cleanup when the request
+  # does not override retention_days.
+  trace_retention_days: 30
+
 job_runner:
   max_concurrency: 2
   # Optional per-tenant concurrency cap across background jobs. 0 means unlimited.

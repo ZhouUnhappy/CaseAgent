@@ -12,6 +12,7 @@ type Config struct {
 	Database   DatabaseConfig   `mapstructure:"database"`
 	Model      ModelConfig      `mapstructure:"model"`
 	Suggestion SuggestionConfig `mapstructure:"suggestion"`
+	Retention  RetentionConfig  `mapstructure:"retention"`
 	JobRunner  JobRunnerConfig  `mapstructure:"job_runner"`
 	GWS        GWSConfig        `mapstructure:"gws"`
 }
@@ -82,6 +83,10 @@ type SuggestionConfig struct {
 	AutoDismissPendingDays int `mapstructure:"auto_dismiss_pending_days"`
 }
 
+type RetentionConfig struct {
+	TraceRetentionDays int `mapstructure:"trace_retention_days"`
+}
+
 type JobRunnerConfig struct {
 	MaxConcurrency            int                            `mapstructure:"max_concurrency"`
 	TenantMaxConcurrency      int                            `mapstructure:"tenant_max_concurrency"`
@@ -110,6 +115,7 @@ func Load(configPath string) error {
 	viper.SetDefault("model.chat.circuit_breaker_failure_threshold", 0)
 	viper.SetDefault("model.chat.circuit_breaker_cooldown_seconds", 60)
 	viper.SetDefault("suggestion.auto_dismiss_pending_days", 30)
+	viper.SetDefault("retention.trace_retention_days", 30)
 	viper.SetDefault("job_runner.max_concurrency", 2)
 	viper.SetDefault("job_runner.tenant_max_concurrency", 0)
 	viper.SetDefault("job_runner.max_retries", 2)

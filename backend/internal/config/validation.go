@@ -50,6 +50,9 @@ func Validate(cfg *Config) error {
 	if err := validateEmbedding(cfg.Model.Embedding); err != nil {
 		return err
 	}
+	if err := validateRetention(cfg.Retention); err != nil {
+		return err
+	}
 	if err := validateJobRunner(cfg.JobRunner); err != nil {
 		return err
 	}
@@ -187,6 +190,13 @@ func validateEmbedding(cfg EmbeddingModelConfig) error {
 		if strings.TrimSpace(cfg.APIKey) == "" {
 			return fmt.Errorf("config validation: model.embedding.api_key is required for openai")
 		}
+	}
+	return nil
+}
+
+func validateRetention(cfg RetentionConfig) error {
+	if cfg.TraceRetentionDays <= 0 {
+		return fmt.Errorf("config validation: retention.trace_retention_days must be > 0")
 	}
 	return nil
 }

@@ -60,12 +60,6 @@
 - **Trigger**：固定样本报告稳定，人工反馈样本累计到足够支撑 prompt/profile 对比，且用户需要在页面里做质量复盘。
 - **DoD**：在运维页或独立质量页展示 prompt/profile 对比、质量报告历史、反馈趋势；数据来自现有 trace / feedback / report artifact，不引入自动评分；API 聚合测试覆盖，前端 build 通过。
 
-### Trace 与诊断数据生命周期治理
-
-- **需要角色**：前端工程师、后端工程师。
-- **Trigger**：`workflow_runs`、`model_calls`、`retrieval_runs`、`artifacts`、`test_case_feedback` 或 `test_cases.source_context` 体积影响查询、备份或 demo 重置。
-- **DoD**：新增可配置 retention days；提供 tenant-scoped cleanup dry-run 与执行 API / 脚本；清理前后返回各表行数与字节估算；保留任务最终状态和必要审计摘要；覆盖 service 测试，更新 `scripts/README.md`。
-
 ### 部署前置诊断的下一阶段
 
 - **需要角色**：后端工程师、前端工程师。

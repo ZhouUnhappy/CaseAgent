@@ -15,6 +15,7 @@ CaseAgent 的回归脚本集合。每个脚本都是**独立的回归工具**，
 | `i2_generation_e2e.sh` | `apache-dubbo` | 默认复用最新 public-corpus project；复用其他 project 时同时设置 `CASEAGENT_TENANT_SLUG` |
 | `i2_generation_quality_eval.sh` | `apache-dubbo` | 包装 i2 e2e 并输出可提交的质量指标 |
 | `multitenancy_isolation.sh` | 一次性创建 `iso-a-*` / `iso-b-*` 两个临时 tenant | 验证私有 vs 私有隔离 |
+| `trace_retention_cleanup.sh` | `demo-caseagent` | 默认 dry-run 诊断数据保留策略；执行时仍只清当前 tenant |
 | `i1_retrieval_cleanup.sh` | **绕过** RLS（用 `CASEAGENT_PSQL_DSN` superuser 直接 DELETE） | design intent |
 
 **`scripts/lib/tenant.sh`** 提供共享 helper：`ensure_tenant`（若不存在则 POST 创建）、`psql_tenant`（为 app role 的直连 SQL 注入 `SET LOCAL app.tenant_id`）、`tenant_slug_for_document` / `tenant_slug_for_project`（从 doc/project id 回查 slug，供少量兼容路径使用）。
@@ -168,6 +169,32 @@ bash scripts/demo_bootstrap.sh fresh
 **阈值**：默认 `duplicate_title_count <= 0`、`field_complete_rate >= 1.0`、`source_context_coverage >= 1.0`、`model_call_count >= 1`；产品/模块命中率与 token/字符统计作为趋势指标记录。
 
 **何时跑**：生成逻辑、prompt、retrieval context、模型配置变化后，需要留下可比较质量证据时。
+
+---
+
+## 诊断数据生命周期
+
+### `trace_retention_cleanup.sh`
+
+**用途**：按 `retention.trace_retention_days`（或脚本 `--days` / `CASEAGENT_TRACE_RETENTION_DAYS` 覆盖）清理当前 tenant 的过期诊断明细。默认 dry-run，只返回各目标的当前行数 / 字节估算、候选行数 / 字节估算；显式 `--execute` 才执行删除或脱敏。
+
+**清理范围**：终态且过期的 `workflow_runs` / `workflow_steps` / `agent_runs` / `model_calls` / `retrieval_runs`，过期的非 intervention `artifacts`、`test_case_feedback`，以及过期终态任务下的 `test_cases.source_context`。脚本不删除 `case_generation_tasks` 或 `test_cases`，保留任务最终状态；`artifacts.artifact_type='intervention'` 会保留，执行清理还会新增一条 retention intervention artifact 记录 operator、reason、before/candidate/deleted 摘要。
+
+**输入**：
+
+- `CASEAGENT_BASE_URL`：后端地址，默认 `http://localhost:40003`
+- `CASEAGENT_TENANT_SLUG`：目标 tenant，默认 `demo-caseagent`
+- `CASEAGENT_TRACE_RETENTION_DAYS` 或 `--days N`：覆盖服务端默认 retention days
+- `CASEAGENT_OPERATOR_ID` / `CASEAGENT_OPERATOR_NAME`：执行清理时写入可信 operator header
+- `CASEAGENT_RETENTION_REASON` 或 `--reason TEXT`：执行清理原因
+
+```bash
+# 只查看候选行数和字节估算
+bash scripts/trace_retention_cleanup.sh --days 30
+
+# 确认 dry-run 后执行
+bash scripts/trace_retention_cleanup.sh --days 30 --execute --reason "demo reset before recording"
+```
 
 ---
 

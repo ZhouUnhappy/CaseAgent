@@ -51,6 +51,16 @@ func TestValidateRejectsInvalidJobRunnerRange(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidRetentionRange(t *testing.T) {
+	cfg := minimalValidConfig()
+	cfg.Retention.TraceRetentionDays = 0
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "retention.trace_retention_days") {
+		t.Fatalf("Validate() error = %v, want retention error", err)
+	}
+}
+
 func TestValidateRejectsUnknownJobTypeOverride(t *testing.T) {
 	cfg := minimalValidConfig()
 	cfg.JobRunner.Types = map[string]JobTypeRunnerConfig{
@@ -114,6 +124,9 @@ func minimalValidConfig() *Config {
 				APIKey:     "test-key",
 				BaseURL:    "https://example.test/api/v3",
 			},
+		},
+		Retention: RetentionConfig{
+			TraceRetentionDays: 30,
 		},
 		JobRunner: JobRunnerConfig{
 			MaxConcurrency:            2,

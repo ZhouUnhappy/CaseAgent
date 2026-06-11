@@ -84,10 +84,11 @@ COMMIT (or ROLLBACK) → flush buffered response
 | `X-Operator-ID` | 操作者稳定标识 | `local-demo` |
 | `X-Operator-Name` | 操作者展示名 | 同 `X-Operator-ID` |
 
-前端在 `localStorage(caseagent.operator_id)` / `localStorage(caseagent.operator_name)` 保存操作者，并在每个请求里自动注入。Jobs 的 `retry` / `cancel` / `replay` 和 `POST /api/v1/maintenance/reindex` 都要求 JSON body 带 `reason`，否则返回 400。后端会把 `operator_id` / `operator_name` / `reason` 写入 `artifacts.artifact_type='intervention'`：
+前端在 `localStorage(caseagent.operator_id)` / `localStorage(caseagent.operator_name)` 保存操作者，并在每个请求里自动注入。Jobs 的 `retry` / `cancel` / `replay`、`POST /api/v1/maintenance/reindex` 和 `POST /api/v1/ops/retention/cleanup` 都要求 JSON body 带 `reason`，否则返回 400。后端会把 `operator_id` / `operator_name` / `reason` 写入 `artifacts.artifact_type='intervention'`：
 
 - job 操作：`resource_type='job'`，`resource_id=<job_id>`，payload 含 action、job_id、job_type、status_before、operator 与 reason；`replay` 还会把 operator metadata 写入新 job payload。
 - reindex 操作：`resource_type='maintenance'`，payload 含 action、operator、reason、index profile/version、queued/blocked document/knowledge 计数和 ID。
+- retention cleanup：`resource_type='retention'`，payload 含 action、operator、reason、retention days、cutoff、before/candidate/deleted 摘要；只清当前 tenant，保留 `case_generation_tasks` / `test_cases` 最终状态和既有 intervention artifact。
 
 这不是安全边界。生产环境仍应把 operator header 换成登录态 / JWT claims，并在 API 前加 RBAC 与资源级授权。
 

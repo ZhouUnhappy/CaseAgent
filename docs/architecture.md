@@ -103,6 +103,7 @@
   - 后台 job 通过 tenant-scoped 独立事务写 trace，避免生成业务事务回滚时丢失失败现场。
   - `backend/internal/service/agent/` 为每次子 Agent / DeepAgent 调用创建 `agent_runs`，并通过 chat model decorator 记录每次 LLM `Generate` 的 provider/model、prompt/response 字符数、agent/attempt metadata、`agent_run_id` 和错误摘要。
   - API：`GET /api/v1/tasks/:id/trace` 返回 workflow runs、steps、agent runs、model calls、retrieval runs、artifacts。
+  - 生命周期治理：`retention.trace_retention_days` 配置默认保留天数；`GET /api/v1/ops/retention/cleanup` 返回 tenant-scoped dry-run 行数 / 字节估算，`POST /api/v1/ops/retention/cleanup` 清理过期终态诊断明细、脱敏 `test_cases.source_context`，保留 `case_generation_tasks` / `test_cases` 最终状态和 `intervention` 审计 artifact，并新增 retention cleanup intervention 摘要。
   - 前端：`frontend/src/views/TaskDetail.vue` 展示 job timeline 与 Workflow Trace 面板，用于 demo 排查生成链路。
 - 数据库表：
   - `backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
@@ -123,6 +124,7 @@
 | `scripts/demo_bootstrap.sh` | 使用公开 fixture + fake provider 预期配置创建可演示的 tenant/project/document/knowledge/task，并输出前端任务 URL |
 | `scripts/i2_generation_e2e.sh` | 选最近一个 public-corpus 项目 → analyze → review → generate → 校验落库；含三项硬断言（`duplicate_title_count==0` / `cases_missing_affected_fields==0` / `sections_with_source_context==section_count`）|
 | `scripts/i2_generation_quality_eval.sh` | 包装 e2e 并输出 Markdown + JSON + 静态 HTML 质量报告：case/section、字段完整率、source_context、失败阶段、model_call、字符/token、prompt version 指标 |
+| `scripts/trace_retention_cleanup.sh` | 默认 dry-run 诊断数据保留策略；执行时调用 tenant-scoped cleanup API 并写入 operator / reason 审计摘要 |
 
 **回归证据**：
 
@@ -153,11 +155,11 @@
 **可观测性**：
 
 - 前端：`api/client.js` 把 5xx/408/429/网络错误标记 `retryable=true`，`utils/error.js` 据此分别用 `warning` / `error` 弹给用户；处理失败行有「重新处理」按钮。API client 还会从 localStorage 注入 `X-Tenant-ID` 与可信 operator header，运维页执行 retry / cancel / replay 前要求填写操作者和原因。
-- 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态。
+- 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态；过期诊断明细通过 retention cleanup API / 脚本按 tenant dry-run 后清理。
 
 **验证方式**：手工跑全流程；`cd frontend && npm run build` 通过。
 
-**运维权限边界**：当前 retry / cancel / replay / reindex 适合 demo、本地调试和单租户可信操作员场景。前端会提示操作者和原因，后端把可信 operator header 与 reason 写入 intervention artifact；这仍不是登录或 RBAC。生产环境应把 header 换成登录态 / JWT claims，并在这些 API 前增加角色权限与更细的资源级授权；跨 tenant 批量处理仍应走独立 admin API，而不是复用 tenant-scoped 业务入口。
+**运维权限边界**：当前 retry / cancel / replay / reindex / retention cleanup 适合 demo、本地调试和单租户可信操作员场景。前端会提示操作者和原因，后端把可信 operator header 与 reason 写入 intervention artifact；这仍不是登录或 RBAC。生产环境应把 header 换成登录态 / JWT claims，并在这些 API 前增加角色权限与更细的资源级授权；跨 tenant 批量处理仍应走独立 admin API，而不是复用 tenant-scoped 业务入口。
 
 ---
 
