@@ -149,7 +149,7 @@
 - 业务页面：`frontend/src/views/`
   - `CaseGenerationWorkspace.vue`：默认首页 `/generate`，承载项目选择、文档上传/选择、任务创建、影响范围确认、生成触发、测试用例查看/导出/提交
   - `ProjectList.vue` / `ProjectDetail.vue`：项目与文档管理，并提供跳转到生成工作台的入口
-  - `TaskDetail.vue`：任务深度排查、Workflow Trace、用例 JSON 编辑
+  - `TaskDetail.vue`：任务深度排查、Workflow Trace、用例 JSON / 单条编辑、提交前结构校验、dirty state、按反馈 / 优先级 / 来源筛选和批量操作
   - `KnowledgeBase.vue` / `KnowledgeSuggestions.vue`：知识库与知识建议沉淀
   - `OpsWorkbench.vue`：tenant-scoped jobs / workflows 运维视图，支持筛选、重试、取消、重放；Preflight tab 展示 DB role、pgvector、RLS、tenant context、模型配置、向量健康和 worker risk，并可复制完整诊断 JSON；Quality tab 用现有 feedback / trace / artifact 数据展示 prompt/profile 对比、反馈趋势和报告历史。
 

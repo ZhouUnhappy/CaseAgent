@@ -45,12 +45,14 @@ const diagnosticsDownloading = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
+const editorOriginal = ref('')
 const provenanceVisible = ref(false)
 const provenanceCase = ref(null)
 const selectedCaseRefs = ref({})
 const caseEditorVisible = ref(false)
 const editingCaseSection = ref(null)
 const editingCaseIndex = ref(-1)
+const caseEditorOriginal = ref('')
 const caseForm = reactive({
   title: '',
   priority_id: 2,
@@ -147,6 +149,8 @@ const filteredSections = computed(() =>
 const filteredCaseCount = computed(() =>
   filteredSections.value.reduce((sum, section) => sum + section.display_cases.length, 0),
 )
+const editorDirty = computed(() => editorVisible.value && editorBuffer.value !== editorOriginal.value)
+const caseEditorDirty = computed(() => caseEditorVisible.value && serializeCaseForm() !== caseEditorOriginal.value)
 const caseOutputEmptyDescription = computed(() => {
   switch (task.value?.status) {
     case 'analyzing':
@@ -609,6 +613,7 @@ function downloadJSON(payload, filename) {
 function openEditor(section) {
   editingCase.value = section
   editorBuffer.value = JSON.stringify(section.cases || [], null, 2)
+  editorOriginal.value = editorBuffer.value
   editorVisible.value = true
 }
 
@@ -621,12 +626,14 @@ async function saveEditor() {
     ElMessageBox.alert(`JSON 解析失败：${err.message}`)
     return
   }
+  if (!showCaseValidationResult(validateCaseRows(parsed, editingCase.value?.section || 'section'))) return
   try {
     await casesStore.update(taskId.value, editingCase.value.id, {
       section: editingCase.value.section,
       cases: parsed,
     })
     notifySuccess('用例已保存')
+    editorOriginal.value = JSON.stringify(parsed, null, 2)
     editorVisible.value = false
   } catch {
     /* 错误已弹窗 */
@@ -634,6 +641,7 @@ async function saveEditor() {
 }
 
 async function submitSection(section) {
+  if (!showCaseValidationResult(validateSection(section))) return
   try {
     await ElMessageBox.confirm(
       `提交 section「${section.section}」共 ${section.cases?.length || 0} 条用例？`,
@@ -657,6 +665,8 @@ async function submitSelectedSections() {
     ElMessageBox.alert('请先选择用例')
     return
   }
+  const sections = cases.value.filter((section) => ids.includes(section.id))
+  if (!showCaseValidationResult(sections.flatMap((section) => validateSection(section)))) return
   try {
     await ElMessageBox.confirm(`提交已选用例所属的 ${ids.length} 个 section？`, '确认', { type: 'info' })
   } catch {
@@ -729,6 +739,7 @@ function openCaseEditor(section, row) {
   if (!caseForm.custom_steps_separated.length) {
     caseForm.custom_steps_separated.push({ content: '', expected: '' })
   }
+  caseEditorOriginal.value = serializeCaseForm()
   caseEditorVisible.value = true
 }
 
@@ -743,10 +754,76 @@ function removeCaseStep(index) {
   }
 }
 
+function serializeCaseForm() {
+  return JSON.stringify({
+    title: caseForm.title,
+    priority_id: Number(caseForm.priority_id || 0),
+    custom_preconds: caseForm.custom_preconds,
+    affected_products: [...caseForm.affected_products],
+    affected_modules: [...caseForm.affected_modules],
+    custom_steps_separated: caseForm.custom_steps_separated.map((step) => ({
+      content: step.content,
+      expected: step.expected,
+    })),
+  })
+}
+
+function validateSection(section) {
+  return validateCaseRows(section.cases || [], section.section || `section #${section.id}`)
+}
+
+function validateCaseRows(rows, sectionLabel) {
+  if (!Array.isArray(rows) || !rows.length) return [`${sectionLabel}: 至少需要 1 条用例`]
+  return rows.flatMap((row, index) => validateCaseRow(row, `${sectionLabel} / case #${index + 1}`))
+}
+
+function validateCaseRow(row, label) {
+  const errors = []
+  if (!String(row?.title || '').trim()) {
+    errors.push(`${label}: title 不能为空`)
+  }
+  const priority = Number(row?.priority_id)
+  if (!Number.isInteger(priority) || priority < 1 || priority > 4) {
+    errors.push(`${label}: priority_id 必须是 1-4`)
+  }
+  const steps = Array.isArray(row?.custom_steps_separated) ? row.custom_steps_separated : []
+  const completeSteps = steps.filter((step) => String(step?.content || '').trim() && String(step?.expected || '').trim())
+  if (!completeSteps.length) {
+    errors.push(`${label}: 至少需要 1 个完整步骤（操作和预期都必填）`)
+  }
+  const incompleteStepIndex = steps.findIndex((step) => {
+    const hasContent = String(step?.content || '').trim()
+    const hasExpected = String(step?.expected || '').trim()
+    return (hasContent || hasExpected) && !(hasContent && hasExpected)
+  })
+  if (incompleteStepIndex >= 0) {
+    errors.push(`${label}: 第 ${incompleteStepIndex + 1} 步操作和预期必须同时填写`)
+  }
+  if (!trimmedArray(row?.affected_products).length) {
+    errors.push(`${label}: affected_products 不能为空`)
+  }
+  if (!trimmedArray(row?.affected_modules).length) {
+    errors.push(`${label}: affected_modules 不能为空`)
+  }
+  return errors
+}
+
+function trimmedArray(value) {
+  return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : []
+}
+
+function showCaseValidationResult(errors) {
+  if (!errors.length) return true
+  const visibleErrors = errors.slice(0, 12)
+  const suffix = errors.length > visibleErrors.length ? `\n... 还有 ${errors.length - visibleErrors.length} 条` : ''
+  ElMessageBox.alert(`${visibleErrors.join('\n')}${suffix}`, '提交前校验失败', { type: 'warning' })
+  return false
+}
+
 async function saveCaseEditor() {
   if (!editingCaseSection.value || editingCaseIndex.value < 0) return
   const nextCases = (editingCaseSection.value.cases || []).map((row) => ({ ...row }))
-  nextCases[editingCaseIndex.value] = {
+  const nextCase = {
     ...nextCases[editingCaseIndex.value],
     title: caseForm.title.trim(),
     priority_id: Number(caseForm.priority_id || 2),
@@ -757,12 +834,15 @@ async function saveCaseEditor() {
       .map((step) => ({ content: step.content.trim(), expected: step.expected.trim() }))
       .filter((step) => step.content || step.expected),
   }
+  if (!showCaseValidationResult(validateCaseRow(nextCase, '当前用例'))) return
+  nextCases[editingCaseIndex.value] = nextCase
   try {
     await casesStore.update(taskId.value, editingCaseSection.value.id, {
       section: editingCaseSection.value.section,
       cases: nextCases,
     })
     notifySuccess('用例已保存')
+    caseEditorOriginal.value = serializeCaseForm()
     caseEditorVisible.value = false
   } catch {
     /* 错误已弹窗 */
@@ -1477,6 +1557,7 @@ async function submitKnowledgeFeedback() {
         style="font-family: ui-monospace, Consolas, monospace"
       />
       <template #footer>
+        <el-tag v-if="editorDirty" type="warning" size="small">未保存</el-tag>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="casesSaving" @click="saveEditor">保存</el-button>
       </template>
@@ -1562,6 +1643,7 @@ async function submitKnowledgeFeedback() {
       </el-form>
       <template #footer>
         <div class="drawer-footer">
+          <el-tag v-if="caseEditorDirty" type="warning" size="small">未保存</el-tag>
           <el-button @click="caseEditorVisible = false">取消</el-button>
           <el-button
             type="primary"

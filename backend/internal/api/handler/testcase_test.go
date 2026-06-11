@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -257,6 +258,40 @@ func TestApplyBatchCasePatch(t *testing.T) {
 	products[0] = "mutated"
 	if row["affected_products"].([]string)[0] != "Product-A" {
 		t.Fatal("patch should copy input slices")
+	}
+}
+
+func TestValidateCaseRows(t *testing.T) {
+	valid := []map[string]any{{
+		"title":             "checkout succeeds",
+		"priority_id":       3,
+		"affected_products": []string{"Shop"},
+		"affected_modules":  []string{"Checkout"},
+		"custom_steps_separated": []map[string]any{
+			{"content": "pay", "expected": "success"},
+		},
+	}}
+	if err := validateCaseRows(valid); err != nil {
+		t.Fatalf("validateCaseRows(valid) = %v", err)
+	}
+
+	invalid := []map[string]any{{
+		"title":             " ",
+		"priority_id":       9,
+		"affected_products": []string{},
+		"affected_modules":  []any{""},
+		"custom_steps_separated": []any{
+			map[string]any{"content": "click", "expected": ""},
+		},
+	}}
+	err := validateCaseRows(invalid)
+	if err == nil {
+		t.Fatal("validateCaseRows(invalid) returned nil")
+	}
+	for _, want := range []string{"title is required", "priority_id", "custom_steps_separated", "affected_products", "affected_modules"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("validateCaseRows(invalid) error = %v, want contains %q", err, want)
+		}
 	}
 }
 

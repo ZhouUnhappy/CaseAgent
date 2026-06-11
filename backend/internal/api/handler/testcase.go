@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"caseagent/internal/db/models"
@@ -73,6 +75,10 @@ func (h *Handler) UpdateTestCase(c *gin.Context) {
 		tc.Section = req.Section
 	}
 	if len(req.Cases) > 0 {
+		if err := validateCaseRows(req.Cases); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		tc.Cases = req.Cases
 	}
 	tc.UpdatedAt = time.Now()
@@ -139,6 +145,10 @@ func (h *Handler) BatchUpdateTestCases(c *gin.Context) {
 			return
 		}
 		applyBatchCasePatch(section.Cases[item.CaseIndex], req.Patch)
+		if err := validateCaseRows(section.Cases); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		changed[section.ID] = struct{}{}
 	}
 
@@ -169,6 +179,10 @@ func (h *Handler) SubmitTestCase(c *gin.Context) {
 
 	if err := DBFromContext(c).NewSelect().Model(tc).Where("id = ?", id).Scan(c); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
+		return
+	}
+	if err := validateCaseRows(tc.Cases); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -219,6 +233,12 @@ func (h *Handler) BatchSubmitTestCases(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
 		return
 	}
+	for _, section := range updated {
+		if err := validateCaseRows(section.Cases); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
 	now := time.Now()
 	if _, err := DBFromContext(c).NewUpdate().
@@ -259,6 +279,72 @@ func applyBatchCasePatch(row map[string]any, patch BatchCasePatchRequest) {
 	if patch.DuplicateHidden != nil {
 		row["duplicate_hidden"] = *patch.DuplicateHidden
 	}
+}
+
+func validateCaseRows(rows []map[string]any) error {
+	if len(rows) == 0 {
+		return fmt.Errorf("cases must contain at least one case")
+	}
+	failures := []string{}
+	for idx, row := range rows {
+		prefix := fmt.Sprintf("case[%d]", idx)
+		if strings.TrimSpace(stringFromAny(row["title"])) == "" {
+			failures = append(failures, prefix+".title is required")
+		}
+		priority := intFromAny(row["priority_id"])
+		if priority < 1 || priority > 4 {
+			failures = append(failures, prefix+".priority_id must be 1..4")
+		}
+		steps := mapsFromAny(row["custom_steps_separated"])
+		validSteps := 0
+		for stepIdx, step := range steps {
+			content := strings.TrimSpace(stringFromAny(step["content"]))
+			expected := strings.TrimSpace(stringFromAny(step["expected"]))
+			if content == "" || expected == "" {
+				failures = append(failures, fmt.Sprintf("%s.custom_steps_separated[%d] content and expected are required", prefix, stepIdx))
+				continue
+			}
+			validSteps++
+		}
+		if validSteps == 0 {
+			failures = append(failures, prefix+".custom_steps_separated must contain at least one complete step")
+		}
+		if len(stringsFromAny(row["affected_products"])) == 0 {
+			failures = append(failures, prefix+".affected_products is required")
+		}
+		if len(stringsFromAny(row["affected_modules"])) == 0 {
+			failures = append(failures, prefix+".affected_modules is required")
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("test case validation failed: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func stringsFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return nonEmptyStrings(typed)
+	case []any:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			values = append(values, stringFromAny(item))
+		}
+		return nonEmptyStrings(values)
+	default:
+		return nil
+	}
+}
+
+func nonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func uniqueTestCaseIDs(items []CaseRefRequest) []int {
