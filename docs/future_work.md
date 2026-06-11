@@ -36,12 +36,6 @@
 
 这些事项不需要算法工程师或数据工程师，但不是当前最短路径。除非出现明确 Trigger，否则只保留为备选，不主动开工。
 
-### 权限、操作者与审计
-
-- **需要角色**：前端工程师、后端工程师。
-- **Trigger**：出现外部用户、多人并发编辑、危险操作追责、客户侧安全要求，或 retry / cancel / replay / reindex 等操作需要明确操作者。
-- **DoD**：新增登录或可信身份注入方案；后端记录 `operator_id` / `operator_name` / `reason` 到运维干预 artifact 或独立 audit 表；前端危险操作要求二次确认并填写原因；覆盖 handler / service 测试；更新 `docs/multitenancy.md` 与 `docs/architecture.md`。
-
 ### API 契约与轻量 e2e
 
 - **需要角色**：前端工程师、后端工程师。

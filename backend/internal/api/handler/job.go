@@ -137,6 +137,10 @@ func toJobView(job models.BackgroundJob) jobView {
 }
 
 func (h *Handler) RetryJob(c *gin.Context) {
+	operator, ok := parseInterventionRequest(c)
+	if !ok {
+		return
+	}
 	job, ok := h.loadJobForAction(c)
 	if !ok {
 		return
@@ -165,7 +169,7 @@ func (h *Handler) RetryJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := recordJobIntervention(c, *job, "retry", nil); err != nil {
+	if err := recordJobIntervention(c, *job, "retry", operator, nil); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -179,6 +183,10 @@ func (h *Handler) RetryJob(c *gin.Context) {
 }
 
 func (h *Handler) CancelJob(c *gin.Context) {
+	operator, ok := parseInterventionRequest(c)
+	if !ok {
+		return
+	}
 	job, ok := h.loadJobForAction(c)
 	if !ok {
 		return
@@ -192,7 +200,7 @@ func (h *Handler) CancelJob(c *gin.Context) {
 	if _, err := DBFromContext(c).NewUpdate().
 		Model((*models.BackgroundJob)(nil)).
 		Set("status = ?", models.JobStatusCanceled).
-		Set("last_error = ?", "canceled by operator").
+		Set("last_error = ?", operator.CancelMessage()).
 		Set("locked_at = NULL").
 		Set("finished_at = ?", now).
 		Set("updated_at = ?", now).
@@ -205,11 +213,11 @@ func (h *Handler) CancelJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := cancelJobWorkflow(c, *job, now); err != nil {
+	if err := cancelJobWorkflow(c, *job, now, operator); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := recordJobIntervention(c, *job, "cancel", nil); err != nil {
+	if err := recordJobIntervention(c, *job, "cancel", operator, nil); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -223,6 +231,10 @@ func (h *Handler) CancelJob(c *gin.Context) {
 }
 
 func (h *Handler) ReplayJob(c *gin.Context) {
+	operator, ok := parseInterventionRequest(c)
+	if !ok {
+		return
+	}
 	job, ok := h.loadJobForAction(c)
 	if !ok {
 		return
@@ -236,6 +248,7 @@ func (h *Handler) ReplayJob(c *gin.Context) {
 	payload := clonePayload(job.Payload)
 	payload["replayed_from_job_id"] = job.ID
 	payload["intervention"] = "replay"
+	payload["operator"] = operator.Metadata()
 	replay := &models.BackgroundJob{
 		TenantID:    job.TenantID,
 		TaskID:      job.TaskID,
@@ -257,7 +270,7 @@ func (h *Handler) ReplayJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := recordJobIntervention(c, *job, "replay", map[string]any{"new_job_id": replay.ID}); err != nil {
+	if err := recordJobIntervention(c, *job, "replay", operator, map[string]any{"new_job_id": replay.ID}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -395,13 +408,13 @@ func markJobResourceCanceled(c *gin.Context, job models.BackgroundJob, updatedAt
 	}
 }
 
-func cancelJobWorkflow(c *gin.Context, job models.BackgroundJob, updatedAt time.Time) error {
+func cancelJobWorkflow(c *gin.Context, job models.BackgroundJob, updatedAt time.Time, operator trustedOperator) error {
 	if job.WorkflowRunID == nil {
 		return nil
 	}
 	if _, err := DBFromContext(c).NewUpdate().Model((*models.WorkflowRun)(nil)).
 		Set("status = ?", models.WorkflowStatusCanceled).
-		Set("last_error = ?", "canceled by operator").
+		Set("last_error = ?", operator.CancelMessage()).
 		Set("finished_at = ?", updatedAt).
 		Set("updated_at = ?", updatedAt).
 		Where("id = ?", *job.WorkflowRunID).
@@ -411,7 +424,7 @@ func cancelJobWorkflow(c *gin.Context, job models.BackgroundJob, updatedAt time.
 	}
 	_, err := DBFromContext(c).NewUpdate().Model((*models.WorkflowStep)(nil)).
 		Set("status = ?", models.WorkflowStatusCanceled).
-		Set("last_error = ?", "canceled by operator").
+		Set("last_error = ?", operator.CancelMessage()).
 		Set("finished_at = ?", updatedAt).
 		Set("updated_at = ?", updatedAt).
 		Where("workflow_run_id = ?", *job.WorkflowRunID).
@@ -420,7 +433,7 @@ func cancelJobWorkflow(c *gin.Context, job models.BackgroundJob, updatedAt time.
 	return err
 }
 
-func recordJobIntervention(c *gin.Context, job models.BackgroundJob, action string, extra map[string]any) error {
+func recordJobIntervention(c *gin.Context, job models.BackgroundJob, action string, operator trustedOperator, extra map[string]any) error {
 	tenantID, ok := TenantIDFromContext(c)
 	if !ok {
 		return fmt.Errorf("record job intervention: missing tenant")
@@ -431,6 +444,9 @@ func recordJobIntervention(c *gin.Context, job models.BackgroundJob, action stri
 		"job_id":        job.ID,
 		"job_type":      job.JobType,
 		"status_before": job.Status,
+		"operator_id":   operator.ID,
+		"operator_name": operator.Name,
+		"reason":        operator.Reason,
 	}
 	for key, value := range extra {
 		payload[key] = value

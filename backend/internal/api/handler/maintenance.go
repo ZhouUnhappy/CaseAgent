@@ -38,6 +38,10 @@ func (h *Handler) ListStaleIndex(c *gin.Context) {
 // tenant's documents/knowledge. Cross-tenant batch repair would need an admin
 // endpoint and a superuser DSN to bypass RLS; not implemented yet.
 func (h *Handler) ReindexVectors(c *gin.Context) {
+	operator, ok := parseInterventionRequest(c)
+	if !ok {
+		return
+	}
 	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -54,7 +58,11 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 		return
 	}
 
-	if err := enqueueRepairPlan(c, plan); err != nil {
+	if err := enqueueRepairPlan(c, plan, operator); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := recordMaintenanceIntervention(c, plan, operator); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -67,12 +75,13 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 	})
 }
 
-func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan) error {
+func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan, operator trustedOperator) error {
 	jobs := jobservice.New(DBFromContext(c))
 	payload := map[string]any{
 		"reason":        "stale_index",
 		"index_profile": plan.Profile.Name,
 		"index_version": plan.Profile.Version,
+		"operator":      operator.Metadata(),
 	}
 	for _, id := range plan.DocumentIDs {
 		if _, err := jobs.Enqueue(c, jobservice.EnqueueInput{
@@ -95,6 +104,38 @@ func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan) erro
 		}
 	}
 	return nil
+}
+
+func recordMaintenanceIntervention(c *gin.Context, plan *maintenanceservice.RepairPlan, operator trustedOperator) error {
+	tenantID, ok := TenantIDFromContext(c)
+	if !ok {
+		return fmt.Errorf("record maintenance intervention: missing tenant")
+	}
+	artifact := &models.Artifact{
+		TenantID:     tenantID,
+		ArtifactType: models.ArtifactTypeIntervention,
+		ResourceType: "maintenance",
+		Name:         "vector reindex",
+		Payload: map[string]any{
+			"action":                  "reindex",
+			"operator_id":             operator.ID,
+			"operator_name":           operator.Name,
+			"reason":                  operator.Reason,
+			"index_profile":           plan.Profile.Name,
+			"index_version":           plan.Profile.Version,
+			"document_ids":            plan.DocumentIDs,
+			"knowledge_ids":           plan.KnowledgeIDs,
+			"blocked_document_ids":    plan.BlockedDocumentIDs,
+			"blocked_knowledge_ids":   plan.BlockedKnowledgeIDs,
+			"queued_document_count":   len(plan.DocumentIDs),
+			"queued_knowledge_count":  len(plan.KnowledgeIDs),
+			"blocked_document_count":  len(plan.BlockedDocumentIDs),
+			"blocked_knowledge_count": len(plan.BlockedKnowledgeIDs),
+		},
+		CreatedAt: time.Now(),
+	}
+	_, err := DBFromContext(c).NewInsert().Model(artifact).Exec(c)
+	return err
 }
 
 func markDocumentsProcessing(ctx context.Context, db bun.IDB, ids []int, updatedAt time.Time) error {

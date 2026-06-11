@@ -75,6 +75,22 @@ COMMIT (or ROLLBACK) → flush buffered response
 | 缺失 / 不存在 / 已归档 | 400，`{"error":"missing X-Tenant-ID header"}` / `{"error":"tenant \"xxx\" not found"}` | 白名单路由 `/api/v1/tenants` 跳过此校验；归档 tenant 不再能访问业务 API |
 | 前端 | localStorage(`caseagent.tenant_slug`) + axios request interceptor 自动注入 | 切换 tenant 会清空 tenant-scoped Pinia store 并用 RouterView key 触发当前页面重新拉数据，不做硬刷新 |
 
+## 操作者与危险操作审计
+
+当前仍是可信本地 demo / 小范围试用场景，不引入登录系统或 RBAC。需要追责的运维操作使用可信 header 注入操作者：
+
+| Header | 含义 | 默认 |
+|---|---|---|
+| `X-Operator-ID` | 操作者稳定标识 | `local-demo` |
+| `X-Operator-Name` | 操作者展示名 | 同 `X-Operator-ID` |
+
+前端在 `localStorage(caseagent.operator_id)` / `localStorage(caseagent.operator_name)` 保存操作者，并在每个请求里自动注入。Jobs 的 `retry` / `cancel` / `replay` 和 `POST /api/v1/maintenance/reindex` 都要求 JSON body 带 `reason`，否则返回 400。后端会把 `operator_id` / `operator_name` / `reason` 写入 `artifacts.artifact_type='intervention'`：
+
+- job 操作：`resource_type='job'`，`resource_id=<job_id>`，payload 含 action、job_id、job_type、status_before、operator 与 reason；`replay` 还会把 operator metadata 写入新 job payload。
+- reindex 操作：`resource_type='maintenance'`，payload 含 action、operator、reason、index profile/version、queued/blocked document/knowledge 计数和 ID。
+
+这不是安全边界。生产环境仍应把 operator header 换成登录态 / JWT claims，并在 API 前加 RBAC 与资源级授权。
+
 ## Tenant 生命周期与 demo 清理
 
 - 创建：`POST /api/v1/tenants` 或前端顶部“新建”/`/tenants` 页面；slug 创建后不改名，显示名可通过 `PUT /api/v1/tenants/:slug` 更新。

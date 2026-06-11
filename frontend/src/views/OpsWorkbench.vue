@@ -14,6 +14,8 @@ import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel } from '..
 const router = useRouter()
 const tenantStore = useTenantStore()
 const { activeItems: tenants, currentSlug, loading: tenantLoading } = storeToRefs(tenantStore)
+const OPERATOR_ID_STORAGE_KEY = 'caseagent.operator_id'
+const OPERATOR_NAME_STORAGE_KEY = 'caseagent.operator_name'
 
 const activeTab = ref('metrics')
 const jobs = ref([])
@@ -287,20 +289,65 @@ function canReplay(job) {
 
 async function confirmAction(job, action) {
   const labels = { retry: '重试', cancel: '取消', replay: '重放' }
-  await ElMessageBox.confirm(`${labels[action]} job #${job.id}？`, '确认', { type: action === 'cancel' ? 'warning' : 'info' })
+  const operatorName = await ensureOperatorName()
+  const reason = await promptInterventionReason(`${labels[action]} job #${job.id}`, action)
+  await ElMessageBox.confirm(
+    `${labels[action]} job #${job.id}？操作者：${operatorName}`,
+    '确认',
+    { type: action === 'cancel' ? 'warning' : 'info' },
+  )
+  return { reason }
+}
+
+async function ensureOperatorName() {
+  const current = localStorage.getItem(OPERATOR_NAME_STORAGE_KEY) || ''
+  if (current.trim()) {
+    if (!localStorage.getItem(OPERATOR_ID_STORAGE_KEY)) {
+      localStorage.setItem(OPERATOR_ID_STORAGE_KEY, operatorIDFromName(current))
+    }
+    return current.trim()
+  }
+  const { value } = await ElMessageBox.prompt('请输入本次操作人名称', '操作者', {
+    confirmButtonText: '确认',
+    cancelButtonText: '取消',
+    inputPattern: /\S+/,
+    inputErrorMessage: '操作者不能为空',
+  })
+  const name = String(value || '').trim()
+  localStorage.setItem(OPERATOR_NAME_STORAGE_KEY, name)
+  localStorage.setItem(OPERATOR_ID_STORAGE_KEY, operatorIDFromName(name))
+  return name
+}
+
+async function promptInterventionReason(title, action) {
+  const labels = { retry: '重试原因', cancel: '取消原因', replay: '重放原因' }
+  const { value } = await ElMessageBox.prompt(`请填写${labels[action] || '操作原因'}：${title}`, '操作原因', {
+    confirmButtonText: '确认',
+    cancelButtonText: '取消',
+    inputType: 'textarea',
+    inputPattern: /\S+/,
+    inputErrorMessage: '原因不能为空',
+  })
+  return String(value || '').trim()
+}
+
+function operatorIDFromName(name) {
+  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return `local:${normalized || 'operator'}`
 }
 
 async function runJobAction(job, action) {
+  let payload
   try {
-    await confirmAction(job, action)
+    payload = await confirmAction(job, action)
   } catch {
     return
   }
   actingJobId.value = job.id
   try {
-    if (action === 'retry') await retryJob(job.id)
-    if (action === 'cancel') await cancelJob(job.id)
-    if (action === 'replay') await replayJob(job.id)
+    if (action === 'retry') await retryJob(job.id, payload)
+    if (action === 'cancel') await cancelJob(job.id, payload)
+    if (action === 'replay') await replayJob(job.id, payload)
     notifySuccess(`job #${job.id} ${action} 已提交`)
     refreshAll()
   } catch {

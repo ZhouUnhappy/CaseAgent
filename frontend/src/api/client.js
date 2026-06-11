@@ -2,6 +2,8 @@ import axios from 'axios'
 import { notifyApiError } from '../utils/error'
 
 const TENANT_STORAGE_KEY = 'caseagent.tenant_slug'
+const OPERATOR_ID_STORAGE_KEY = 'caseagent.operator_id'
+const OPERATOR_NAME_STORAGE_KEY = 'caseagent.operator_name'
 
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || '/api/v1',
@@ -14,6 +16,14 @@ client.interceptors.request.use((config) => {
   const slug = localStorage.getItem(TENANT_STORAGE_KEY)
   if (slug && !config.headers['X-Tenant-ID']) {
     config.headers['X-Tenant-ID'] = slug
+  }
+  const operatorId = localStorage.getItem(OPERATOR_ID_STORAGE_KEY)
+  const operatorName = localStorage.getItem(OPERATOR_NAME_STORAGE_KEY)
+  if (operatorId && !config.headers['X-Operator-ID']) {
+    config.headers['X-Operator-ID'] = operatorId
+  }
+  if (operatorName && !config.headers['X-Operator-Name']) {
+    config.headers['X-Operator-Name'] = operatorName
   }
   return config
 })

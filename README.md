@@ -103,6 +103,13 @@ npm run dev
 - `GET /api/v1/maintenance/vector-health` - 查看向量健康状态
 - `POST /api/v1/maintenance/reindex` - 批量重建异常向量
 
+运维危险操作还支持可信操作者 header：`X-Operator-ID` / `X-Operator-Name`。前端会自动从 localStorage 注入；未提供时后端按 `local-demo` 记录。以下接口要求 body 带 `{"reason":"..."}`，并会把 operator 与 reason 写入 `artifacts.artifact_type='intervention'`：
+
+- `POST /api/v1/jobs/:id/retry` - 重试失败或取消的后台 job
+- `POST /api/v1/jobs/:id/cancel` - 取消 pending/running job
+- `POST /api/v1/jobs/:id/replay` - 从 terminal job 重放一个新 job
+- `POST /api/v1/maintenance/reindex` - 批量重建异常向量
+
 ## License
 
 This project is licensed under the [Apache-2.0 License](LICENSE-APACHE).

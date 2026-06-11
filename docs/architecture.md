@@ -96,7 +96,7 @@
   - job 记录 job 类型、tenant、task_id、状态、重试次数、最后错误、领取/完成时间。
   - worker 按 `job_runner.max_concurrency` 限制并发，用 tenant-scoped tx 执行任务，启动时恢复超时 running job。
   - worker 领取 job 后创建 `workflow_runs` / `workflow_steps`，并把 `workflow_run_id` 注入任务执行 context。
-  - 运维 API：`GET /api/v1/jobs` / `GET /api/v1/workflows` 支持按当前 tenant、resource、status、job_type/workflow_type 查询；`POST /api/v1/jobs/:id/{retry,cancel,replay}` 只允许安全状态转移，并写入 `artifacts.artifact_type='intervention'`。
+  - 运维 API：`GET /api/v1/jobs` / `GET /api/v1/workflows` 支持按当前 tenant、resource、status、job_type/workflow_type 查询；`POST /api/v1/jobs/:id/{retry,cancel,replay}` 要求请求体带 `reason`，只允许安全状态转移，并把可信 operator header（`X-Operator-ID` / `X-Operator-Name`）与 reason 写入 `artifacts.artifact_type='intervention'`。
 - Workflow trace：`backend/internal/service/workflow/`
   - Workflow run / step 状态通过 `start/succeed/fail/cancel/replay` 事件做集中转移，非法 transition 在 service 层拒绝。
   - `GenerateCases` 记录 document / knowledge retrieval 摘要、case generation agent 摘要和 generated cases artifact。
@@ -152,12 +152,12 @@
 
 **可观测性**：
 
-- 前端：`api/client.js` 把 5xx/408/429/网络错误标记 `retryable=true`，`utils/error.js` 据此分别用 `warning` / `error` 弹给用户；处理失败行有「重新处理」按钮。
+- 前端：`api/client.js` 把 5xx/408/429/网络错误标记 `retryable=true`，`utils/error.js` 据此分别用 `warning` / `error` 弹给用户；处理失败行有「重新处理」按钮。API client 还会从 localStorage 注入 `X-Tenant-ID` 与可信 operator header，运维页执行 retry / cancel / replay 前要求填写操作者和原因。
 - 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态。
 
 **验证方式**：手工跑全流程；`cd frontend && npm run build` 通过。
 
-**运维权限边界**：当前 retry / cancel / replay 适合 demo、本地调试和单租户可信操作员场景。生产环境应在这些 API 前增加操作者身份、角色权限、二次确认审计字段和更细的资源级授权；跨 tenant 批量处理仍应走独立 admin API，而不是复用 tenant-scoped 业务入口。
+**运维权限边界**：当前 retry / cancel / replay / reindex 适合 demo、本地调试和单租户可信操作员场景。前端会提示操作者和原因，后端把可信 operator header 与 reason 写入 intervention artifact；这仍不是登录或 RBAC。生产环境应把 header 换成登录态 / JWT claims，并在这些 API 前增加角色权限与更细的资源级授权；跨 tenant 批量处理仍应走独立 admin API，而不是复用 tenant-scoped 业务入口。
 
 ---
 
