@@ -66,6 +66,7 @@ func (s *Service) Get(ctx context.Context) (*Report, error) {
 		s.checkPgvector(ctx),
 		s.checkBusinessTableRLS(ctx),
 		s.checkConfig(),
+		s.checkWorkerRisk(),
 		s.checkVectorHealth(ctx),
 	}
 
@@ -208,6 +209,91 @@ func (s *Service) checkConfig() Check {
 		return fail("config_loaded", "Runtime config", err.Error(), meta)
 	}
 	return pass("config_loaded", "Runtime config", "runtime config is loaded and validates", meta)
+}
+
+func (s *Service) checkWorkerRisk() Check {
+	if s.cfg == nil {
+		return warn("worker_risk", "Worker risk", "runtime config is not loaded in process", nil)
+	}
+	cfg := s.cfg.JobRunner
+	meta := map[string]any{
+		"max_concurrency":              cfg.MaxConcurrency,
+		"tenant_max_concurrency":       cfg.TenantMaxConcurrency,
+		"max_retries":                  cfg.MaxRetries,
+		"retry_backoff_seconds":        cfg.RetryBackoffSeconds,
+		"poll_interval_seconds":        cfg.PollIntervalSeconds,
+		"running_timeout_seconds":      cfg.RunningTimeoutSeconds,
+		"state_update_timeout_seconds": cfg.StateUpdateTimeoutSeconds,
+		"job_type_overrides":           len(cfg.Types),
+	}
+
+	failures := workerRiskFailures(cfg)
+	warnings := workerRiskWarnings(cfg)
+	meta["failures"] = failures
+	meta["warnings"] = warnings
+	if len(failures) > 0 {
+		return fail("worker_risk", "Worker risk", "worker configuration can prevent jobs from running safely", meta)
+	}
+	if len(warnings) > 0 {
+		return warn("worker_risk", "Worker risk", "worker configuration has capacity or recovery risks", meta)
+	}
+	return pass("worker_risk", "Worker risk", "worker configuration has bounded concurrency and recovery settings", meta)
+}
+
+func workerRiskFailures(cfg config.JobRunnerConfig) []string {
+	failures := []string{}
+	if cfg.MaxConcurrency <= 0 {
+		failures = append(failures, "max_concurrency must be > 0")
+	}
+	if cfg.PollIntervalSeconds <= 0 {
+		failures = append(failures, "poll_interval_seconds must be > 0")
+	}
+	if cfg.RunningTimeoutSeconds <= 0 {
+		failures = append(failures, "running_timeout_seconds must be > 0")
+	}
+	if cfg.StateUpdateTimeoutSeconds <= 0 {
+		failures = append(failures, "state_update_timeout_seconds must be > 0")
+	}
+	if cfg.MaxRetries < 0 {
+		failures = append(failures, "max_retries must be >= 0")
+	}
+	if cfg.RetryBackoffSeconds < 0 {
+		failures = append(failures, "retry_backoff_seconds must be >= 0")
+	}
+	for jobType, options := range cfg.Types {
+		if options.MaxConcurrency < 0 {
+			failures = append(failures, fmt.Sprintf("types.%s.max_concurrency must be >= 0", jobType))
+		}
+		if options.MaxRetries < 0 {
+			failures = append(failures, fmt.Sprintf("types.%s.max_retries must be >= 0", jobType))
+		}
+	}
+	return failures
+}
+
+func workerRiskWarnings(cfg config.JobRunnerConfig) []string {
+	warnings := []string{}
+	if cfg.TenantMaxConcurrency == 0 {
+		warnings = append(warnings, "tenant_max_concurrency is disabled; one tenant can consume all worker slots")
+	}
+	if cfg.TenantMaxConcurrency > cfg.MaxConcurrency && cfg.MaxConcurrency > 0 {
+		warnings = append(warnings, "tenant_max_concurrency is higher than max_concurrency and is effectively unbounded")
+	}
+	if cfg.MaxRetries == 0 {
+		warnings = append(warnings, "max_retries is 0; transient failures will not retry")
+	}
+	if cfg.RunningTimeoutSeconds <= cfg.StateUpdateTimeoutSeconds && cfg.RunningTimeoutSeconds > 0 {
+		warnings = append(warnings, "running_timeout_seconds should be greater than state_update_timeout_seconds")
+	}
+	for jobType, options := range cfg.Types {
+		if options.MaxConcurrency > cfg.MaxConcurrency && cfg.MaxConcurrency > 0 {
+			warnings = append(warnings, fmt.Sprintf("types.%s.max_concurrency is higher than global max_concurrency", jobType))
+		}
+		if options.MaxRetries == 0 && cfg.MaxRetries > 0 {
+			warnings = append(warnings, fmt.Sprintf("types.%s.max_retries disables retries for this job type", jobType))
+		}
+	}
+	return warnings
 }
 
 func (s *Service) checkVectorHealth(ctx context.Context) Check {

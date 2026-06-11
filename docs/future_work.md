@@ -60,12 +60,6 @@
 - **Trigger**：固定样本报告稳定，人工反馈样本累计到足够支撑 prompt/profile 对比，且用户需要在页面里做质量复盘。
 - **DoD**：在运维页或独立质量页展示 prompt/profile 对比、质量报告历史、反馈趋势；数据来自现有 trace / feedback / report artifact，不引入自动评分；API 聚合测试覆盖，前端 build 通过。
 
-### 部署前置诊断的下一阶段
-
-- **需要角色**：后端工程师、前端工程师。
-- **Trigger**：非核心开发者独立部署，或环境问题频繁来自 DB role、pgvector、RLS、模型配置、embedding 维度、worker 配置。
-- **DoD**：诊断结果覆盖 DB role 是否绕过 RLS、pgvector 是否启用、业务表 RLS 是否完整、当前 tenant 上下文、模型配置摘要、向量健康、worker 风险项；前端运维页可查看并复制诊断 JSON；后端测试覆盖 PASS / WARN / FAIL 分类。
-
 ### 任务诊断包的下一阶段
 
 - **需要角色**：前端工程师、后端工程师。

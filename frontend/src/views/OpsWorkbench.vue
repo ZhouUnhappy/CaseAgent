@@ -27,6 +27,7 @@ const jobsLoading = ref(false)
 const workflowsLoading = ref(false)
 const metricsLoading = ref(false)
 const preflightLoading = ref(false)
+const preflightCopying = ref(false)
 const feedbackLoading = ref(false)
 const actingJobId = ref(0)
 const metricsRange = ref([])
@@ -99,6 +100,7 @@ const workflowMetrics = computed(() => metrics.value?.by_workflow || [])
 const failureStages = computed(() => metrics.value?.failure_stages || [])
 const jobStatuses = computed(() => metrics.value?.job_statuses || [])
 const preflightChecks = computed(() => preflight.value?.checks || [])
+const preflightJSON = computed(() => (preflight.value ? JSON.stringify(preflight.value, null, 2) : ''))
 const feedbackByType = computed(() => feedbackSummary.value?.by_type || [])
 const feedbackByPrompt = computed(() => feedbackSummary.value?.by_prompt || [])
 const recentFeedback = computed(() => feedbackSummary.value?.recent || [])
@@ -192,6 +194,38 @@ async function loadPreflight() {
     preflight.value = await getOpsPreflight()
   } finally {
     preflightLoading.value = false
+  }
+}
+
+async function copyPreflightJSON() {
+  if (!preflightJSON.value) return
+  preflightCopying.value = true
+  try {
+    await copyText(preflightJSON.value)
+    notifySuccess('Preflight JSON 已复制')
+  } catch {
+    await ElMessageBox.alert('复制失败，请展开 Raw JSON 后手动复制。', '复制失败', { type: 'warning' })
+  } finally {
+    preflightCopying.value = false
+  }
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  if (!copied) {
+    throw new Error('copy failed')
   }
 }
 
@@ -591,6 +625,14 @@ function formatDuration(ms) {
           <el-button type="primary" :icon="Refresh" :loading="preflightLoading" @click="loadPreflight">
             重新诊断
           </el-button>
+          <el-button
+            :icon="CopyDocument"
+            :loading="preflightCopying"
+            :disabled="!preflight"
+            @click="copyPreflightJSON"
+          >
+            复制 JSON
+          </el-button>
         </div>
 
         <el-table :data="preflightChecks" v-loading="preflightLoading" stripe class="ops-table">
@@ -608,6 +650,11 @@ function formatDuration(ms) {
           </el-table-column>
           <template #empty>暂无 preflight 数据</template>
         </el-table>
+        <el-collapse v-if="preflight" class="preflight-json">
+          <el-collapse-item title="Raw JSON" name="raw-json">
+            <pre class="json-block">{{ preflightJSON }}</pre>
+          </el-collapse-item>
+        </el-collapse>
       </el-tab-pane>
 
       <el-tab-pane label="Feedback" name="feedback">
@@ -957,6 +1004,24 @@ function formatDuration(ms) {
   max-height: 120px;
   margin: 0;
   overflow: auto;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.preflight-json {
+  margin-top: 12px;
+}
+
+.json-block {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  background: #f8fafc;
   color: #334155;
   font-size: 12px;
   line-height: 1.45;

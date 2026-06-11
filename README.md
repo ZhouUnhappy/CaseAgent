@@ -101,7 +101,7 @@ npm run dev
 - `PUT /api/v1/knowledge-suggestions/:id` - 采纳/忽略知识建议，可回填 `resolved_knowledge_id`
 - pending 知识建议会按 `suggestion.auto_dismiss_pending_days` 自动过期为 `dismissed`
 - `GET /api/v1/ops/metrics` - 运维质量、成本与稳定性指标
-- `GET /api/v1/ops/preflight` - 部署前置诊断（DB/RLS/pgvector/config/vector health）
+- `GET /api/v1/ops/preflight` - 部署前置诊断（DB/RLS/pgvector/config/vector health/worker risk）
 - `GET /api/v1/ops/feedback-summary` - 人工反馈按类型 / prompt / task 聚合
 - `GET /api/v1/ops/retention/cleanup` - 诊断数据保留策略 dry-run，返回候选行数与字节估算
 - `POST /api/v1/ops/retention/cleanup` - 执行 tenant-scoped 诊断数据清理
