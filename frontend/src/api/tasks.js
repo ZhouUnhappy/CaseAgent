@@ -16,6 +16,10 @@ export function getTaskTrace(id) {
   return client.get(`/tasks/${id}/trace`).then((r) => r.data)
 }
 
+export function getTaskDiagnostics(id) {
+  return client.get(`/tasks/${id}/diagnostics`).then((r) => r.data)
+}
+
 export function reviewAffected(id, payload) {
   return client.put(`/tasks/${id}/review`, payload).then((r) => r.data)
 }

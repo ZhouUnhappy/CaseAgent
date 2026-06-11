@@ -3,6 +3,8 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	feedbackservice "caseagent/internal/service/feedback"
 
@@ -58,6 +60,46 @@ func (h *Handler) ListTaskFeedback(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rows)
+}
+
+func (h *Handler) GetFeedbackSummary(c *gin.Context) {
+	input, ok := parseFeedbackSummaryInput(c)
+	if !ok {
+		return
+	}
+	summary, err := feedbackservice.New(DBFromContext(c)).FeedbackSummary(c, input)
+	if err != nil {
+		writeFeedbackServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, summary)
+}
+
+func parseFeedbackSummaryInput(c *gin.Context) (feedbackservice.SummaryInput, bool) {
+	input := feedbackservice.SummaryInput{
+		FeedbackType:  strings.TrimSpace(c.Query("feedback_type")),
+		PromptID:      strings.TrimSpace(c.Query("prompt_id")),
+		PromptVersion: strings.TrimSpace(c.Query("prompt_version")),
+	}
+	if raw := c.Query("task_id"); raw != "" {
+		taskID, err := strconv.Atoi(raw)
+		if err != nil || taskID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "task_id must be a positive integer"})
+			return input, false
+		}
+		input.TaskID = taskID
+	}
+	from, ok := parseOptionalOpsTime(c, "from")
+	if !ok {
+		return input, false
+	}
+	to, ok := parseOptionalOpsTime(c, "to")
+	if !ok {
+		return input, false
+	}
+	input.From = from
+	input.To = to
+	return input, true
 }
 
 func writeFeedbackServiceError(c *gin.Context, err error) {

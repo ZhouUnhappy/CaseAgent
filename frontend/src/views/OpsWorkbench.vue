@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Close, CopyDocument, Refresh, RefreshRight, View } from '@element-plus/icons-vue'
 import { cancelJob, listJobs, replayJob, retryJob } from '../api/jobs'
-import { getOpsMetrics } from '../api/ops'
+import { getFeedbackSummary, getOpsMetrics, getOpsPreflight } from '../api/ops'
 import { listWorkflows } from '../api/workflows'
 import { useTenantStore } from '../stores/tenant'
 import { notifySuccess } from '../utils/error'
@@ -19,11 +19,16 @@ const activeTab = ref('metrics')
 const jobs = ref([])
 const workflows = ref([])
 const metrics = ref(null)
+const preflight = ref(null)
+const feedbackSummary = ref(null)
 const jobsLoading = ref(false)
 const workflowsLoading = ref(false)
 const metricsLoading = ref(false)
+const preflightLoading = ref(false)
+const feedbackLoading = ref(false)
 const actingJobId = ref(0)
 const metricsRange = ref([])
+const feedbackRange = ref([])
 
 const jobFilters = reactive({
   tenant: currentSlug.value,
@@ -50,6 +55,14 @@ const metricsFilters = reactive({
   task_id: '',
 })
 
+const feedbackFilters = reactive({
+  tenant: currentSlug.value,
+  task_id: '',
+  feedback_type: '',
+  prompt_id: '',
+  prompt_version: '',
+})
+
 const jobTypeOptions = [
   'analyze',
   'generate',
@@ -60,6 +73,13 @@ const jobTypeOptions = [
 ]
 const jobStatusOptions = ['pending', 'retrying', 'running', 'succeeded', 'failed', 'canceled']
 const workflowStatusOptions = ['pending', 'running', 'succeeded', 'failed', 'canceled']
+const feedbackTypeOptions = [
+  { value: 'useful', label: '有用' },
+  { value: 'duplicate', label: '重复' },
+  { value: 'missing_steps', label: '缺步骤' },
+  { value: 'requirement_mismatch', label: '不符合需求' },
+  { value: 'knowledge_missing', label: '知识缺失' },
+]
 const jobResourceOptions = [
   { value: 'task_id', label: 'Task' },
   { value: 'document_id', label: 'Document' },
@@ -76,6 +96,10 @@ const modelMetrics = computed(() => metrics.value?.by_model || [])
 const workflowMetrics = computed(() => metrics.value?.by_workflow || [])
 const failureStages = computed(() => metrics.value?.failure_stages || [])
 const jobStatuses = computed(() => metrics.value?.job_statuses || [])
+const preflightChecks = computed(() => preflight.value?.checks || [])
+const feedbackByType = computed(() => feedbackSummary.value?.by_type || [])
+const feedbackByPrompt = computed(() => feedbackSummary.value?.by_prompt || [])
+const recentFeedback = computed(() => feedbackSummary.value?.recent || [])
 
 const currentTenantLabel = computed(() => {
   const tenant = tenants.value.find((item) => item.slug === currentSlug.value)
@@ -96,6 +120,7 @@ function applyTenant(slug) {
   jobFilters.tenant = slug
   workflowFilters.tenant = slug
   metricsFilters.tenant = slug
+  feedbackFilters.tenant = slug
   refreshAll()
 }
 
@@ -130,6 +155,17 @@ function buildMetricsParams() {
   return params
 }
 
+function buildFeedbackParams() {
+  const params = {}
+  if (feedbackRange.value?.[0]) params.from = feedbackRange.value[0]
+  if (feedbackRange.value?.[1]) params.to = feedbackRange.value[1]
+  if (feedbackFilters.task_id) params.task_id = Number(feedbackFilters.task_id)
+  if (feedbackFilters.feedback_type) params.feedback_type = feedbackFilters.feedback_type
+  if (feedbackFilters.prompt_id) params.prompt_id = feedbackFilters.prompt_id.trim()
+  if (feedbackFilters.prompt_version) params.prompt_version = feedbackFilters.prompt_version.trim()
+  return params
+}
+
 async function loadJobs() {
   jobsLoading.value = true
   try {
@@ -148,6 +184,24 @@ async function loadMetrics() {
   }
 }
 
+async function loadPreflight() {
+  preflightLoading.value = true
+  try {
+    preflight.value = await getOpsPreflight()
+  } finally {
+    preflightLoading.value = false
+  }
+}
+
+async function loadFeedbackSummary() {
+  feedbackLoading.value = true
+  try {
+    feedbackSummary.value = await getFeedbackSummary(buildFeedbackParams())
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
 async function loadWorkflows() {
   workflowsLoading.value = true
   try {
@@ -159,6 +213,8 @@ async function loadWorkflows() {
 
 function refreshAll() {
   loadMetrics().catch(() => {})
+  loadPreflight().catch(() => {})
+  loadFeedbackSummary().catch(() => {})
   loadJobs().catch(() => {})
   loadWorkflows().catch(() => {})
 }
@@ -196,6 +252,18 @@ function resetMetricsFilters() {
     task_id: '',
   })
   loadMetrics().catch(() => {})
+}
+
+function resetFeedbackFilters() {
+  feedbackRange.value = []
+  Object.assign(feedbackFilters, {
+    tenant: currentSlug.value,
+    task_id: '',
+    feedback_type: '',
+    prompt_id: '',
+    prompt_version: '',
+  })
+  loadFeedbackSummary().catch(() => {})
 }
 
 function resourceLabel(job) {
@@ -259,6 +327,22 @@ function formatPercent(value) {
   return `${Math.round(Number(value || 0) * 100)}%`
 }
 
+function checkStatusType(status) {
+  if (status === 'pass') return 'success'
+  if (status === 'warn') return 'warning'
+  if (status === 'fail') return 'danger'
+  return 'info'
+}
+
+function feedbackTypeLabel(value) {
+  return feedbackTypeOptions.find((item) => item.value === value)?.label || value || '-'
+}
+
+function feedbackNegativeRate(row) {
+  if (!row?.total) return '0%'
+  return formatPercent(Number(row.negative || 0) / Number(row.total))
+}
+
 function formatDuration(ms) {
   const value = Number(ms || 0)
   if (!value) return '-'
@@ -291,7 +375,11 @@ function formatDuration(ms) {
           <span class="muted small">{{ currentTenantLabel }}</span>
         </div>
       </div>
-      <el-button :icon="Refresh" :loading="jobsLoading || workflowsLoading" @click="refreshAll">刷新</el-button>
+      <el-button
+        :icon="Refresh"
+        :loading="jobsLoading || workflowsLoading || metricsLoading || preflightLoading || feedbackLoading"
+        @click="refreshAll"
+      >刷新</el-button>
     </header>
 
     <el-tabs v-model="activeTab" class="ops-tabs">
@@ -443,6 +531,125 @@ function formatDuration(ms) {
               <template #empty>暂无 job 状态数据</template>
             </el-table>
           </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="Preflight" name="preflight">
+        <div class="filter-bar">
+          <el-tag :type="checkStatusType(preflight?.overall)" size="large">
+            {{ preflight?.overall || 'unknown' }}
+          </el-tag>
+          <span class="muted small">Generated: {{ formatDate(preflight?.generated_at) }}</span>
+          <span class="muted small">Tenant #{{ preflight?.tenant_id || '-' }}</span>
+          <el-button type="primary" :icon="Refresh" :loading="preflightLoading" @click="loadPreflight">
+            重新诊断
+          </el-button>
+        </div>
+
+        <el-table :data="preflightChecks" v-loading="preflightLoading" stripe class="ops-table">
+          <el-table-column prop="label" label="Check" min-width="170" />
+          <el-table-column label="Status" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="checkStatusType(row.status)">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="message" label="Message" min-width="260" show-overflow-tooltip />
+          <el-table-column label="Metadata" min-width="320">
+            <template #default="{ row }">
+              <pre class="json-inline">{{ JSON.stringify(row.metadata || {}, null, 2) }}</pre>
+            </template>
+          </el-table-column>
+          <template #empty>暂无 preflight 数据</template>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="Feedback" name="feedback">
+        <div class="filter-bar">
+          <el-date-picker
+            v-model="feedbackRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="from"
+            end-placeholder="to"
+            class="date-range"
+          />
+          <el-input v-model="feedbackFilters.task_id" clearable placeholder="task id" class="id-input" />
+          <el-select v-model="feedbackFilters.feedback_type" clearable placeholder="feedback" class="filter-control">
+            <el-option v-for="item in feedbackTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+          <el-input v-model="feedbackFilters.prompt_id" clearable placeholder="prompt id" class="filter-control" />
+          <el-input v-model="feedbackFilters.prompt_version" clearable placeholder="prompt version" class="filter-control" />
+          <el-button type="primary" :icon="Refresh" :loading="feedbackLoading" @click="loadFeedbackSummary">查询</el-button>
+          <el-button @click="resetFeedbackFilters">重置</el-button>
+        </div>
+
+        <div class="metric-grid compact-grid" v-loading="feedbackLoading">
+          <div class="metric-panel">
+            <span class="metric-label">Feedback rows</span>
+            <strong>{{ formatNumber(feedbackSummary?.total) }}</strong>
+            <span class="metric-foot">latest 500 rows</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Feedback types</span>
+            <strong>{{ formatNumber(feedbackByType.length) }}</strong>
+            <span class="metric-foot">manual labels</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Prompt groups</span>
+            <strong>{{ formatNumber(feedbackByPrompt.length) }}</strong>
+            <span class="metric-foot">prompt/version</span>
+          </div>
+        </div>
+
+        <div class="metrics-split">
+          <div class="metrics-section">
+            <h3>By Feedback Type</h3>
+            <el-table :data="feedbackByType" v-loading="feedbackLoading" stripe class="ops-table">
+              <el-table-column label="Type" min-width="180">
+                <template #default="{ row }">{{ feedbackTypeLabel(row.feedback_type) }}</template>
+              </el-table-column>
+              <el-table-column label="Count" width="110">
+                <template #default="{ row }">{{ formatNumber(row.count) }}</template>
+              </el-table-column>
+              <template #empty>暂无反馈类型数据</template>
+            </el-table>
+          </div>
+          <div class="metrics-section">
+            <h3>By Prompt</h3>
+            <el-table :data="feedbackByPrompt" v-loading="feedbackLoading" stripe class="ops-table">
+              <el-table-column prop="prompt_id" label="Prompt" min-width="150" />
+              <el-table-column prop="prompt_version" label="Version" width="110" />
+              <el-table-column label="Total" width="90">
+                <template #default="{ row }">{{ formatNumber(row.total) }}</template>
+              </el-table-column>
+              <el-table-column label="Useful" width="90">
+                <template #default="{ row }">{{ formatNumber(row.useful) }}</template>
+              </el-table-column>
+              <el-table-column label="Negative" width="100">
+                <template #default="{ row }">{{ feedbackNegativeRate(row) }}</template>
+              </el-table-column>
+              <template #empty>暂无 prompt 反馈数据</template>
+            </el-table>
+          </div>
+        </div>
+
+        <div class="metrics-section">
+          <h3>Recent Feedback</h3>
+          <el-table :data="recentFeedback" v-loading="feedbackLoading" stripe class="ops-table">
+            <el-table-column prop="id" label="ID" width="76" />
+            <el-table-column prop="task_id" label="Task" width="86" />
+            <el-table-column label="Type" min-width="150">
+              <template #default="{ row }">{{ feedbackTypeLabel(row.feedback_type) }}</template>
+            </el-table-column>
+            <el-table-column prop="case_title" label="Case" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="prompt_id" label="Prompt" min-width="140" />
+            <el-table-column prop="prompt_version" label="Version" width="110" />
+            <el-table-column prop="note" label="Note" min-width="220" show-overflow-tooltip />
+            <el-table-column label="Created" min-width="180">
+              <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+            </el-table-column>
+            <template #empty>暂无反馈记录</template>
+          </el-table>
         </div>
       </el-tab-pane>
 
@@ -639,6 +846,10 @@ function formatDuration(ms) {
   margin-bottom: 16px;
 }
 
+.compact-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric-panel {
   min-width: 0;
   border: 1px solid #e5e7eb;
@@ -693,6 +904,16 @@ function formatDuration(ms) {
 
 .chip {
   margin-right: 4px;
+}
+
+.json-inline {
+  max-height: 120px;
+  margin: 0;
+  overflow: auto;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .muted {

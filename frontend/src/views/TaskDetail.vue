@@ -6,7 +6,7 @@ import { ElMessageBox } from 'element-plus'
 import { ChatDotRound, Check, Delete, Download, EditPen, Plus, Refresh, View, Warning } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
-import { getTaskTrace } from '../api/tasks'
+import { getTaskDiagnostics, getTaskTrace } from '../api/tasks'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
@@ -41,6 +41,7 @@ const jobs = ref([])
 const jobsLoading = ref(false)
 const trace = ref(null)
 const traceLoading = ref(false)
+const diagnosticsDownloading = ref(false)
 const editingCase = ref(null)
 const editorVisible = ref(false)
 const editorBuffer = ref('')
@@ -578,11 +579,27 @@ function exportCases() {
     exported_at: new Date().toISOString(),
     sections: cases.value,
   }
+  downloadJSON(payload, `caseagent-task-${taskId.value}-test-cases.json`)
+}
+
+async function exportDiagnostics() {
+  diagnosticsDownloading.value = true
+  try {
+    const payload = await getTaskDiagnostics(taskId.value)
+    downloadJSON(payload, `caseagent-task-${taskId.value}-diagnostics.json`)
+  } catch {
+    /* api/client.js 已弹错 */
+  } finally {
+    diagnosticsDownloading.value = false
+  }
+}
+
+function downloadJSON(payload, filename) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `caseagent-task-${taskId.value}-test-cases.json`
+  link.download = filename
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -1146,6 +1163,13 @@ async function submitKnowledgeFeedback() {
           <div class="header-actions">
             <el-button size="small" :loading="jobsLoading" @click="loadJobs">刷新任务</el-button>
             <el-button size="small" :loading="traceLoading" @click="loadTrace">刷新 Trace</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :icon="Download"
+              :loading="diagnosticsDownloading"
+              @click="exportDiagnostics"
+            >导出诊断包</el-button>
           </div>
         </div>
       </template>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,35 @@ type CreateInput struct {
 	FeedbackType string
 	Note         string
 	Metadata     map[string]any
+}
+
+type SummaryInput struct {
+	TaskID        int
+	FeedbackType  string
+	PromptID      string
+	PromptVersion string
+	From          *time.Time
+	To            *time.Time
+}
+
+type Summary struct {
+	Total    int                       `json:"total"`
+	ByType   []TypeSummary             `json:"by_type"`
+	ByPrompt []PromptSummary           `json:"by_prompt"`
+	Recent   []models.TestCaseFeedback `json:"recent"`
+}
+
+type TypeSummary struct {
+	FeedbackType string `json:"feedback_type"`
+	Count        int    `json:"count"`
+}
+
+type PromptSummary struct {
+	PromptID      string `json:"prompt_id"`
+	PromptVersion string `json:"prompt_version"`
+	Total         int    `json:"total"`
+	Useful        int    `json:"useful"`
+	Negative      int    `json:"negative"`
 }
 
 func New(db bun.IDB) *Service {
@@ -94,6 +124,108 @@ func (s *Service) ListTaskFeedback(ctx context.Context, taskID int) ([]models.Te
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (s *Service) FeedbackSummary(ctx context.Context, input SummaryInput) (*Summary, error) {
+	if input.TaskID < 0 {
+		return nil, fmt.Errorf("%w: task_id must be >= 0", ErrInvalidInput)
+	}
+	if input.FeedbackType != "" && !IsFeedbackType(input.FeedbackType) {
+		return nil, fmt.Errorf("%w: unsupported feedback_type %q", ErrInvalidInput, input.FeedbackType)
+	}
+
+	rows := []models.TestCaseFeedback{}
+	query := s.db.NewSelect().
+		Model(&rows).
+		Order("created_at DESC", "id DESC").
+		Limit(500)
+	if input.TaskID > 0 {
+		query.Where("task_id = ?", input.TaskID)
+	}
+	if input.FeedbackType != "" {
+		query.Where("feedback_type = ?", strings.TrimSpace(input.FeedbackType))
+	}
+	if strings.TrimSpace(input.PromptID) != "" {
+		query.Where("prompt_id = ?", strings.TrimSpace(input.PromptID))
+	}
+	if strings.TrimSpace(input.PromptVersion) != "" {
+		query.Where("prompt_version = ?", strings.TrimSpace(input.PromptVersion))
+	}
+	if input.From != nil {
+		query.Where("created_at >= ?", *input.From)
+	}
+	if input.To != nil {
+		query.Where("created_at <= ?", *input.To)
+	}
+	if err := query.Scan(ctx); err != nil {
+		return nil, err
+	}
+	summary := SummarizeFeedbackRows(rows)
+	summary.Recent = rows
+	return summary, nil
+}
+
+func SummarizeFeedbackRows(rows []models.TestCaseFeedback) *Summary {
+	byType := map[string]int{}
+	byPrompt := map[string]*PromptSummary{}
+	for _, row := range rows {
+		byType[row.FeedbackType]++
+		key := row.PromptID + "\x00" + row.PromptVersion
+		prompt := byPrompt[key]
+		if prompt == nil {
+			prompt = &PromptSummary{
+				PromptID:      row.PromptID,
+				PromptVersion: row.PromptVersion,
+			}
+			byPrompt[key] = prompt
+		}
+		prompt.Total++
+		if row.FeedbackType == models.CaseFeedbackUseful {
+			prompt.Useful++
+		} else {
+			prompt.Negative++
+		}
+	}
+
+	summary := &Summary{
+		Total:    len(rows),
+		ByType:   make([]TypeSummary, 0, len(byType)),
+		ByPrompt: make([]PromptSummary, 0, len(byPrompt)),
+		Recent:   []models.TestCaseFeedback{},
+	}
+	for feedbackType, count := range byType {
+		summary.ByType = append(summary.ByType, TypeSummary{FeedbackType: feedbackType, Count: count})
+	}
+	for _, prompt := range byPrompt {
+		summary.ByPrompt = append(summary.ByPrompt, *prompt)
+	}
+	sortTypeSummary(summary.ByType)
+	sortPromptSummary(summary.ByPrompt)
+	return summary
+}
+
+func sortTypeSummary(rows []TypeSummary) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].FeedbackType < rows[j].FeedbackType
+	})
+}
+
+func sortPromptSummary(rows []PromptSummary) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Total != rows[j].Total {
+			return rows[i].Total > rows[j].Total
+		}
+		if rows[i].Negative != rows[j].Negative {
+			return rows[i].Negative > rows[j].Negative
+		}
+		if rows[i].PromptID != rows[j].PromptID {
+			return rows[i].PromptID < rows[j].PromptID
+		}
+		return rows[i].PromptVersion < rows[j].PromptVersion
+	})
 }
 
 func validateCreateInput(input CreateInput) error {
