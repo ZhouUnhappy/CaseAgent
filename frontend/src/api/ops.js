@@ -11,3 +11,7 @@ export function getOpsPreflight() {
 export function getFeedbackSummary(params = {}) {
   return client.get('/ops/feedback-summary', { params }).then((r) => r.data)
 }
+
+export function getQualityOverview(params = {}) {
+  return client.get('/ops/quality', { params }).then((r) => r.data)
+}

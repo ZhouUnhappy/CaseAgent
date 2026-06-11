@@ -151,12 +151,12 @@
   - `ProjectList.vue` / `ProjectDetail.vue`：项目与文档管理，并提供跳转到生成工作台的入口
   - `TaskDetail.vue`：任务深度排查、Workflow Trace、用例 JSON 编辑
   - `KnowledgeBase.vue` / `KnowledgeSuggestions.vue`：知识库与知识建议沉淀
-  - `OpsWorkbench.vue`：tenant-scoped jobs / workflows 运维视图，支持筛选、重试、取消、重放；Preflight tab 展示 DB role、pgvector、RLS、tenant context、模型配置、向量健康和 worker risk，并可复制完整诊断 JSON。
+  - `OpsWorkbench.vue`：tenant-scoped jobs / workflows 运维视图，支持筛选、重试、取消、重放；Preflight tab 展示 DB role、pgvector、RLS、tenant context、模型配置、向量健康和 worker risk，并可复制完整诊断 JSON；Quality tab 用现有 feedback / trace / artifact 数据展示 prompt/profile 对比、反馈趋势和报告历史。
 
 **可观测性**：
 
 - 前端：`api/client.js` 把 5xx/408/429/网络错误标记 `retryable=true`，`utils/error.js` 据此分别用 `warning` / `error` 弹给用户；处理失败行有「重新处理」按钮。API client 还会从 localStorage 注入 `X-Tenant-ID` 与可信 operator header，运维页执行 retry / cancel / replay 前要求填写操作者和原因。
-- 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态；`GET /api/v1/ops/preflight` 覆盖 DB role、pgvector、RLS、tenant context、模型配置、向量健康和 worker risk；过期诊断明细通过 retention cleanup API / 脚本按 tenant dry-run 后清理。
+- 后端：`backend/internal/api/handler/{document,knowledge,task,testcase}.go` 在主要请求上输出 `[handler]` 前缀日志，含 `document_id` / `knowledge_id` / `task_id` / `case_id`；`workflow_runs` 及相关 trace 表持久化生成链路的可查询状态；`GET /api/v1/ops/preflight` 覆盖 DB role、pgvector、RLS、tenant context、模型配置、向量健康和 worker risk；`GET /api/v1/ops/quality` 基于人工 feedback、test case source_context 和 generated_cases/output artifact 做质量复盘聚合，不引入自动评分；过期诊断明细通过 retention cleanup API / 脚本按 tenant dry-run 后清理。
 
 **验证方式**：手工跑全流程；`cd frontend && npm run build` 通过。
 

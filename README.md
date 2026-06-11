@@ -103,6 +103,7 @@ npm run dev
 - `GET /api/v1/ops/metrics` - 运维质量、成本与稳定性指标
 - `GET /api/v1/ops/preflight` - 部署前置诊断（DB/RLS/pgvector/config/vector health/worker risk）
 - `GET /api/v1/ops/feedback-summary` - 人工反馈按类型 / prompt / task 聚合
+- `GET /api/v1/ops/quality` - 质量复盘聚合，展示 prompt/profile 对比、反馈趋势和报告 artifact 历史
 - `GET /api/v1/ops/retention/cleanup` - 诊断数据保留策略 dry-run，返回候选行数与字节估算
 - `POST /api/v1/ops/retention/cleanup` - 执行 tenant-scoped 诊断数据清理
 - `GET /api/v1/tasks/:id/diagnostics` - 导出单任务诊断包 JSON，默认脱敏 artifact content、长 prompt/metadata 和原始 source_context

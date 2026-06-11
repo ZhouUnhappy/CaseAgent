@@ -75,6 +75,19 @@ func (h *Handler) GetFeedbackSummary(c *gin.Context) {
 	c.JSON(http.StatusOK, summary)
 }
 
+func (h *Handler) GetQualityOverview(c *gin.Context) {
+	input, ok := parseFeedbackSummaryInput(c)
+	if !ok {
+		return
+	}
+	overview, err := feedbackservice.New(DBFromContext(c)).QualityOverview(c, input)
+	if err != nil {
+		writeFeedbackServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, overview)
+}
+
 func parseFeedbackSummaryInput(c *gin.Context) (feedbackservice.SummaryInput, bool) {
 	input := feedbackservice.SummaryInput{
 		FeedbackType:  strings.TrimSpace(c.Query("feedback_type")),

@@ -62,6 +62,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		biz.GET("/ops/metrics", h.GetOpsMetrics)
 		biz.GET("/ops/preflight", h.GetOpsPreflight)
 		biz.GET("/ops/feedback-summary", h.GetFeedbackSummary)
+		biz.GET("/ops/quality", h.GetQualityOverview)
 		biz.GET("/ops/retention/cleanup", h.GetRetentionCleanupPlan)
 		biz.POST("/ops/retention/cleanup", h.RunRetentionCleanup)
 

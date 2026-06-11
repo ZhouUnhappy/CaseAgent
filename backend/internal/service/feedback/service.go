@@ -61,6 +61,40 @@ type PromptSummary struct {
 	Negative      int    `json:"negative"`
 }
 
+type QualityOverview struct {
+	TotalFeedback     int                    `json:"total_feedback"`
+	PromptComparison  []PromptSummary        `json:"prompt_comparison"`
+	ProfileComparison []ProfileSummary       `json:"profile_comparison"`
+	FeedbackTrend     []TrendSummary         `json:"feedback_trend"`
+	ReportHistory     []QualityReportSummary `json:"report_history"`
+}
+
+type ProfileSummary struct {
+	ProfileID      string `json:"profile_id"`
+	ProfileVersion string `json:"profile_version"`
+	Total          int    `json:"total"`
+	Useful         int    `json:"useful"`
+	Negative       int    `json:"negative"`
+}
+
+type TrendSummary struct {
+	Date         string `json:"date"`
+	FeedbackType string `json:"feedback_type"`
+	Count        int    `json:"count"`
+}
+
+type QualityReportSummary struct {
+	ArtifactID     int       `json:"artifact_id"`
+	TaskID         int       `json:"task_id,omitempty"`
+	Name           string    `json:"name,omitempty"`
+	ArtifactType   string    `json:"artifact_type"`
+	SectionCount   int       `json:"section_count"`
+	CaseCount      int       `json:"case_count"`
+	ProfileID      string    `json:"profile_id,omitempty"`
+	ProfileVersion string    `json:"profile_version,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 func New(db bun.IDB) *Service {
 	return &Service{db: db}
 }
@@ -127,6 +161,32 @@ func (s *Service) ListTaskFeedback(ctx context.Context, taskID int) ([]models.Te
 }
 
 func (s *Service) FeedbackSummary(ctx context.Context, input SummaryInput) (*Summary, error) {
+	rows, err := s.loadFeedbackRows(ctx, input, 500)
+	if err != nil {
+		return nil, err
+	}
+	summary := SummarizeFeedbackRows(rows)
+	summary.Recent = rows
+	return summary, nil
+}
+
+func (s *Service) QualityOverview(ctx context.Context, input SummaryInput) (*QualityOverview, error) {
+	rows, err := s.loadFeedbackRows(ctx, input, 1000)
+	if err != nil {
+		return nil, err
+	}
+	testCases, err := s.loadFeedbackTestCases(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	artifacts, err := s.loadQualityReportArtifacts(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return BuildQualityOverview(rows, testCases, artifacts), nil
+}
+
+func (s *Service) loadFeedbackRows(ctx context.Context, input SummaryInput, limit int) ([]models.TestCaseFeedback, error) {
 	if input.TaskID < 0 {
 		return nil, fmt.Errorf("%w: task_id must be >= 0", ErrInvalidInput)
 	}
@@ -138,7 +198,7 @@ func (s *Service) FeedbackSummary(ctx context.Context, input SummaryInput) (*Sum
 	query := s.db.NewSelect().
 		Model(&rows).
 		Order("created_at DESC", "id DESC").
-		Limit(500)
+		Limit(limit)
 	if input.TaskID > 0 {
 		query.Where("task_id = ?", input.TaskID)
 	}
@@ -160,9 +220,56 @@ func (s *Service) FeedbackSummary(ctx context.Context, input SummaryInput) (*Sum
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
-	summary := SummarizeFeedbackRows(rows)
-	summary.Recent = rows
-	return summary, nil
+	return rows, nil
+}
+
+func (s *Service) loadFeedbackTestCases(ctx context.Context, rows []models.TestCaseFeedback) ([]models.TestCase, error) {
+	ids := make([]int, 0, len(rows))
+	seen := map[int]struct{}{}
+	for _, row := range rows {
+		if row.TestCaseID <= 0 {
+			continue
+		}
+		if _, ok := seen[row.TestCaseID]; ok {
+			continue
+		}
+		seen[row.TestCaseID] = struct{}{}
+		ids = append(ids, row.TestCaseID)
+	}
+	if len(ids) == 0 {
+		return []models.TestCase{}, nil
+	}
+	testCases := []models.TestCase{}
+	if err := s.db.NewSelect().
+		Model(&testCases).
+		Where("id IN (?)", bun.In(ids)).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return testCases, nil
+}
+
+func (s *Service) loadQualityReportArtifacts(ctx context.Context, input SummaryInput) ([]models.Artifact, error) {
+	rows := []models.Artifact{}
+	query := s.db.NewSelect().
+		Model(&rows).
+		Where("artifact_type IN (?)", bun.In([]string{models.ArtifactTypeGeneratedCases, models.ArtifactTypeOutput})).
+		Where("resource_type = ?", "task").
+		Order("created_at DESC", "id DESC").
+		Limit(50)
+	if input.TaskID > 0 {
+		query.Where("resource_id = ?", input.TaskID)
+	}
+	if input.From != nil {
+		query.Where("created_at >= ?", *input.From)
+	}
+	if input.To != nil {
+		query.Where("created_at <= ?", *input.To)
+	}
+	if err := query.Scan(ctx); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func SummarizeFeedbackRows(rows []models.TestCaseFeedback) *Summary {
@@ -202,6 +309,121 @@ func SummarizeFeedbackRows(rows []models.TestCaseFeedback) *Summary {
 	sortTypeSummary(summary.ByType)
 	sortPromptSummary(summary.ByPrompt)
 	return summary
+}
+
+func BuildQualityOverview(feedbackRows []models.TestCaseFeedback, testCases []models.TestCase, artifacts []models.Artifact) *QualityOverview {
+	summary := SummarizeFeedbackRows(feedbackRows)
+	return &QualityOverview{
+		TotalFeedback:     len(feedbackRows),
+		PromptComparison:  summary.ByPrompt,
+		ProfileComparison: profileComparison(feedbackRows, testCases),
+		FeedbackTrend:     feedbackTrend(feedbackRows),
+		ReportHistory:     qualityReportHistory(artifacts),
+	}
+}
+
+func profileComparison(feedbackRows []models.TestCaseFeedback, testCases []models.TestCase) []ProfileSummary {
+	casesByID := make(map[int]models.TestCase, len(testCases))
+	for _, testCase := range testCases {
+		casesByID[testCase.ID] = testCase
+	}
+	byProfile := map[string]*ProfileSummary{}
+	for _, row := range feedbackRows {
+		profileID, profileVersion := feedbackProfile(row, casesByID[row.TestCaseID])
+		key := profileID + "\x00" + profileVersion
+		summary := byProfile[key]
+		if summary == nil {
+			summary = &ProfileSummary{ProfileID: profileID, ProfileVersion: profileVersion}
+			byProfile[key] = summary
+		}
+		summary.Total++
+		if row.FeedbackType == models.CaseFeedbackUseful {
+			summary.Useful++
+		} else {
+			summary.Negative++
+		}
+	}
+	rows := make([]ProfileSummary, 0, len(byProfile))
+	for _, summary := range byProfile {
+		rows = append(rows, *summary)
+	}
+	sortProfileSummary(rows)
+	return rows
+}
+
+func feedbackProfile(row models.TestCaseFeedback, testCase models.TestCase) (string, string) {
+	for _, source := range []map[string]any{testCase.SourceContext, row.SourceContextSummary, row.Metadata} {
+		id := stringFromAny(sourceValue(source, "generation_profile_id"))
+		version := stringFromAny(sourceValue(source, "generation_profile_version"))
+		if id != "" || version != "" {
+			return defaultLabel(id), defaultLabel(version)
+		}
+	}
+	return "unknown", "unknown"
+}
+
+func feedbackTrend(rows []models.TestCaseFeedback) []TrendSummary {
+	counts := map[string]int{}
+	for _, row := range rows {
+		date := row.CreatedAt.UTC().Format("2006-01-02")
+		key := date + "\x00" + row.FeedbackType
+		counts[key]++
+	}
+	trend := make([]TrendSummary, 0, len(counts))
+	for key, count := range counts {
+		parts := strings.SplitN(key, "\x00", 2)
+		trend = append(trend, TrendSummary{Date: parts[0], FeedbackType: parts[1], Count: count})
+	}
+	sort.Slice(trend, func(i, j int) bool {
+		if trend[i].Date != trend[j].Date {
+			return trend[i].Date < trend[j].Date
+		}
+		return trend[i].FeedbackType < trend[j].FeedbackType
+	})
+	return trend
+}
+
+func qualityReportHistory(artifacts []models.Artifact) []QualityReportSummary {
+	rows := make([]QualityReportSummary, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		taskID := 0
+		if artifact.ResourceID != nil {
+			taskID = *artifact.ResourceID
+		}
+		source := mapFromAny(artifact.Payload["source_context"])
+		profileID := stringFromAny(sourceValue(source, "generation_profile_id"))
+		profileVersion := stringFromAny(sourceValue(source, "generation_profile_version"))
+		rows = append(rows, QualityReportSummary{
+			ArtifactID:     artifact.ID,
+			TaskID:         taskID,
+			Name:           artifact.Name,
+			ArtifactType:   artifact.ArtifactType,
+			SectionCount:   intFromAny(artifact.Payload["section_count"]),
+			CaseCount:      intFromAny(artifact.Payload["case_count"]),
+			ProfileID:      profileID,
+			ProfileVersion: profileVersion,
+			CreatedAt:      artifact.CreatedAt,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].CreatedAt.After(rows[j].CreatedAt)
+	})
+	return rows
+}
+
+func sortProfileSummary(rows []ProfileSummary) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Total != rows[j].Total {
+			return rows[i].Total > rows[j].Total
+		}
+		if rows[i].Negative != rows[j].Negative {
+			return rows[i].Negative > rows[j].Negative
+		}
+		if rows[i].ProfileID != rows[j].ProfileID {
+			return rows[i].ProfileID < rows[j].ProfileID
+		}
+		return rows[i].ProfileVersion < rows[j].ProfileVersion
+	})
 }
 
 func sortTypeSummary(rows []TypeSummary) {
@@ -265,15 +487,17 @@ func SummarizeSourceContext(source map[string]any) map[string]any {
 	knowledgeHits := mapsFromAny(source["knowledge_hits"])
 	modelCalls := mapsFromAny(source["model_calls"])
 	return map[string]any{
-		"document_queries":        source["document_queries"],
-		"knowledge_queries":       source["knowledge_queries"],
-		"document_hit_count":      len(documentHits),
-		"knowledge_hit_count":     len(knowledgeHits),
-		"model_call_count":        len(modelCalls),
-		"document_hits":           summarizeMaps(documentHits, "document_id", "name", "rank", "best_score"),
-		"knowledge_hits":          summarizeMaps(knowledgeHits, "id", "name", "type", "rank", "score"),
-		"knowledge_shipped_ids":   source["knowledge_shipped_ids"],
-		"knowledge_shipped_names": source["knowledge_shipped_names"],
+		"document_queries":           source["document_queries"],
+		"knowledge_queries":          source["knowledge_queries"],
+		"document_hit_count":         len(documentHits),
+		"knowledge_hit_count":        len(knowledgeHits),
+		"model_call_count":           len(modelCalls),
+		"document_hits":              summarizeMaps(documentHits, "document_id", "name", "rank", "best_score"),
+		"knowledge_hits":             summarizeMaps(knowledgeHits, "id", "name", "type", "rank", "score"),
+		"knowledge_shipped_ids":      source["knowledge_shipped_ids"],
+		"knowledge_shipped_names":    source["knowledge_shipped_names"],
+		"generation_profile_id":      source["generation_profile_id"],
+		"generation_profile_version": source["generation_profile_version"],
 	}
 }
 
@@ -332,6 +556,11 @@ func mapsFromAny(value any) []map[string]any {
 	}
 }
 
+func mapFromAny(value any) map[string]any {
+	row, _ := value.(map[string]any)
+	return row
+}
+
 func sourceValue(source map[string]any, key string) any {
 	if source == nil {
 		return nil
@@ -357,6 +586,13 @@ func intFromAny(value any) int {
 func stringFromAny(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func defaultLabel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return strings.TrimSpace(value)
 }
 
 func defaultMap(value map[string]any) map[string]any {

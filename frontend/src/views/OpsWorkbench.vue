@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Close, CopyDocument, Refresh, RefreshRight, View } from '@element-plus/icons-vue'
 import { cancelJob, listJobs, replayJob, retryJob } from '../api/jobs'
-import { getFeedbackSummary, getOpsMetrics, getOpsPreflight } from '../api/ops'
+import { getFeedbackSummary, getOpsMetrics, getOpsPreflight, getQualityOverview } from '../api/ops'
 import { listWorkflows } from '../api/workflows'
 import { useTenantStore } from '../stores/tenant'
 import { notifySuccess } from '../utils/error'
@@ -23,15 +23,18 @@ const workflows = ref([])
 const metrics = ref(null)
 const preflight = ref(null)
 const feedbackSummary = ref(null)
+const qualityOverview = ref(null)
 const jobsLoading = ref(false)
 const workflowsLoading = ref(false)
 const metricsLoading = ref(false)
 const preflightLoading = ref(false)
 const preflightCopying = ref(false)
 const feedbackLoading = ref(false)
+const qualityLoading = ref(false)
 const actingJobId = ref(0)
 const metricsRange = ref([])
 const feedbackRange = ref([])
+const qualityRange = ref([])
 
 const jobFilters = reactive({
   tenant: currentSlug.value,
@@ -62,6 +65,13 @@ const feedbackFilters = reactive({
   tenant: currentSlug.value,
   task_id: '',
   feedback_type: '',
+  prompt_id: '',
+  prompt_version: '',
+})
+
+const qualityFilters = reactive({
+  tenant: currentSlug.value,
+  task_id: '',
   prompt_id: '',
   prompt_version: '',
 })
@@ -104,6 +114,10 @@ const preflightJSON = computed(() => (preflight.value ? JSON.stringify(preflight
 const feedbackByType = computed(() => feedbackSummary.value?.by_type || [])
 const feedbackByPrompt = computed(() => feedbackSummary.value?.by_prompt || [])
 const recentFeedback = computed(() => feedbackSummary.value?.recent || [])
+const qualityPromptComparison = computed(() => qualityOverview.value?.prompt_comparison || [])
+const qualityProfileComparison = computed(() => qualityOverview.value?.profile_comparison || [])
+const qualityTrend = computed(() => qualityOverview.value?.feedback_trend || [])
+const qualityReportHistory = computed(() => qualityOverview.value?.report_history || [])
 
 const currentTenantLabel = computed(() => {
   const tenant = tenants.value.find((item) => item.slug === currentSlug.value)
@@ -125,6 +139,7 @@ function applyTenant(slug) {
   workflowFilters.tenant = slug
   metricsFilters.tenant = slug
   feedbackFilters.tenant = slug
+  qualityFilters.tenant = slug
   refreshAll()
 }
 
@@ -167,6 +182,16 @@ function buildFeedbackParams() {
   if (feedbackFilters.feedback_type) params.feedback_type = feedbackFilters.feedback_type
   if (feedbackFilters.prompt_id) params.prompt_id = feedbackFilters.prompt_id.trim()
   if (feedbackFilters.prompt_version) params.prompt_version = feedbackFilters.prompt_version.trim()
+  return params
+}
+
+function buildQualityParams() {
+  const params = {}
+  if (qualityRange.value?.[0]) params.from = qualityRange.value[0]
+  if (qualityRange.value?.[1]) params.to = qualityRange.value[1]
+  if (qualityFilters.task_id) params.task_id = Number(qualityFilters.task_id)
+  if (qualityFilters.prompt_id) params.prompt_id = qualityFilters.prompt_id.trim()
+  if (qualityFilters.prompt_version) params.prompt_version = qualityFilters.prompt_version.trim()
   return params
 }
 
@@ -238,6 +263,15 @@ async function loadFeedbackSummary() {
   }
 }
 
+async function loadQualityOverview() {
+  qualityLoading.value = true
+  try {
+    qualityOverview.value = await getQualityOverview(buildQualityParams())
+  } finally {
+    qualityLoading.value = false
+  }
+}
+
 async function loadWorkflows() {
   workflowsLoading.value = true
   try {
@@ -251,6 +285,7 @@ function refreshAll() {
   loadMetrics().catch(() => {})
   loadPreflight().catch(() => {})
   loadFeedbackSummary().catch(() => {})
+  loadQualityOverview().catch(() => {})
   loadJobs().catch(() => {})
   loadWorkflows().catch(() => {})
 }
@@ -300,6 +335,17 @@ function resetFeedbackFilters() {
     prompt_version: '',
   })
   loadFeedbackSummary().catch(() => {})
+}
+
+function resetQualityFilters() {
+  qualityRange.value = []
+  Object.assign(qualityFilters, {
+    tenant: currentSlug.value,
+    task_id: '',
+    prompt_id: '',
+    prompt_version: '',
+  })
+  loadQualityOverview().catch(() => {})
 }
 
 function resourceLabel(job) {
@@ -458,7 +504,7 @@ function formatDuration(ms) {
       </div>
       <el-button
         :icon="Refresh"
-        :loading="jobsLoading || workflowsLoading || metricsLoading || preflightLoading || feedbackLoading"
+        :loading="jobsLoading || workflowsLoading || metricsLoading || preflightLoading || feedbackLoading || qualityLoading"
         @click="refreshAll"
       >刷新</el-button>
     </header>
@@ -744,6 +790,111 @@ function formatDuration(ms) {
             </el-table-column>
             <template #empty>暂无反馈记录</template>
           </el-table>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="Quality" name="quality">
+        <div class="filter-bar">
+          <el-date-picker
+            v-model="qualityRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="from"
+            end-placeholder="to"
+            class="date-range"
+          />
+          <el-input v-model="qualityFilters.task_id" clearable placeholder="task id" class="id-input" />
+          <el-input v-model="qualityFilters.prompt_id" clearable placeholder="prompt id" class="filter-control" />
+          <el-input v-model="qualityFilters.prompt_version" clearable placeholder="prompt version" class="filter-control" />
+          <el-button type="primary" :icon="Refresh" :loading="qualityLoading" @click="loadQualityOverview">查询</el-button>
+          <el-button @click="resetQualityFilters">重置</el-button>
+        </div>
+
+        <div class="metric-grid compact-grid" v-loading="qualityLoading">
+          <div class="metric-panel">
+            <span class="metric-label">Feedback rows</span>
+            <strong>{{ formatNumber(qualityOverview?.total_feedback) }}</strong>
+            <span class="metric-foot">latest quality window</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Prompt comparison</span>
+            <strong>{{ formatNumber(qualityPromptComparison.length) }}</strong>
+            <span class="metric-foot">prompt/version groups</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-label">Profile comparison</span>
+            <strong>{{ formatNumber(qualityProfileComparison.length) }}</strong>
+            <span class="metric-foot">generation profiles</span>
+          </div>
+        </div>
+
+        <div class="metrics-split">
+          <div class="metrics-section">
+            <h3>Prompt Comparison</h3>
+            <el-table :data="qualityPromptComparison" v-loading="qualityLoading" stripe class="ops-table">
+              <el-table-column prop="prompt_id" label="Prompt" min-width="150" />
+              <el-table-column prop="prompt_version" label="Version" width="110" />
+              <el-table-column label="Total" width="90">
+                <template #default="{ row }">{{ formatNumber(row.total) }}</template>
+              </el-table-column>
+              <el-table-column label="Useful" width="90">
+                <template #default="{ row }">{{ formatNumber(row.useful) }}</template>
+              </el-table-column>
+              <el-table-column label="Negative" width="100">
+                <template #default="{ row }">{{ feedbackNegativeRate(row) }}</template>
+              </el-table-column>
+              <template #empty>暂无 prompt 对比数据</template>
+            </el-table>
+          </div>
+          <div class="metrics-section">
+            <h3>Profile Comparison</h3>
+            <el-table :data="qualityProfileComparison" v-loading="qualityLoading" stripe class="ops-table">
+              <el-table-column prop="profile_id" label="Profile" min-width="190" />
+              <el-table-column prop="profile_version" label="Version" min-width="150" show-overflow-tooltip />
+              <el-table-column label="Total" width="90">
+                <template #default="{ row }">{{ formatNumber(row.total) }}</template>
+              </el-table-column>
+              <el-table-column label="Useful" width="90">
+                <template #default="{ row }">{{ formatNumber(row.useful) }}</template>
+              </el-table-column>
+              <el-table-column label="Negative" width="100">
+                <template #default="{ row }">{{ feedbackNegativeRate(row) }}</template>
+              </el-table-column>
+              <template #empty>暂无 profile 对比数据</template>
+            </el-table>
+          </div>
+        </div>
+
+        <div class="metrics-split">
+          <div class="metrics-section">
+            <h3>Feedback Trend</h3>
+            <el-table :data="qualityTrend" v-loading="qualityLoading" stripe class="ops-table">
+              <el-table-column prop="date" label="Date" width="130" />
+              <el-table-column label="Type" min-width="170">
+                <template #default="{ row }">{{ feedbackTypeLabel(row.feedback_type) }}</template>
+              </el-table-column>
+              <el-table-column label="Count" width="100">
+                <template #default="{ row }">{{ formatNumber(row.count) }}</template>
+              </el-table-column>
+              <template #empty>暂无反馈趋势数据</template>
+            </el-table>
+          </div>
+          <div class="metrics-section">
+            <h3>Report History</h3>
+            <el-table :data="qualityReportHistory" v-loading="qualityLoading" stripe class="ops-table">
+              <el-table-column prop="artifact_id" label="Artifact" width="96" />
+              <el-table-column prop="task_id" label="Task" width="86" />
+              <el-table-column prop="name" label="Name" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="profile_version" label="Profile Version" min-width="150" show-overflow-tooltip />
+              <el-table-column label="Cases" width="90">
+                <template #default="{ row }">{{ formatNumber(row.case_count) }}</template>
+              </el-table-column>
+              <el-table-column label="Created" min-width="170">
+                <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+              </el-table-column>
+              <template #empty>暂无报告 artifact</template>
+            </el-table>
+          </div>
         </div>
       </el-tab-pane>
 
