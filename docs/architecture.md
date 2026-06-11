@@ -103,6 +103,7 @@
   - 后台 job 通过 tenant-scoped 独立事务写 trace，避免生成业务事务回滚时丢失失败现场。
   - `backend/internal/service/agent/` 为每次子 Agent / DeepAgent 调用创建 `agent_runs`，并通过 chat model decorator 记录每次 LLM `Generate` 的 provider/model、prompt/response 字符数、agent/attempt metadata、`agent_run_id` 和错误摘要。
   - API：`GET /api/v1/tasks/:id/trace` 返回 workflow runs、steps、agent runs、model calls、retrieval runs、artifacts。
+  - 诊断包：`GET /api/v1/tasks/:id/diagnostics` 返回 task、test_cases、workflow/agent/model/retrieval trace、feedback、错误摘要和 source_context 摘要；默认脱敏 artifact content、敏感 metadata key、长 prompt/metadata 和原始 source_context 查询正文。
   - 生命周期治理：`retention.trace_retention_days` 配置默认保留天数；`GET /api/v1/ops/retention/cleanup` 返回 tenant-scoped dry-run 行数 / 字节估算，`POST /api/v1/ops/retention/cleanup` 清理过期终态诊断明细、脱敏 `test_cases.source_context`，保留 `case_generation_tasks` / `test_cases` 最终状态和 `intervention` 审计 artifact，并新增 retention cleanup intervention 摘要。
   - 前端：`frontend/src/views/TaskDetail.vue` 展示 job timeline 与 Workflow Trace 面板，用于 demo 排查生成链路。
 - 数据库表：

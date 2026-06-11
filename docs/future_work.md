@@ -60,12 +60,6 @@
 - **Trigger**：固定样本报告稳定，人工反馈样本累计到足够支撑 prompt/profile 对比，且用户需要在页面里做质量复盘。
 - **DoD**：在运维页或独立质量页展示 prompt/profile 对比、质量报告历史、反馈趋势；数据来自现有 trace / feedback / report artifact，不引入自动评分；API 聚合测试覆盖，前端 build 通过。
 
-### 任务诊断包的下一阶段
-
-- **需要角色**：前端工程师、后端工程师。
-- **Trigger**：生成失败需要交给开发者排查，或客户现场不能直接开放 DB / 日志访问。
-- **DoD**：任务详情页一键导出 JSON 或 zip；包含 task、test_cases、workflow trace、agent/model/retrieval 摘要、反馈、错误与 source_context 摘要；API key、长 prompt、原始私有正文默认脱敏；增加 handler 测试和前端下载验证。
-
 ### 用例审核体验强化
 
 - **需要角色**：前端工程师、后端工程师。

@@ -105,7 +105,7 @@ npm run dev
 - `GET /api/v1/ops/feedback-summary` - 人工反馈按类型 / prompt / task 聚合
 - `GET /api/v1/ops/retention/cleanup` - 诊断数据保留策略 dry-run，返回候选行数与字节估算
 - `POST /api/v1/ops/retention/cleanup` - 执行 tenant-scoped 诊断数据清理
-- `GET /api/v1/tasks/:id/diagnostics` - 导出单任务诊断包 JSON
+- `GET /api/v1/tasks/:id/diagnostics` - 导出单任务诊断包 JSON，默认脱敏 artifact content、长 prompt/metadata 和原始 source_context
 - `GET /api/v1/maintenance/vector-health` - 查看向量健康状态
 - `POST /api/v1/maintenance/reindex` - 批量重建异常向量
 
