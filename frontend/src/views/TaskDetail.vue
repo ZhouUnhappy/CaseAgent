@@ -1485,6 +1485,19 @@ async function submitKnowledgeFeedback() {
               <div class="trace-row-main">
                 <span class="trace-title">{{ hit.name || `knowledge #${hit.id}` }}</span>
                 <el-tag size="small">{{ hit.type || 'knowledge' }}</el-tag>
+                <el-tag v-if="hit.source_highlight?.source || hit.source" size="small" type="info">
+                  source: {{ hit.source_highlight?.source || hit.source }}
+                </el-tag>
+                <el-tag v-if="hit.source_highlight?.is_expired" size="small" type="danger">
+                  expired
+                </el-tag>
+                <el-tag
+                  v-if="hit.source_highlight?.is_duplicate || hit.duplicate_of_id"
+                  size="small"
+                  type="warning"
+                >
+                  duplicate #{{ hit.source_highlight?.duplicate_of_id || hit.duplicate_of_id }}
+                </el-tag>
               </div>
               <div class="muted small">rank {{ hit.rank }} · score {{ hit.score ?? '-' }}</div>
               <div class="query-list mini">

@@ -61,16 +61,20 @@ type chunkScoreRow struct {
 type knowledgeScoreRow struct {
 	bun.BaseModel `bun:"table:knowledge_base,alias:kb"`
 
-	ID        int             `bun:"id"`
-	Type      string          `bun:"type"`
-	Name      string          `bun:"name"`
-	Content   string          `bun:"content"`
-	Embedding dbvector.Vector `bun:"embedding"`
-	Metadata  map[string]any  `bun:"metadata,type:jsonb"`
-	Status    string          `bun:"status"`
-	CreatedAt time.Time       `bun:"created_at"`
-	UpdatedAt time.Time       `bun:"updated_at"`
-	Score     float64         `bun:"score"`
+	ID                int             `bun:"id"`
+	Type              string          `bun:"type"`
+	Name              string          `bun:"name"`
+	Content           string          `bun:"content"`
+	Embedding         dbvector.Vector `bun:"embedding"`
+	Metadata          map[string]any  `bun:"metadata,type:jsonb"`
+	Source            string          `bun:"source"`
+	ExpiresAt         *time.Time      `bun:"expires_at"`
+	DuplicateOfID     *int            `bun:"duplicate_of_id"`
+	DuplicateMarkedAt *time.Time      `bun:"duplicate_marked_at"`
+	Status            string          `bun:"status"`
+	CreatedAt         time.Time       `bun:"created_at"`
+	UpdatedAt         time.Time       `bun:"updated_at"`
+	Score             float64         `bun:"score"`
 }
 
 func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error) {
@@ -167,11 +171,15 @@ func (r *Retriever) RetrieveFromKnowledge(ctx context.Context, queryEmbedding []
 	queryVector := dbvector.New(queryEmbedding)
 	args := []any{queryVector, models.KnowledgeStatusCompleted}
 	query := strings.TrimSpace(`
-		SELECT kb.id, kb.type, kb.name, kb.content, kb.embedding, kb.metadata, kb.status, kb.created_at, kb.updated_at,
+		SELECT kb.id, kb.type, kb.name, kb.content, kb.embedding, kb.metadata,
+		       kb.source, kb.expires_at, kb.duplicate_of_id, kb.duplicate_marked_at,
+		       kb.status, kb.created_at, kb.updated_at,
 		       (1 - (kb.embedding <=> ?)) AS score
 		FROM knowledge_base AS kb
 		WHERE kb.embedding IS NOT NULL
 		  AND kb.status = ?
+		  AND (kb.expires_at IS NULL OR kb.expires_at > CURRENT_TIMESTAMP)
+		  AND kb.duplicate_of_id IS NULL
 	`)
 	if r.dimensions > 0 {
 		query += "\n  AND vector_dims(kb.embedding) = ?"
@@ -190,15 +198,19 @@ func (r *Retriever) RetrieveFromKnowledge(ctx context.Context, queryEmbedding []
 		row := rows[i]
 		hits = append(hits, KnowledgeHit{
 			Knowledge: &models.KnowledgeBase{
-				ID:        row.ID,
-				Type:      row.Type,
-				Name:      row.Name,
-				Content:   row.Content,
-				Embedding: row.Embedding,
-				Metadata:  row.Metadata,
-				Status:    row.Status,
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
+				ID:                row.ID,
+				Type:              row.Type,
+				Name:              row.Name,
+				Content:           row.Content,
+				Embedding:         row.Embedding,
+				Metadata:          row.Metadata,
+				Source:            row.Source,
+				ExpiresAt:         row.ExpiresAt,
+				DuplicateOfID:     row.DuplicateOfID,
+				DuplicateMarkedAt: row.DuplicateMarkedAt,
+				Status:            row.Status,
+				CreatedAt:         row.CreatedAt,
+				UpdatedAt:         row.UpdatedAt,
 			},
 			Score: row.Score,
 		})

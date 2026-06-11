@@ -125,11 +125,14 @@ func knowledgeResultsToBaseEntries(results []retrievalservice.KnowledgeResult) [
 	entries := make([]models.KnowledgeBase, 0, len(results))
 	for _, result := range results {
 		entries = append(entries, models.KnowledgeBase{
-			ID:       result.ID,
-			Type:     result.Type,
-			Name:     result.Name,
-			Content:  result.Content,
-			Metadata: result.Metadata,
+			ID:            result.ID,
+			Type:          result.Type,
+			Name:          result.Name,
+			Content:       result.Content,
+			Metadata:      result.Metadata,
+			Source:        result.Source,
+			ExpiresAt:     result.ExpiresAt,
+			DuplicateOfID: result.DuplicateOfID,
 		})
 	}
 	return entries

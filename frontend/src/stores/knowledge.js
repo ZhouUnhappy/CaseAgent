@@ -13,18 +13,30 @@ export const useKnowledgeStore = defineStore('knowledge', {
     loading: false,
     saving: false,
     typeFilter: '',
+    sourceFilter: '',
+    expiredFilter: '',
+    duplicateFilter: '',
   }),
   actions: {
     async fetch() {
       this.loading = true
       try {
-        this.items = await listKnowledge(this.typeFilter || undefined)
+        this.items = await listKnowledge({
+          type: this.typeFilter || undefined,
+          source: this.sourceFilter || undefined,
+          expired: this.expiredFilter || undefined,
+          duplicate: this.duplicateFilter || undefined,
+        })
       } finally {
         this.loading = false
       }
     },
     setTypeFilter(t) {
       this.typeFilter = t
+      return this.fetch()
+    },
+    setFilters(filters) {
+      Object.assign(this, filters)
       return this.fetch()
     },
     async create(payload) {
@@ -60,6 +72,10 @@ export const useKnowledgeStore = defineStore('knowledge', {
       this.items = []
       this.loading = false
       this.saving = false
+      this.typeFilter = ''
+      this.sourceFilter = ''
+      this.expiredFilter = ''
+      this.duplicateFilter = ''
     },
     replace(updated) {
       const idx = this.items.findIndex((k) => k.id === updated.id)

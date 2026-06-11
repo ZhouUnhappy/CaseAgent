@@ -90,8 +90,9 @@ npm run dev
 - `POST /api/v1/projects/:id/documents` - 上传文档
 - `GET /api/v1/projects/:id/documents` - 列出文档
 - `POST /api/v1/documents/:id/reprocess` - 重处理文档
-- `POST /api/v1/knowledge` - 上传知识库
-- `GET /api/v1/knowledge` - 列出知识库
+- `POST /api/v1/knowledge` - 上传知识库，支持 `source` / `expires_at` / `duplicate_of_id` 治理字段
+- `GET /api/v1/knowledge` - 列出知识库，支持 `type` / `source` / `expired` / `duplicate` 筛选
+- `GET /api/v1/knowledge/:id/impacted-tasks` - 基于 `test_cases.source_context` 查询引用过该知识的任务
 - `POST /api/v1/knowledge/:id/reprocess` - 重处理知识库
 - `POST /api/v1/projects/:id/tasks` - 创建生成任务
 - `GET /api/v1/tasks/:id/cases` - 获取测试用例

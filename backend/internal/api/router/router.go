@@ -75,6 +75,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 		{
 			knowledge.POST("", h.UploadKnowledge)
 			knowledge.GET("", h.ListKnowledge)
+			knowledge.GET("/:id/impacted-tasks", h.ListKnowledgeImpactedTasks)
 			knowledge.GET("/:id", h.GetKnowledge)
 			knowledge.POST("/:id/reprocess", h.ReprocessKnowledge)
 			knowledge.PUT("/:id", h.UpdateKnowledge)

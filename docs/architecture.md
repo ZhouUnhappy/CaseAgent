@@ -82,7 +82,7 @@
   - prompt 模板按 `ID + version` 注册，Agent 只渲染 registry 默认版本，不在业务代码中内联长模板。
   - `model_calls.metadata.prompt_id` / `prompt_version` 记录本次 LLM 调用实际使用的 prompt。
   - 新增 prompt 版本：在 registry 增加同 ID 新 version，标记 `Default: true` 并取消旧版本 default；回滚则把 default 标记切回旧版本，配套更新 `registry_test.go`。
-- 任务服务（应用层生成 workflow）：`backend/internal/service/task/`
+  - 任务服务（应用层生成 workflow）：`backend/internal/service/task/`
   - 顶层编排：`service.go`
   - 任务创建 / review / generate / retry 状态机：`lifecycle.go`
   - 需求与知识上下文：`context.go`
@@ -105,11 +105,13 @@
   - API：`GET /api/v1/tasks/:id/trace` 返回 workflow runs、steps、agent runs、model calls、retrieval runs、artifacts。
   - 诊断包：`GET /api/v1/tasks/:id/diagnostics` 返回 task、test_cases、workflow/agent/model/retrieval trace、feedback、错误摘要和 source_context 摘要；默认脱敏 artifact content、敏感 metadata key、长 prompt/metadata 和原始 source_context 查询正文。
   - 生命周期治理：`retention.trace_retention_days` 配置默认保留天数；`GET /api/v1/ops/retention/cleanup` 返回 tenant-scoped dry-run 行数 / 字节估算，`POST /api/v1/ops/retention/cleanup` 清理过期终态诊断明细、脱敏 `test_cases.source_context`，保留 `case_generation_tasks` / `test_cases` 最终状态和 `intervention` 审计 artifact，并新增 retention cleanup intervention 摘要。
+  - 知识库治理：`knowledge_base.source` / `expires_at` / `duplicate_of_id` 记录来源、过期时间和人工重复标记；列表 API 支持 `type` / `source` / `expired` / `duplicate` 筛选；检索和生成只使用 completed、未过期、非重复条目；`GET /api/v1/knowledge/:id/impacted-tasks` 使用普通 SQL 从 `test_cases.source_context` 查询受影响任务。
   - 前端：`frontend/src/views/TaskDetail.vue` 展示 job timeline 与 Workflow Trace 面板，用于 demo 排查生成链路。
 - 数据库表：
   - `backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
   - `backend/migrations/003_background_jobs.sql`（`background_jobs` + RLS）
   - `backend/migrations/005_v2_workflow_trace.sql`（workflow / agent / model / retrieval / artifact trace + RLS）
+  - `backend/migrations/010_knowledge_governance.sql`（知识来源、过期时间、重复标记及筛选索引）
 
 **单元测试**：`backend/internal/service/task/service_test.go`
 - `TestParseGeneratedSectionsSectionedJSON` / `TestParseGeneratedSectionsFlatJSON`

@@ -103,7 +103,13 @@ func (s *Service) loadRequirements(ctx context.Context, projectID int, documentI
 
 func (s *Service) listKnowledge(ctx context.Context) ([]models.KnowledgeBase, error) {
 	var entries []models.KnowledgeBase
-	if err := s.db.NewSelect().Model(&entries).OrderExpr("type ASC, name ASC").Scan(ctx); err != nil {
+	if err := s.db.NewSelect().
+		Model(&entries).
+		Where("status = ?", models.KnowledgeStatusCompleted).
+		Where("(expires_at IS NULL OR expires_at > ?)", time.Now()).
+		Where("duplicate_of_id IS NULL").
+		OrderExpr("type ASC, name ASC").
+		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("failed to load knowledge base: %w", err)
 	}
 	return entries, nil

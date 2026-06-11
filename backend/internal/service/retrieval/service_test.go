@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"testing"
+	"time"
 
 	"caseagent/internal/db/models"
 )
@@ -37,14 +38,55 @@ func TestFilterSearchableDocumentIDs(t *testing.T) {
 }
 
 func TestIsKnowledgeSearchable(t *testing.T) {
-	if isKnowledgeSearchable(&models.KnowledgeBase{Status: models.KnowledgeStatusProcessing}) {
+	now := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Minute)
+	future := now.Add(time.Hour)
+	duplicateID := 12
+
+	if isKnowledgeSearchableAt(&models.KnowledgeBase{Status: models.KnowledgeStatusProcessing}, now) {
 		t.Fatal("processing knowledge should not be searchable")
 	}
-	if !isKnowledgeSearchable(&models.KnowledgeBase{Status: models.KnowledgeStatusCompleted}) {
+	if !isKnowledgeSearchableAt(&models.KnowledgeBase{Status: models.KnowledgeStatusCompleted}, now) {
 		t.Fatal("completed knowledge should be searchable")
 	}
-	if isKnowledgeSearchable(nil) {
+	if !isKnowledgeSearchableAt(&models.KnowledgeBase{Status: models.KnowledgeStatusCompleted, ExpiresAt: &future}, now) {
+		t.Fatal("future-expiring knowledge should be searchable")
+	}
+	if isKnowledgeSearchableAt(&models.KnowledgeBase{Status: models.KnowledgeStatusCompleted, ExpiresAt: &past}, now) {
+		t.Fatal("expired knowledge should not be searchable")
+	}
+	if isKnowledgeSearchableAt(&models.KnowledgeBase{Status: models.KnowledgeStatusCompleted, DuplicateOfID: &duplicateID}, now) {
+		t.Fatal("duplicate knowledge should not be searchable")
+	}
+	if isKnowledgeSearchableAt(nil, now) {
 		t.Fatal("nil knowledge entry should not be searchable")
+	}
+}
+
+func TestKnowledgeSourceHighlight(t *testing.T) {
+	now := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+	expiredAt := now.Add(-time.Second)
+	duplicateID := 7
+
+	highlight := knowledgeSourceHighlight(&models.KnowledgeBase{
+		Source:        "public-fixture",
+		ExpiresAt:     &expiredAt,
+		DuplicateOfID: &duplicateID,
+	}, now)
+
+	if highlight.Source != "public-fixture" {
+		t.Fatalf("unexpected source: %q", highlight.Source)
+	}
+	if !highlight.IsExpired {
+		t.Fatal("expected expired highlight")
+	}
+	if !highlight.IsDuplicate || highlight.DuplicateOfID == nil || *highlight.DuplicateOfID != duplicateID {
+		t.Fatalf("unexpected duplicate highlight: %#v", highlight)
+	}
+
+	defaulted := knowledgeSourceHighlight(&models.KnowledgeBase{}, now)
+	if defaulted.Source != "manual" {
+		t.Fatalf("expected default source manual, got %q", defaulted.Source)
 	}
 }
 

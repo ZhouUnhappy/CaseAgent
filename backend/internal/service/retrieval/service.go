@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"caseagent/internal/config"
 	"caseagent/internal/db/models"
@@ -41,14 +42,26 @@ type DocumentResult struct {
 }
 
 type KnowledgeResult struct {
-	ID         int            `json:"id"`
-	Type       string         `json:"type"`
-	Name       string         `json:"name"`
-	Content    string         `json:"content"`
-	Metadata   map[string]any  `json:"metadata"`
-	Score      float64        `json:"score"`
-	HitQueries []string       `json:"hit_queries"`
-	Rank       int            `json:"rank"`
+	ID              int                      `json:"id"`
+	Type            string                   `json:"type"`
+	Name            string                   `json:"name"`
+	Content         string                   `json:"content"`
+	Metadata        map[string]any           `json:"metadata"`
+	Source          string                   `json:"source"`
+	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
+	DuplicateOfID   *int                     `json:"duplicate_of_id,omitempty"`
+	SourceHighlight KnowledgeSourceHighlight `json:"source_highlight"`
+	Score           float64                  `json:"score"`
+	HitQueries      []string                 `json:"hit_queries"`
+	Rank            int                      `json:"rank"`
+}
+
+type KnowledgeSourceHighlight struct {
+	Source        string     `json:"source"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	DuplicateOfID *int       `json:"duplicate_of_id,omitempty"`
+	IsExpired     bool       `json:"is_expired"`
+	IsDuplicate   bool       `json:"is_duplicate"`
 }
 
 func New(db bun.IDB) *Service {
@@ -188,12 +201,13 @@ func (s *Service) SearchKnowledge(ctx context.Context, query string, topK int, k
 
 	results := make([]KnowledgeResult, 0, topK)
 	seen := make(map[int]struct{}, len(hits))
+	now := time.Now()
 	for _, hit := range hits {
 		entry := hit.Knowledge
 		if entry == nil {
 			continue
 		}
-		if !isKnowledgeSearchable(entry) {
+		if !isKnowledgeSearchableAt(entry, now) {
 			continue
 		}
 		if kbType != "" && entry.Type != kbType {
@@ -204,14 +218,18 @@ func (s *Service) SearchKnowledge(ctx context.Context, query string, topK int, k
 		}
 		seen[entry.ID] = struct{}{}
 		results = append(results, KnowledgeResult{
-			ID:         entry.ID,
-			Type:       entry.Type,
-			Name:       entry.Name,
-			Content:    entry.Content,
-			Metadata:   entry.Metadata,
-			Score:      hit.Score,
-			HitQueries: []string{query},
-			Rank:       len(results) + 1,
+			ID:              entry.ID,
+			Type:            entry.Type,
+			Name:            entry.Name,
+			Content:         entry.Content,
+			Metadata:        entry.Metadata,
+			Source:          knowledgeSource(entry),
+			ExpiresAt:       entry.ExpiresAt,
+			DuplicateOfID:   entry.DuplicateOfID,
+			SourceHighlight: knowledgeSourceHighlight(entry, now),
+			Score:           hit.Score,
+			HitQueries:      []string{query},
+			Rank:            len(results) + 1,
 		})
 		if len(results) >= topK {
 			break
@@ -345,7 +363,41 @@ func isDocumentSearchable(document models.Document) bool {
 }
 
 func isKnowledgeSearchable(entry *models.KnowledgeBase) bool {
-	return entry != nil && entry.Status == models.KnowledgeStatusCompleted
+	return isKnowledgeSearchableAt(entry, time.Now())
+}
+
+func isKnowledgeSearchableAt(entry *models.KnowledgeBase, now time.Time) bool {
+	if entry == nil || entry.Status != models.KnowledgeStatusCompleted {
+		return false
+	}
+	if entry.DuplicateOfID != nil {
+		return false
+	}
+	return !isKnowledgeExpiredAt(entry, now)
+}
+
+func isKnowledgeExpiredAt(entry *models.KnowledgeBase, now time.Time) bool {
+	return entry != nil && entry.ExpiresAt != nil && !entry.ExpiresAt.After(now)
+}
+
+func knowledgeSource(entry *models.KnowledgeBase) string {
+	if entry == nil || strings.TrimSpace(entry.Source) == "" {
+		return "manual"
+	}
+	return entry.Source
+}
+
+func knowledgeSourceHighlight(entry *models.KnowledgeBase, now time.Time) KnowledgeSourceHighlight {
+	if entry == nil {
+		return KnowledgeSourceHighlight{Source: "manual"}
+	}
+	return KnowledgeSourceHighlight{
+		Source:        knowledgeSource(entry),
+		ExpiresAt:     entry.ExpiresAt,
+		DuplicateOfID: entry.DuplicateOfID,
+		IsExpired:     isKnowledgeExpiredAt(entry, now),
+		IsDuplicate:   entry.DuplicateOfID != nil,
+	}
 }
 
 func normalizeQueries(queries []string) []string {

@@ -51,12 +51,16 @@ func buildSourceContext(documentQueries, knowledgeQueries []string,
 	kbHits := make([]map[string]any, 0, len(knowledgeHits))
 	for _, hit := range knowledgeHits {
 		kbHits = append(kbHits, map[string]any{
-			"id":          hit.ID,
-			"name":        hit.Name,
-			"type":        hit.Type,
-			"rank":        hit.Rank,
-			"score":       hit.Score,
-			"hit_queries": hit.HitQueries,
+			"id":               hit.ID,
+			"name":             hit.Name,
+			"type":             hit.Type,
+			"source":           hit.Source,
+			"expires_at":       hit.ExpiresAt,
+			"duplicate_of_id":  hit.DuplicateOfID,
+			"source_highlight": hit.SourceHighlight,
+			"rank":             hit.Rank,
+			"score":            hit.Score,
+			"hit_queries":      hit.HitQueries,
 		})
 	}
 

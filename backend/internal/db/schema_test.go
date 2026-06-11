@@ -83,4 +83,11 @@ func TestLoadSchemaSQL(t *testing.T) {
 		!strings.Contains(schema, "knowledge_base_index_profile_idx") {
 		t.Fatalf("expected index profile columns and indexes in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'manual'") ||
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP") ||
+		!strings.Contains(schema, "ADD COLUMN IF NOT EXISTS duplicate_of_id INTEGER REFERENCES knowledge_base(id) ON DELETE SET NULL") ||
+		!strings.Contains(schema, "knowledge_base_source_idx") ||
+		!strings.Contains(schema, "knowledge_base_duplicate_idx") {
+		t.Fatalf("expected knowledge governance columns and indexes in schema, got: %s", schema)
+	}
 }

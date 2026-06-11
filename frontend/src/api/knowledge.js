@@ -1,12 +1,21 @@
 import client from './client'
 
-export function listKnowledge(type) {
-  const params = type ? { type } : {}
-  return client.get('/knowledge', { params }).then((r) => r.data)
+function cleanParams(params = {}) {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+  )
+}
+
+export function listKnowledge(params = {}) {
+  return client.get('/knowledge', { params: cleanParams(params) }).then((r) => r.data)
 }
 
 export function getKnowledge(id) {
   return client.get(`/knowledge/${id}`).then((r) => r.data)
+}
+
+export function listKnowledgeImpactedTasks(id) {
+  return client.get(`/knowledge/${id}/impacted-tasks`).then((r) => r.data.items || [])
 }
 
 export function createKnowledge(payload) {
