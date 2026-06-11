@@ -36,11 +36,59 @@
 
 这些事项不需要算法工程师或数据工程师，但不是当前最短路径。除非出现明确 Trigger，否则只保留为备选，不主动开工。
 
-- **权限、操作者与审计**：前后端可做。当前仍按可信本地 demo / 小范围试用处理；只有出现外部用户、多人并发编辑、危险操作追责或客户侧安全要求时，再考虑登录、RBAC、操作者审计和危险操作二次确认。
-- **API 契约与轻量 e2e**：前后端可做。OpenAPI、生成式 API client、少量 Playwright 主流程验证都可以由现有团队维护；但在 API 调整频率高、外部调用方少的阶段，先用后端测试和前端 build 控制风险。
-- **Demo 控制台**：前后端可做。现阶段脚本更便宜、可复现性更强；只有非工程同学频繁准备演示数据，或脚本使用成本明显阻碍试用时，再做可视化一键 reset 页面。
-- **知识库治理的规则化功能**：前后端可做。重复知识的人工标记、来源筛选、过期时间字段、chunk 来源高亮、知识变更影响任务的普通 SQL 查询都可以做；但当前优先级低于用例反馈、审核体验和 demo 稳定性。
-- **质量评估产品化页面**：前后端可做。prompt/profile 对比页、质量报告历史页、人工反馈汇总页可以从脚本报告演进而来；在固定样本报告尚未稳定前，不先做产品页。
+### 权限、操作者与审计
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：出现外部用户、多人并发编辑、危险操作追责、客户侧安全要求，或 retry / cancel / replay / reindex 等操作需要明确操作者。
+- **DoD**：新增登录或可信身份注入方案；后端记录 `operator_id` / `operator_name` / `reason` 到运维干预 artifact 或独立 audit 表；前端危险操作要求二次确认并填写原因；覆盖 handler / service 测试；更新 `docs/multitenancy.md` 与 `docs/architecture.md`。
+
+### API 契约与轻量 e2e
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：API 调整频率下降，出现外部调用方，或前端接口字段回归开始频繁阻塞联调。
+- **DoD**：维护 OpenAPI 或等价契约文件；前端 API client 由契约生成或至少有契约校验；新增 1-3 条 Playwright 主流程验证，覆盖 tenant 选择、任务创建、用例审核提交；`cd frontend && npm run build` 与后端相关测试通过。
+
+### Demo 控制台
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：非工程同学频繁准备演示数据，或 `scripts/demo_bootstrap.sh fresh` 的使用成本明显阻碍试用。
+- **DoD**：新增 tenant-scoped demo reset/bootstrap API，前端提供一键 reset 页面；只使用公开 fixture，不读取私有路径；操作结果展示 project/task URL；保留脚本入口；补 handler 测试和脚本文档。
+
+### 知识库治理的规则化功能
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：知识库条目超过人工浏览可控范围，或用户反馈中重复、过期、来源不明的问题稳定出现。
+- **DoD**：知识条目支持来源筛选、过期时间、人工重复标记；chunk 来源在检索结果中可高亮；新增普通 SQL 查询展示知识变更影响过的任务；后端列表 API 与前端筛选均有测试或构建验证。
+
+### 质量评估产品化页面的下一阶段
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：固定样本报告稳定，人工反馈样本累计到足够支撑 prompt/profile 对比，且用户需要在页面里做质量复盘。
+- **DoD**：在运维页或独立质量页展示 prompt/profile 对比、质量报告历史、反馈趋势；数据来自现有 trace / feedback / report artifact，不引入自动评分；API 聚合测试覆盖，前端 build 通过。
+
+### Trace 与诊断数据生命周期治理
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：`workflow_runs`、`model_calls`、`retrieval_runs`、`artifacts`、`test_case_feedback` 或 `test_cases.source_context` 体积影响查询、备份或 demo 重置。
+- **DoD**：新增可配置 retention days；提供 tenant-scoped cleanup dry-run 与执行 API / 脚本；清理前后返回各表行数与字节估算；保留任务最终状态和必要审计摘要；覆盖 service 测试，更新 `scripts/README.md`。
+
+### 部署前置诊断的下一阶段
+
+- **需要角色**：后端工程师、前端工程师。
+- **Trigger**：非核心开发者独立部署，或环境问题频繁来自 DB role、pgvector、RLS、模型配置、embedding 维度、worker 配置。
+- **DoD**：诊断结果覆盖 DB role 是否绕过 RLS、pgvector 是否启用、业务表 RLS 是否完整、当前 tenant 上下文、模型配置摘要、向量健康、worker 风险项；前端运维页可查看并复制诊断 JSON；后端测试覆盖 PASS / WARN / FAIL 分类。
+
+### 任务诊断包的下一阶段
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：生成失败需要交给开发者排查，或客户现场不能直接开放 DB / 日志访问。
+- **DoD**：任务详情页一键导出 JSON 或 zip；包含 task、test_cases、workflow trace、agent/model/retrieval 摘要、反馈、错误与 source_context 摘要；API key、长 prompt、原始私有正文默认脱敏；增加 handler 测试和前端下载验证。
+
+### 用例审核体验强化
+
+- **需要角色**：前端工程师、后端工程师。
+- **Trigger**：用户主要在前端完成审核，而不是下载 JSON 后离线修改；或提交前结构错误、缺字段、重复项反馈稳定出现。
+- **DoD**：前端提交前校验 title / priority / steps / affected fields；展示 dirty state、只看未提交 / 有反馈 / 高优先级；批量操作保留失败行提示；后端继续兜底校验；关键 store / handler 测试通过。
 
 ## 暂不纳入计划
 
