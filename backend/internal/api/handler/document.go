@@ -83,7 +83,7 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		"source", document.Source,
 	)
 
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		DocumentID: document.ID,
 		JobType:    models.JobTypeDocumentProcess,
 		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentProcess),
@@ -154,7 +154,7 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 
 	slog.Info("document reprocess accepted", "document_id", document.ID, "name", document.Name)
 
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		DocumentID: document.ID,
 		JobType:    models.JobTypeDocumentReprocess,
 		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentReprocess),

@@ -85,7 +85,7 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 
 	slog.Info("knowledge create accepted", "knowledge_id", kb.ID, "type", kb.Type, "name", kb.Name)
 
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		KnowledgeID: kb.ID,
 		JobType:     models.JobTypeKnowledgeProcess,
 		MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeProcess),
@@ -110,7 +110,7 @@ func (h *Handler) ListKnowledge(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	var knowledge []models.KnowledgeBase
+	knowledge := []models.KnowledgeBase{}
 
 	query := DBFromContext(c).NewSelect().Model(&knowledge)
 	if kbType != "" {
@@ -207,7 +207,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 	}
 
 	if needsReprocess {
-		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 			KnowledgeID: kb.ID,
 			JobType:     models.JobTypeKnowledgeReprocess,
 			MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),
@@ -268,7 +268,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 
 	slog.Info("knowledge reprocess accepted", "knowledge_id", kb.ID, "name", kb.Name)
 
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		KnowledgeID: kb.ID,
 		JobType:     models.JobTypeKnowledgeReprocess,
 		MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),

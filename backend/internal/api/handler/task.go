@@ -49,7 +49,7 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		"document_ids", task.DocumentIDs,
 	)
 
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		TaskID:     task.ID,
 		JobType:    models.JobTypeAnalyze,
 		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeAnalyze),
@@ -129,7 +129,7 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 		return
 	}
 
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		TaskID:     taskID,
 		JobType:    models.JobTypeGenerate,
 		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeGenerate),
@@ -156,7 +156,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 	}
 
 	if decision.RerunAnalyze {
-		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+		if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 			TaskID:     taskID,
 			JobType:    models.JobTypeAnalyze,
 			MaxRetries: configuredJobMaxRetriesFor(models.JobTypeAnalyze),

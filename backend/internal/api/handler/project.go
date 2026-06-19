@@ -44,7 +44,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 }
 
 func (h *Handler) ListProjects(c *gin.Context) {
-	var projects []models.Project
+	projects := []models.Project{}
 	if err := DBFromContext(c).NewSelect().Model(&projects).Order("created_at DESC").Scan(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

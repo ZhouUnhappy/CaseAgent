@@ -60,9 +60,6 @@ func MessageChars(messages []*schema.Message) int {
 		}
 		total += len(message.Content)
 		total += len(message.ReasoningContent)
-		for _, part := range message.MultiContent {
-			total += len(part.Text)
-		}
 		for _, part := range message.UserInputMultiContent {
 			total += len(part.Text)
 		}

@@ -47,3 +47,4 @@ testdata/i1/public_corpus/runs/*
 !testdata/i1/public_corpus/runs/.gitkeep
 
 .*
+!.node-version

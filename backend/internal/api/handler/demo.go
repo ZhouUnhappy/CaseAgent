@@ -187,7 +187,7 @@ func bootstrapDemoData(c *gin.Context, req DemoBootstrapRequest, reset *DemoRese
 	if err != nil {
 		return DemoBootstrapResult{}, err
 	}
-	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c, jobservice.EnqueueInput{
+	if _, err := jobservice.New(DBFromContext(c)).Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 		TaskID:     task.ID,
 		JobType:    models.JobTypeAnalyze,
 		MaxRetries: configuredJobMaxRetriesFor(models.JobTypeAnalyze),

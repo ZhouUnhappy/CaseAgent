@@ -175,6 +175,27 @@ func TestEstimateUsageFallsBackToCharacterTokens(t *testing.T) {
 	}
 }
 
+func TestMessageCharsUsesCurrentMultimodalFields(t *testing.T) {
+	messages := []*schema.Message{
+		{
+			Content:          "prompt",
+			ReasoningContent: "reason",
+			UserInputMultiContent: []schema.MessageInputPart{
+				{Type: schema.ChatMessagePartTypeText, Text: "input"},
+			},
+		},
+		{
+			AssistantGenMultiContent: []schema.MessageOutputPart{
+				{Type: schema.ChatMessagePartTypeText, Text: "output"},
+			},
+		},
+	}
+
+	if got, want := MessageChars(messages), len("promptreasoninputoutput"); got != want {
+		t.Fatalf("MessageChars() = %d, want %d", got, want)
+	}
+}
+
 func TestEstimateUsagePrefersProviderTokenUsage(t *testing.T) {
 	message := schema.AssistantMessage("ok", nil)
 	message.ResponseMeta = &schema.ResponseMeta{
