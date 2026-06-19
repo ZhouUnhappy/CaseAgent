@@ -32,7 +32,7 @@ func Init(ctx context.Context) error {
 	DB = bun.NewDB(sqldb, pgdialect.New())
 
 	if config.Get().Server.Mode == "debug" {
-		DB.AddQueryHook(bundebug.NewQueryHook(
+		DB = DB.WithQueryHook(bundebug.NewQueryHook(
 			bundebug.WithVerbose(true),
 			bundebug.FromEnv("BUNDEBUG"),
 		))
