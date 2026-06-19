@@ -64,6 +64,10 @@
 这些事项不需要算法工程师或数据工程师，但不是当前最短路径。除非出现明确 Trigger，否则只保留为备选，不主动开工。
 
 - **OpenAPI / API 契约文档**：前后端和测试工程师可做。但当前先以接口自动化覆盖真实链路；只有外部调用方增加、API 变更开始影响多端协作，或测试用例需要稳定 schema 生成时，再补 OpenAPI / client 生成。
+- **任务生成前置检查**：前后端可做。只有任务失败或 demo 排障中反复出现文档未处理完成、知识库未完成向量化、tenant 未选、模型配置缺失、worker 未运行等可提前发现的问题时，再考虑新增 `POST /api/v1/projects/:id/tasks/preflight` 或等价检查 API，返回 tenant、文档状态、知识库状态、模型配置、worker 风险的结构化 checklist。
+- **API 错误码规范化**：前后端可做。只有前端需要根据错误类型做不同处理，或用户反馈中频繁出现无法区分 validation、conflict、not_found、retryable server error 的提示时，再统一后端主要 handler 的错误响应，例如 `{code,message,details}`。
+- **运行时配置摘要页面**：前后端可做。只有排障或 demo 准备时频繁需要确认当前 chat/embedding provider、model、job runner、retention、index profile 等运行时配置时，再新增只读配置摘要 API 和 Ops 页面展示；API 必须脱敏，不返回 API key、access key、secret key、password 等字段。
+- **本地验证入口收敛**：前后端和测试工程师可做。当前优先通过接口自动化和脚本回归分级解决；若提交前仍需要统一入口，再新增 `scripts/check.sh` 或等价命令聚合 `go test ./...`、前端 build、脚本语法检查和接口 smoke，但不默认包含 Playwright / chromedp UI 主流程。
 - **Playwright UI 主流程**：测试工程师可做。但当前页面仍是内部 demo / 管理界面，核心风险在 API、后台任务、数据落库与 trace；先不做 1-2 条 Playwright 主流程，避免维护浏览器点击流。
 - **权限、操作者与审计**：前后端可做。当前仍按可信本地 demo / 小范围试用处理；只有出现外部用户、多人并发编辑、危险操作追责或客户侧安全要求时，再考虑登录、RBAC、操作者审计和危险操作二次确认。
 - **Demo 控制台 / Demo 结果自检页面**：前后端可做。现阶段 demo 是工程内部使用，直接运行 `scripts/demo_bootstrap.sh fresh` 更便宜、可复现性更强；不继续扩展可视化一键 reset 或 demo 自检页面，演示前可用脚本输出确认 task id、case count、trace/model_call 计数。
