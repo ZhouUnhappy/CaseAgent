@@ -19,7 +19,7 @@
 
 - 需要算法工程师长期维护的模型能力：自动质量评分、语义重复检测模型、reranker、query rewrite 模型、embedding 训练、LLM-as-judge、大规模模型效果实验平台。
 - 需要数据工程师长期维护的数据能力：数据仓库、BI 平台、特征工程 pipeline、复杂趋势预测、跨版本自动归因、大规模离线实验数据链路。
-- 重型测试平台能力：完整跨浏览器 UI 矩阵、海量端到端用例矩阵、商业测试平台建设。当前测试工程师优先做接口自动化和脚本回归，不把 Playwright 主流程作为默认路径。
+- 重型测试平台能力：完整跨浏览器 UI 矩阵、海量端到端用例矩阵、商业测试平台建设。当前测试工程师以探索测试、变更后针对性回归和演示前检查为主，不把完整接口自动化或 Playwright 主流程作为默认路径。
 
 ## 文档约定
 
@@ -33,13 +33,17 @@
 
 不在本文维护“做了哪些”。已发生的事实由 git log 与 `docs/regression/` 承载。完成的项请直接从本文删除。
 
-## 后续目标（当前建议启动）
+## 当前阶段结论
+
+当前没有必须立即启动的优化项。项目仍处于 Demo 持续打磨阶段，优先验证核心流程、收集使用反馈、改善交互和结果；测试工程师优先做探索测试、场景设计、缺陷复现、变更后针对性回归和演示前 checklist。下列事项只在 Trigger 真实出现后启动。
+
+## 现有团队能做但当前不启动
 
 ### 1. 接口自动化回归
 
 **需要角色**：测试工程师、后端工程师，前端工程师按需配合接口契约调整。
 
-**Trigger**：核心链路已经覆盖 tenant / project / document / knowledge / analyze / review / generate / testcase / feedback / trace / demo fresh，后续任一改动都可能造成跨模块回归；测试工程师需要一套不依赖浏览器点击的稳定回归入口。
+**Trigger**：仅在出现以下任一信号后启动：同一核心链路频繁回归；演示频率已高到每次手工回归成本明显；多人并行修改 analyze / review / generate / testcase / feedback 等跨模块链路；Demo 开始交给客户或外部团队稳定使用；手工回归成本已高于自动化维护成本。
 
 **DoD**：新增或整理接口自动化入口，建议路径为 `scripts/api_core_regression.sh` 或 `tests/api/`；覆盖创建/复用 tenant、创建 project、上传 document / knowledge、等待 analyze、提交 review、触发 generate、批量修改/提交用例、提交用例质量反馈、提交知识缺失反馈、读取 trace / source_context / generation profile；不新增 Playwright 主流程；失败时输出 API URL、tenant slug、project id、task id、最后 job error、trace last_error、model_call / retrieval_run 数量；在固定 fake provider demo 配置下可跑通；`bash -n scripts/*.sh`、`cd backend && go test ./...`、`cd frontend && npm run build` 通过。
 
@@ -59,15 +63,15 @@
 
 **DoD**：沉淀共享诊断 helper，建议路径为 `scripts/lib/diagnostics.sh`；脚本失败时统一输出 tenant slug、project id、document / knowledge id、task id、task status、最后一个 job error、trace last_error、agent / model / retrieval 计数、生成 profile id/version；接口自动化和 demo 脚本复用该 helper；不新增页面，不要求接入外部日志平台。
 
-## 前后端能做但当前不启动
+### 其他备选事项
 
 这些事项不需要算法工程师或数据工程师，但不是当前最短路径。除非出现明确 Trigger，否则只保留为备选，不主动开工。
 
-- **OpenAPI / API 契约文档**：前后端和测试工程师可做。但当前先以接口自动化覆盖真实链路；只有外部调用方增加、API 变更开始影响多端协作，或测试用例需要稳定 schema 生成时，再补 OpenAPI / client 生成。
+- **OpenAPI / API 契约文档**：前后端和测试工程师可做。当前保持现有后端测试、前端 build 和 demo 脚本即可；只有外部调用方增加、API 变更开始影响多端协作，或测试用例需要稳定 schema 生成时，再补 OpenAPI / client 生成。
 - **任务生成前置检查**：前后端可做。只有任务失败或 demo 排障中反复出现文档未处理完成、知识库未完成向量化、tenant 未选、模型配置缺失、worker 未运行等可提前发现的问题时，再考虑新增 `POST /api/v1/projects/:id/tasks/preflight` 或等价检查 API，返回 tenant、文档状态、知识库状态、模型配置、worker 风险的结构化 checklist。
 - **API 错误码规范化**：前后端可做。只有前端需要根据错误类型做不同处理，或用户反馈中频繁出现无法区分 validation、conflict、not_found、retryable server error 的提示时，再统一后端主要 handler 的错误响应，例如 `{code,message,details}`。
 - **运行时配置摘要页面**：前后端可做。只有排障或 demo 准备时频繁需要确认当前 chat/embedding provider、model、job runner、retention、index profile 等运行时配置时，再新增只读配置摘要 API 和 Ops 页面展示；API 必须脱敏，不返回 API key、access key、secret key、password 等字段。
-- **本地验证入口收敛**：前后端和测试工程师可做。当前优先通过接口自动化和脚本回归分级解决；若提交前仍需要统一入口，再新增 `scripts/check.sh` 或等价命令聚合 `go test ./...`、前端 build、脚本语法检查和接口 smoke，但不默认包含 Playwright / chromedp UI 主流程。
+- **本地验证入口收敛**：前后端和测试工程师可做。当前继续按需运行现有 `go test ./...`、前端 build 和 demo 脚本；只有提交前频繁漏跑必要检查时，再新增 `scripts/check.sh` 或等价统一入口，但不默认包含 Playwright / chromedp UI 主流程。
 - **Playwright UI 主流程**：测试工程师可做。但当前页面仍是内部 demo / 管理界面，核心风险在 API、后台任务、数据落库与 trace；先不做 1-2 条 Playwright 主流程，避免维护浏览器点击流。
 - **权限、操作者与审计**：前后端可做。当前仍按可信本地 demo / 小范围试用处理；只有出现外部用户、多人并发编辑、危险操作追责或客户侧安全要求时，再考虑登录、RBAC、操作者审计和危险操作二次确认。
 - **Demo 控制台 / Demo 结果自检页面**：前后端可做。现阶段 demo 是工程内部使用，直接运行 `scripts/demo_bootstrap.sh fresh` 更便宜、可复现性更强；不继续扩展可视化一键 reset 或 demo 自检页面，演示前可用脚本输出确认 task id、case count、trace/model_call 计数。
@@ -82,4 +86,4 @@
 - 自动质量评分与算法优化：没有算法工程师前，不做自动覆盖率评分、LLM-as-judge、reranker、语义重复检测模型、query rewrite 模型、embedding 训练或模型效果实验平台。
 - 数据平台与复杂分析：没有数据工程师前，不做数据仓库、BI 平台、特征工程 pipeline、复杂趋势预测、跨版本自动归因或大规模离线实验平台。
 - 知识条目过期时间：当前没有明确业务需求，不做 expires_at、自动失效、过期提醒或过期清理。
-- 重型测试平台：不做完整自动化回归平台、跨浏览器 UI 矩阵或大规模端到端用例平台；测试工程师优先维护接口自动化、脚本回归和少量关键验证命令。
+- 重型测试平台：不做完整自动化回归平台、跨浏览器 UI 矩阵或大规模端到端用例平台；测试工程师以探索测试、针对性回归和演示前检查为主，只在收益明确时补少量关键自动化。
