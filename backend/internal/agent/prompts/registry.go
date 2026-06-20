@@ -179,12 +179,16 @@ var defaultRegistry = mustDefaultRegistry()
 
 func mustDefaultRegistry() *Registry {
 	registry, err := NewRegistry([]Template{
-		{ID: FunctionalCases, Version: "v1", Body: functionalCasesV1, Default: true},
+		{ID: FunctionalCases, Version: "v1", Body: functionalCasesV1},
+		{ID: FunctionalCases, Version: "v2", Body: functionalCasesV2, Default: true},
 		{ID: OpsCases, Version: "v1", Body: opsCasesV1, Default: true},
 		{ID: FailureCases, Version: "v1", Body: failureCasesV1, Default: true},
-		{ID: BoundaryCases, Version: "v1", Body: boundaryCasesV1, Default: true},
-		{ID: DeepCases, Version: "v1", Body: deepCasesV1, Default: true},
-		{ID: DeepRefineCases, Version: "v1", Body: deepRefineCasesV1, Default: true},
+		{ID: BoundaryCases, Version: "v1", Body: boundaryCasesV1},
+		{ID: BoundaryCases, Version: "v2", Body: boundaryCasesV2, Default: true},
+		{ID: DeepCases, Version: "v1", Body: deepCasesV1},
+		{ID: DeepCases, Version: "v2", Body: deepCasesV2, Default: true},
+		{ID: DeepRefineCases, Version: "v1", Body: deepRefineCasesV1},
+		{ID: DeepRefineCases, Version: "v2", Body: deepRefineCasesV2, Default: true},
 	})
 	if err != nil {
 		panic(err)
@@ -199,6 +203,35 @@ const functionalCasesV1 = `你是一个功能测试专家。根据以下需求�
 
 相关知识:
 {{.Knowledge}}
+
+请只返回如下结构的 JSON 数组，不要解释文字，不要 Markdown 代码块：
+[
+  {
+    "section": "功能测试",
+    "cases": [
+      {
+        "title": "[模块] 用例标题",
+        "priority_id": 3,
+        "custom_preconds": "前置条件",
+        "custom_steps_separated": [
+          {"content": "步骤1", "expected": "预期1"}
+        ]
+      }
+    ]
+  }
+]`
+
+const functionalCasesV2 = `你是一个功能测试专家。根据以下需求和相关知识，只生成功能测试用例。
+
+需求:
+{{.Requirements}}
+
+相关知识:
+{{.Knowledge}}
+
+分类规则：
+- 需求明确支持的正常枚举值（例如 S/M/L/XL）逐一验证属于功能测试。
+- 不要仅因枚举值位于列表首尾，就将其称为边界值。
 
 请只返回如下结构的 JSON 数组，不要解释文字，不要 Markdown 代码块：
 [
@@ -307,6 +340,40 @@ const boundaryCasesV1 = `你是一个边界测试专家。根据以下需求和�
   }
 ]`
 
+const boundaryCasesV2 = `你是一个边界测试专家。根据以下需求和相关知识，只生成边界测试用例。
+
+需求:
+{{.Requirements}}
+
+相关知识:
+{{.Knowledge}}
+
+边界测试只关注：
+- 可比较的最小值、最大值、阈值以及刚好越界的值。
+- 长度、容量、数量、尺寸、时间、格式等输入域的边界和无效输入。
+- 空值、缺失值、极端值等真正的边缘情况。
+
+分类限制：
+- 需求明确支持的正常枚举值（例如 S/M/L/XL）逐一验证属于功能测试，不属于边界测试。
+- 只有当某个枚举项明确代表可比较的最小或最大限制时，才能作为边界。
+
+请只返回如下结构的 JSON 数组，不要解释文字，不要 Markdown 代码块：
+[
+  {
+    "section": "边界测试",
+    "cases": [
+      {
+        "title": "[模块] 用例标题",
+        "priority_id": 3,
+        "custom_preconds": "前置条件",
+        "custom_steps_separated": [
+          {"content": "步骤1", "expected": "预期1"}
+        ]
+      }
+    ]
+  }
+]`
+
 const deepCasesV1 = `你是一个测试用例生成专家。根据以下需求和相关知识，输出结构化测试用例。
 
 需求:
@@ -342,6 +409,9 @@ const deepCasesV1 = `你是一个测试用例生成专家。根据以下需求�
 6. custom_steps_separated 中每一步都必须包含 content 和 expected
 7. 只返回合法 JSON，不要 Markdown 代码块，不要解释文字`
 
+const deepCasesV2 = deepCasesV1 + `
+8. 正常枚举值全覆盖属于功能测试；只有可比较阈值、刚好越界值和无效输入属于边界测试。`
+
 const deepRefineCasesV1 = `你是测试用例总协调 Agent。请基于以下输入，对草稿用例做统一整理：
 
 需求:
@@ -375,3 +445,6 @@ const deepRefineCasesV1 = `你是测试用例总协调 Agent。请基于以下�
 2. 每个 case 必须包含 title/priority_id/custom_preconds/custom_steps_separated。
 3. custom_steps_separated 每一步都必须有 content 与 expected。
 4. 仅返回合法 JSON，不要 Markdown 代码块，不要解释文字。`
+
+const deepRefineCasesV2 = deepRefineCasesV1 + `
+5. 校正 section 分类：正常支持的枚举值（例如 S/M/L/XL）全覆盖归入功能测试；只有可比较阈值、刚好越界值和无效输入归入边界测试。`

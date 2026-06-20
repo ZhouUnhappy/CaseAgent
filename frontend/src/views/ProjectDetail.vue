@@ -3,7 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
-import { MagicStick } from '@element-plus/icons-vue'
+import { MagicStick, View } from '@element-plus/icons-vue'
+import MarkdownPreview from '../components/MarkdownPreview.vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
 import { getProject } from '../api/projects'
@@ -25,6 +26,8 @@ const { items: taskItems, loading: taskLoading, creating: taskCreating } = store
 const uploadDialog = ref(false)
 const uploadForm = reactive({ name: '', file: null })
 const uploadFormRef = ref(null)
+const previewVisible = ref(false)
+const previewDocument = ref(null)
 const documentJobs = ref({})
 const taskJobs = ref({})
 
@@ -58,6 +61,11 @@ function openUpload() {
   uploadForm.name = ''
   uploadForm.file = null
   uploadDialog.value = true
+}
+
+function openDocumentPreview(document) {
+  previewDocument.value = document
+  previewVisible.value = true
 }
 
 function onFileChange(file) {
@@ -244,8 +252,14 @@ function latestTaskJob(row) {
         <el-table-column label="更新时间" width="180">
           <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="220">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              :icon="View"
+              :disabled="!row.content"
+              @click="openDocumentPreview(row)"
+            >预览</el-button>
             <el-button
               size="small"
               :disabled="row.status === 'processing'"
@@ -337,6 +351,21 @@ function latestTaskJob(row) {
         <template #empty>暂无任务，点击右上角新建。</template>
       </el-table>
     </el-card>
+
+    <el-drawer
+      v-model="previewVisible"
+      :title="previewDocument?.name || '需求文档预览'"
+      size="min(860px, 94vw)"
+      destroy-on-close
+      @closed="previewDocument = null"
+    >
+      <div v-if="previewDocument" class="preview-meta">
+        <el-tag size="small" type="info">{{ previewDocument.type }}</el-tag>
+        <StatusTag :status="previewDocument.status" />
+        <span class="muted">更新于 {{ formatDate(previewDocument.updated_at) }}</span>
+      </div>
+      <MarkdownPreview :content="previewDocument?.content || ''" />
+    </el-drawer>
 
     <el-dialog
       v-model="uploadDialog"
@@ -474,5 +503,12 @@ function latestTaskJob(row) {
 .file-name {
   margin-left: 12px;
   color: #606266;
+}
+.preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
 }
 </style>

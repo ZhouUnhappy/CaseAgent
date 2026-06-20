@@ -1,9 +1,21 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
-import { ChatDotRound, Check, Delete, Download, EditPen, Plus, Refresh, View, Warning } from '@element-plus/icons-vue'
+import {
+  ArrowDownBold,
+  ArrowUpBold,
+  ChatDotRound,
+  Check,
+  Delete,
+  Download,
+  EditPen,
+  Plus,
+  Refresh,
+  View,
+  Warning,
+} from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
 import { getTaskDiagnostics, getTaskTrace } from '../api/tasks'
@@ -49,6 +61,8 @@ const editorOriginal = ref('')
 const provenanceVisible = ref(false)
 const provenanceCase = ref(null)
 const selectedCaseRefs = ref({})
+const expandedSections = ref([])
+const expandedCaseRows = ref({})
 const caseEditorVisible = ref(false)
 const editingCaseSection = ref(null)
 const editingCaseIndex = ref(-1)
@@ -263,6 +277,7 @@ watch(taskId, () => {
   stopPolling()
   casesStore.clear()
   clearSelectedCases()
+  clearCaseExpansion()
   loadTask()
 })
 
@@ -507,6 +522,78 @@ function resetCaseFilters() {
     provenance: '',
     hide_duplicates: true,
   })
+}
+
+function sectionCaseRows(section) {
+  return section.display_cases || []
+}
+
+function caseRowKey(section, row) {
+  return `${section.id}:${row.__case_index}`
+}
+
+function caseAnchorId(section, row) {
+  return `case-${caseRowKey(section, row).replace(':', '-')}`
+}
+
+function isSectionExpanded(section) {
+  return expandedSections.value.includes(section.id)
+}
+
+function isCaseExpanded(section, row) {
+  return (expandedCaseRows.value[section.id] || []).includes(caseRowKey(section, row))
+}
+
+function ensureSectionExpanded(section) {
+  if (isSectionExpanded(section)) return
+  expandedSections.value = [...expandedSections.value, section.id]
+}
+
+function setSectionCasesExpanded(section, expanded) {
+  if (expanded) ensureSectionExpanded(section)
+  expandedCaseRows.value = {
+    ...expandedCaseRows.value,
+    [section.id]: expanded ? sectionCaseRows(section).map((row) => caseRowKey(section, row)) : [],
+  }
+}
+
+function onCaseExpandChange(section, row, expanded) {
+  const key = caseRowKey(section, row)
+  const current = new Set(expandedCaseRows.value[section.id] || [])
+  if (expanded) current.add(key)
+  else current.delete(key)
+  expandedCaseRows.value = { ...expandedCaseRows.value, [section.id]: [...current] }
+}
+
+function toggleCaseExpanded(section, row) {
+  ensureSectionExpanded(section)
+  onCaseExpandChange(section, row, !isCaseExpanded(section, row))
+}
+
+function expandAllCases() {
+  expandedSections.value = filteredSections.value.map((section) => section.id)
+  expandedCaseRows.value = Object.fromEntries(
+    filteredSections.value.map((section) => [
+      section.id,
+      sectionCaseRows(section).map((row) => caseRowKey(section, row)),
+    ]),
+  )
+}
+
+function collapseAllCases() {
+  clearCaseExpansion()
+}
+
+function clearCaseExpansion() {
+  expandedSections.value = []
+  expandedCaseRows.value = {}
+}
+
+async function focusCase(section, row) {
+  ensureSectionExpanded(section)
+  onCaseExpandChange(section, row, true)
+  await nextTick()
+  document.getElementById(caseAnchorId(section, row))?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 function onCaseSelectionChange(section, selection) {
@@ -999,10 +1086,10 @@ async function submitKnowledgeFeedback() {
         <div class="card-header">
           <span>测试用例输出</span>
           <div class="header-actions">
-            <el-tag type="info" size="small">{{ caseSectionCount }} sections</el-tag>
-            <el-tag type="success" size="small">{{ totalCaseCount }} cases</el-tag>
+            <el-tag type="info" size="small">{{ caseSectionCount }} 个类别</el-tag>
+            <el-tag type="success" size="small">{{ totalCaseCount }} 条用例</el-tag>
             <el-tag v-if="filteredCaseCount !== totalCaseCount" type="warning" size="small">
-              {{ filteredCaseCount }} visible
+              当前显示 {{ filteredCaseCount }} 条
             </el-tag>
             <el-button
               :icon="Refresh"
@@ -1024,21 +1111,59 @@ async function submitKnowledgeFeedback() {
         :description="caseOutputEmptyDescription"
       />
       <template v-else>
+        <div class="case-overview">
+          <div class="overview-header">
+            <div>
+              <h3>用例概览</h3>
+              <p class="muted small">{{ filteredCaseCount }} 条标题，按类别汇总</p>
+            </div>
+            <div class="overview-actions">
+              <el-button size="small" :icon="ArrowDownBold" @click="expandAllCases">
+                全部展开
+              </el-button>
+              <el-button size="small" :icon="ArrowUpBold" @click="collapseAllCases">
+                全部收起
+              </el-button>
+            </div>
+          </div>
+          <el-scrollbar max-height="380px" class="overview-scroll">
+            <div class="overview-sections">
+              <section
+                v-for="section in filteredSections"
+                :key="`overview-${section.id}`"
+                class="overview-section"
+              >
+                <div class="overview-section-header">
+                  <strong>{{ section.section }}</strong>
+                  <el-tag size="small" type="info">{{ section.display_cases.length }} 条</el-tag>
+                </div>
+                <ol class="overview-title-list">
+                  <li v-for="row in section.display_cases" :key="caseRowKey(section, row)">
+                    <el-button link type="primary" @click="focusCase(section, row)">
+                      {{ row.title || `用例 #${row.__case_index + 1}` }}
+                    </el-button>
+                  </li>
+                </ol>
+              </section>
+            </div>
+          </el-scrollbar>
+        </div>
+
         <div class="case-review-tools">
           <div class="filter-bar case-filter-bar">
-            <el-select v-model="caseFilters.section" clearable placeholder="section" class="filter-control">
+            <el-select v-model="caseFilters.section" clearable placeholder="类别" class="filter-control">
               <el-option v-for="item in sectionOptions" :key="item" :label="item" :value="item" />
             </el-select>
-            <el-select v-model="caseFilters.priority_id" clearable placeholder="priority" class="filter-control compact">
+            <el-select v-model="caseFilters.priority_id" clearable placeholder="优先级" class="filter-control compact">
               <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
-            <el-select v-model="caseFilters.product" clearable filterable placeholder="product" class="filter-control">
+            <el-select v-model="caseFilters.product" clearable filterable placeholder="产品" class="filter-control">
               <el-option v-for="item in productOptions" :key="item" :label="item" :value="item" />
             </el-select>
-            <el-select v-model="caseFilters.module" clearable filterable placeholder="module" class="filter-control">
+            <el-select v-model="caseFilters.module" clearable filterable placeholder="模块" class="filter-control">
               <el-option v-for="item in moduleOptions" :key="item" :label="item" :value="item" />
             </el-select>
-            <el-select v-model="caseFilters.feedback_type" clearable placeholder="feedback" class="filter-control">
+            <el-select v-model="caseFilters.feedback_type" clearable placeholder="反馈" class="filter-control">
               <el-option label="有反馈" value="any" />
               <el-option
                 v-for="item in qualityFeedbackOptions"
@@ -1056,8 +1181,8 @@ async function submitKnowledgeFeedback() {
           </div>
 
           <div class="batch-bar">
-            <el-tag type="info" size="small">{{ selectedCaseCount }} selected</el-tag>
-            <el-select v-model="batchPatch.priority_id" clearable placeholder="priority" class="batch-control compact">
+            <el-tag type="info" size="small">已选 {{ selectedCaseCount }} 条</el-tag>
+            <el-select v-model="batchPatch.priority_id" clearable placeholder="优先级" class="batch-control compact">
               <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
             <el-select
@@ -1066,7 +1191,7 @@ async function submitKnowledgeFeedback() {
               filterable
               allow-create
               collapse-tags
-              placeholder="products"
+              placeholder="产品"
               class="batch-control"
             >
               <el-option v-for="item in productOptions" :key="item" :label="item" :value="item" />
@@ -1077,7 +1202,7 @@ async function submitKnowledgeFeedback() {
               filterable
               allow-create
               collapse-tags
-              placeholder="modules"
+              placeholder="模块"
               class="batch-control"
             >
               <el-option v-for="item in moduleOptions" :key="item" :label="item" :value="item" />
@@ -1091,7 +1216,7 @@ async function submitKnowledgeFeedback() {
           v-if="!filteredCaseCount && !casesLoading"
           description="没有符合筛选条件的用例"
         />
-        <el-collapse v-else>
+        <el-collapse v-else v-model="expandedSections">
           <el-collapse-item
             v-for="section in filteredSections"
             :key="section.id"
@@ -1101,13 +1226,23 @@ async function submitKnowledgeFeedback() {
             <div class="section-title">
               <span>{{ section.section }}</span>
               <el-tag size="small" type="info">
-                {{ section.display_cases?.length || 0 }}/{{ section.cases?.length || 0 }} cases
+                {{ section.display_cases?.length || 0 }}/{{ section.cases?.length || 0 }} 条
               </el-tag>
               <StatusTag :status="section.status" />
             </div>
           </template>
 
           <div class="section-actions">
+            <el-button
+              size="small"
+              :icon="ArrowDownBold"
+              @click="setSectionCasesExpanded(section, true)"
+            >展开本类</el-button>
+            <el-button
+              size="small"
+              :icon="ArrowUpBold"
+              @click="setSectionCasesExpanded(section, false)"
+            >收起本类</el-button>
             <el-button size="small" :icon="EditPen" @click="openEditor(section)">编辑 JSON</el-button>
             <el-button
               size="small"
@@ -1122,6 +1257,9 @@ async function submitKnowledgeFeedback() {
             :data="section.display_cases || []"
             stripe
             size="small"
+            :row-key="(row) => caseRowKey(section, row)"
+            :expand-row-keys="expandedCaseRows[section.id] || []"
+            @expand-change="(row, expanded) => onCaseExpandChange(section, row, expanded)"
             @selection-change="(selection) => onCaseSelectionChange(section, selection)"
           >
             <el-table-column type="selection" width="44" />
@@ -1150,7 +1288,17 @@ async function submitKnowledgeFeedback() {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="title" label="标题" min-width="260" show-overflow-tooltip />
+            <el-table-column prop="title" label="标题" min-width="300">
+              <template #default="{ row }">
+                <el-button
+                  :id="caseAnchorId(section, row)"
+                  link
+                  type="primary"
+                  class="case-title-button"
+                  @click="toggleCaseExpanded(section, row)"
+                >{{ row.title || `用例 #${row.__case_index + 1}` }}</el-button>
+              </template>
+            </el-table-column>
             <el-table-column label="优先级" width="100">
               <template #default="{ row }">{{ priorityLabel(row.priority_id) }}</template>
             </el-table-column>
@@ -1949,6 +2097,74 @@ async function submitKnowledgeFeedback() {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.case-overview {
+  margin-bottom: 14px;
+  padding: 14px 16px 10px;
+  border-top: 1px solid #ebeef5;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafafa;
+}
+.overview-header,
+.overview-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.overview-header h3 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+.overview-header p {
+  margin: 3px 0 0;
+}
+.overview-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.overview-scroll {
+  margin-top: 10px;
+}
+.overview-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+}
+.overview-section {
+  min-width: 0;
+  padding: 10px 0 12px;
+  border-top: 1px solid #ebeef5;
+}
+.overview-title-list {
+  margin: 8px 0 0;
+  padding-left: 24px;
+}
+.overview-title-list li {
+  padding: 1px 0;
+  color: #909399;
+}
+.overview-title-list :deep(.el-button) {
+  max-width: 100%;
+  height: auto;
+  padding: 3px 0;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.45;
+}
+.case-title-button {
+  max-width: 100%;
+  height: auto;
+  padding: 4px 0;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.45;
 }
 .case-review-tools {
   display: flex;
@@ -2102,8 +2318,19 @@ async function submitKnowledgeFeedback() {
   }
   .trace-summary-grid,
   .trace-layout,
-  .provenance-grid {
+  .provenance-grid,
+  .overview-sections {
     grid-template-columns: 1fr;
+  }
+  .overview-header,
+  .overview-section-header {
+    align-items: flex-start;
+  }
+  .overview-header {
+    flex-direction: column;
+  }
+  .case-overview {
+    padding-inline: 12px;
   }
 }
 </style>

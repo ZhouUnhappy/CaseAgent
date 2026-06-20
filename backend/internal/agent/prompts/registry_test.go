@@ -81,11 +81,26 @@ func TestDefaultPromptsKeepFakeProviderSentinels(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render(%s) returned error: %v", tc.id, err)
 		}
-		if rendered.Version != "v1" {
-			t.Fatalf("Render(%s) version = %q, want v1", tc.id, rendered.Version)
-		}
 		if !strings.Contains(rendered.Content, tc.needle) {
 			t.Fatalf("Render(%s) missing fake sentinel %q:\n%s", tc.id, tc.needle, rendered.Content)
+		}
+	}
+}
+
+func TestDefaultCasePromptsDistinguishEnumsFromBoundaries(t *testing.T) {
+	registry := DefaultRegistry()
+	data := CasePromptData{Requirements: "sizes: S/M/L/XL", Knowledge: "knowledge", DraftJSON: "[]"}
+
+	for _, id := range []ID{FunctionalCases, BoundaryCases, DeepCases, DeepRefineCases} {
+		rendered, err := registry.Render(id, data)
+		if err != nil {
+			t.Fatalf("Render(%s) returned error: %v", id, err)
+		}
+		if rendered.Version != "v2" {
+			t.Fatalf("Render(%s) version = %q, want v2", id, rendered.Version)
+		}
+		if !strings.Contains(rendered.Content, "S/M/L/XL") {
+			t.Fatalf("Render(%s) missing enum classification guidance", id)
 		}
 	}
 }

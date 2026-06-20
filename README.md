@@ -33,6 +33,7 @@ CaseAgent/
 ```
 
 - 架构与回归索引：[`docs/architecture.md`](docs/architecture.md)
+- 工程约定：[`docs/engineering_conventions.md`](docs/engineering_conventions.md)
 - 回归脚本说明：[`scripts/README.md`](scripts/README.md)
 - 后续优化方向：[`docs/future_work.md`](docs/future_work.md)
 
