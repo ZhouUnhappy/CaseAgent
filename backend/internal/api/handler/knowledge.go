@@ -78,7 +78,7 @@ func (h *Handler) UploadKnowledge(c *gin.Context) {
 		UpdatedAt:         now,
 	}
 
-	if _, err := DBFromContext(c).NewInsert().Model(kb).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(kb).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -139,7 +139,7 @@ func (h *Handler) ListKnowledge(c *gin.Context) {
 		}
 	}
 
-	if err := query.Order("created_at DESC").Scan(c); err != nil {
+	if err := query.Order("created_at DESC").Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -151,7 +151,7 @@ func (h *Handler) GetKnowledge(c *gin.Context) {
 	id := c.Param("id")
 	kb := &models.KnowledgeBase{ID: 0}
 
-	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
@@ -168,7 +168,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 	}
 
 	kb := &models.KnowledgeBase{ID: 0}
-	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
@@ -201,7 +201,7 @@ func (h *Handler) UpdateKnowledge(c *gin.Context) {
 		update = update.Set("embedding = ?", nil)
 	}
 
-	if _, err := update.Exec(c); err != nil {
+	if _, err := update.Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -229,13 +229,13 @@ func (h *Handler) ListKnowledgeImpactedTasks(c *gin.Context) {
 	}
 
 	kb := &models.KnowledgeBase{ID: knowledgeID}
-	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", knowledgeID).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", knowledgeID).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
 
 	var items []KnowledgeImpactedTask
-	if err := DBFromContext(c).NewRaw(knowledgeImpactedTasksSQL, knowledgeID, knowledgeID).Scan(c, &items); err != nil {
+	if err := DBFromContext(c).NewRaw(knowledgeImpactedTasksSQL, knowledgeID, knowledgeID).Scan(c.Request.Context(), &items); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -247,7 +247,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 	id := c.Param("id")
 	kb := &models.KnowledgeBase{}
 
-	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(kb).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge not found"})
 		return
 	}
@@ -261,7 +261,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 		Set("status = ?", kb.Status).
 		Set("updated_at = ?", kb.UpdatedAt).
 		Where("id = ?", id).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -283,7 +283,7 @@ func (h *Handler) ReprocessKnowledge(c *gin.Context) {
 func (h *Handler) DeleteKnowledge(c *gin.Context) {
 	id := c.Param("id")
 
-	if _, err := DBFromContext(c).NewDelete().Model(&models.KnowledgeBase{}).Where("id = ?", id).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewDelete().Model(&models.KnowledgeBase{}).Where("id = ?", id).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

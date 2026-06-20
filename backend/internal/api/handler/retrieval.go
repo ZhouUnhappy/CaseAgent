@@ -44,9 +44,9 @@ func (h *Handler) SearchDocuments(c *gin.Context) {
 		err     error
 	)
 	if len(queries) == 1 {
-		results, err = svc.SearchDocuments(c, queries[0], req.TopK, req.DocumentIDs)
+		results, err = svc.SearchDocuments(c.Request.Context(), queries[0], req.TopK, req.DocumentIDs)
 	} else {
-		results, err = svc.SearchDocumentsMultiQuery(c, queries, req.TopK, req.DocumentIDs)
+		results, err = svc.SearchDocumentsMultiQuery(c.Request.Context(), queries, req.TopK, req.DocumentIDs)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -80,9 +80,9 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		err     error
 	)
 	if len(queries) == 1 {
-		results, err = svc.SearchKnowledge(c, queries[0], req.TopK, req.Type)
+		results, err = svc.SearchKnowledge(c.Request.Context(), queries[0], req.TopK, req.Type)
 	} else {
-		results, err = svc.SearchKnowledgeMultiQuery(c, queries, req.TopK, req.Type)
+		results, err = svc.SearchKnowledgeMultiQuery(c.Request.Context(), queries, req.TopK, req.Type)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

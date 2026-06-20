@@ -37,7 +37,7 @@ func (h *Handler) ListKnowledgeSuggestions(c *gin.Context) {
 		return
 	}
 
-	rows, err := suggestionservice.New(DBFromContext(c)).List(c, status)
+	rows, err := suggestionservice.New(DBFromContext(c)).List(c.Request.Context(), status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -58,7 +58,7 @@ func (h *Handler) CreateKnowledgeSuggestion(c *gin.Context) {
 		return
 	}
 
-	row, err := suggestionservice.New(DBFromContext(c)).CreateManual(c, input)
+	row, err := suggestionservice.New(DBFromContext(c)).CreateManual(c.Request.Context(), input)
 	if err != nil {
 		if errors.Is(err, suggestionservice.ErrInvalidManualSuggestion) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": strings.TrimPrefix(err.Error(), suggestionservice.ErrInvalidManualSuggestion.Error()+": ")})
@@ -91,7 +91,7 @@ func (h *Handler) UpdateKnowledgeSuggestion(c *gin.Context) {
 		return
 	}
 
-	row, ok, err := suggestionservice.New(DBFromContext(c)).SetStatus(c, id, req.Status, req.ResolvedKnowledgeID)
+	row, ok, err := suggestionservice.New(DBFromContext(c)).SetStatus(c.Request.Context(), id, req.Status, req.ResolvedKnowledgeID)
 	if err != nil {
 		if errors.Is(err, suggestionservice.ErrInvalidManualSuggestion) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": strings.TrimPrefix(err.Error(), suggestionservice.ErrInvalidManualSuggestion.Error()+": ")})
@@ -126,7 +126,7 @@ func (h *Handler) DraftKnowledgeSuggestion(c *gin.Context) {
 		return
 	}
 
-	result, found, err := suggestionservice.New(DBFromContext(c)).Draft(c, id)
+	result, found, err := suggestionservice.New(DBFromContext(c)).Draft(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, suggestionservice.ErrInvalidManualSuggestion) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": strings.TrimPrefix(err.Error(), suggestionservice.ErrInvalidManualSuggestion.Error()+": ")})

@@ -84,7 +84,7 @@ func (h *Handler) GetTaskDiagnostics(c *gin.Context) {
 	if err := DBFromContext(c).NewSelect().
 		Model(&task).
 		Where("id = ?", taskID).
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
@@ -94,7 +94,7 @@ func (h *Handler) GetTaskDiagnostics(c *gin.Context) {
 		Model(&testCases).
 		Where("task_id = ?", taskID).
 		Order("id ASC").
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -105,7 +105,7 @@ func (h *Handler) GetTaskDiagnostics(c *gin.Context) {
 		Where("resource_type = ?", "task").
 		Where("resource_id = ?", taskID).
 		Order("created_at ASC", "id ASC").
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

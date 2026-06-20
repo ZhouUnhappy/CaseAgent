@@ -41,7 +41,7 @@ func (h *Handler) CreateTenant(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	if _, err := DBFromContext(c).NewInsert().Model(tenant).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(tenant).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -55,7 +55,7 @@ func (h *Handler) ListTenants(c *gin.Context) {
 	if c.Query("include_archived") != "true" {
 		query.Where("archived_at IS NULL")
 	}
-	if err := query.OrderExpr("archived_at ASC NULLS FIRST").Order("created_at DESC").Scan(c); err != nil {
+	if err := query.OrderExpr("archived_at ASC NULLS FIRST").Order("created_at DESC").Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -84,7 +84,7 @@ func (h *Handler) UpdateTenant(c *gin.Context) {
 		Set("name = ?", req.Name).
 		Set("updated_at = ?", now).
 		Where("id = ?", tenant.ID).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -104,7 +104,7 @@ func (h *Handler) ArchiveTenant(c *gin.Context) {
 		Set("archived_at = ?", now).
 		Set("updated_at = ?", now).
 		Where("id = ?", tenant.ID).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -124,7 +124,7 @@ func (h *Handler) UnarchiveTenant(c *gin.Context) {
 		Set("archived_at = NULL").
 		Set("updated_at = ?", now).
 		Where("id = ?", tenant.ID).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -140,7 +140,7 @@ func (h *Handler) loadTenantBySlug(c *gin.Context) (*models.Tenant, bool) {
 		return nil, false
 	}
 	tenant := new(models.Tenant)
-	if err := DBFromContext(c).NewSelect().Model(tenant).Where("slug = ?", slug).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(tenant).Where("slug = ?", slug).Scan(c.Request.Context()); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
 			return nil, false

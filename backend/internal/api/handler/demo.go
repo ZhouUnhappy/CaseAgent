@@ -119,7 +119,7 @@ func resetDemoData(c *gin.Context) (DemoResetResult, error) {
 			"%scripts/demo_bootstrap.sh%",
 			"%demo_console%",
 		).
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		return DemoResetResult{}, fmt.Errorf("list demo projects: %w", err)
 	}
 
@@ -127,7 +127,7 @@ func resetDemoData(c *gin.Context) (DemoResetResult, error) {
 	if err := DBFromContext(c).NewSelect().
 		Model(&knowledge).
 		Where("source = ? OR metadata::text LIKE ?", demoKnowledgeSource, "%"+demoKnowledgeAlias+"%").
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		return DemoResetResult{}, fmt.Errorf("list demo knowledge: %w", err)
 	}
 
@@ -136,13 +136,13 @@ func resetDemoData(c *gin.Context) (DemoResetResult, error) {
 		MatchedKnowledge: len(knowledge),
 	}
 	for _, project := range projects {
-		if _, err := DBFromContext(c).NewDelete().Model(&models.Project{}).Where("id = ?", project.ID).Exec(c); err != nil {
+		if _, err := DBFromContext(c).NewDelete().Model(&models.Project{}).Where("id = ?", project.ID).Exec(c.Request.Context()); err != nil {
 			return result, fmt.Errorf("delete demo project %d: %w", project.ID, err)
 		}
 		result.DeletedProjects++
 	}
 	for _, entry := range knowledge {
-		if _, err := DBFromContext(c).NewDelete().Model(&models.KnowledgeBase{}).Where("id = ?", entry.ID).Exec(c); err != nil {
+		if _, err := DBFromContext(c).NewDelete().Model(&models.KnowledgeBase{}).Where("id = ?", entry.ID).Exec(c.Request.Context()); err != nil {
 			return result, fmt.Errorf("delete demo knowledge %d: %w", entry.ID, err)
 		}
 		result.DeletedKnowledge++
@@ -166,7 +166,7 @@ func bootstrapDemoData(c *gin.Context, req DemoBootstrapRequest, reset *DemoRese
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if _, err := DBFromContext(c).NewInsert().Model(project).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(project).Exec(c.Request.Context()); err != nil {
 		return DemoBootstrapResult{}, fmt.Errorf("create demo project: %w", err)
 	}
 
@@ -183,7 +183,7 @@ func bootstrapDemoData(c *gin.Context, req DemoBootstrapRequest, reset *DemoRese
 		return DemoBootstrapResult{}, err
 	}
 
-	task, err := taskservice.New(DBFromContext(c)).CreateTask(c, project.ID, []int{document.ID})
+	task, err := taskservice.New(DBFromContext(c)).CreateTask(c.Request.Context(), project.ID, []int{document.ID})
 	if err != nil {
 		return DemoBootstrapResult{}, err
 	}
@@ -229,15 +229,15 @@ func createProcessedDemoDocument(c *gin.Context, tenantID int, projectID int, ru
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if _, err := DBFromContext(c).NewInsert().Model(document).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(document).Exec(c.Request.Context()); err != nil {
 		return nil, fmt.Errorf("create demo document: %w", err)
 	}
 
-	svc, err := documentservice.New(c, DBFromContext(c))
+	svc, err := documentservice.New(c.Request.Context(), DBFromContext(c))
 	if err != nil {
 		return nil, fmt.Errorf("initialize demo document processor: %w", err)
 	}
-	if err := svc.ProcessDocument(c, document.ID, content, ""); err != nil {
+	if err := svc.ProcessDocument(c.Request.Context(), document.ID, content, ""); err != nil {
 		return nil, fmt.Errorf("process demo document: %w", err)
 	}
 	document.Status = models.DocumentStatusCompleted
@@ -261,15 +261,15 @@ func createProcessedDemoKnowledge(c *gin.Context, tenantID int, kbType string, n
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if _, err := DBFromContext(c).NewInsert().Model(entry).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(entry).Exec(c.Request.Context()); err != nil {
 		return nil, fmt.Errorf("create demo knowledge: %w", err)
 	}
 
-	svc, err := knowledgeservice.New(c, DBFromContext(c))
+	svc, err := knowledgeservice.New(c.Request.Context(), DBFromContext(c))
 	if err != nil {
 		return nil, fmt.Errorf("initialize demo knowledge processor: %w", err)
 	}
-	if err := svc.ProcessKnowledge(c, entry.ID, content); err != nil {
+	if err := svc.ProcessKnowledge(c.Request.Context(), entry.ID, content); err != nil {
 		return nil, fmt.Errorf("process demo knowledge: %w", err)
 	}
 	entry.Status = models.KnowledgeStatusCompleted

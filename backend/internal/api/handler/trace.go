@@ -74,7 +74,7 @@ func (h *Handler) GetTaskTrace(c *gin.Context) {
 		Where("resource_type = ?", "task").
 		Where("resource_id = ?", taskID).
 		Order("created_at ASC", "id ASC").
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -94,7 +94,7 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 			Model(&view.Steps).
 			Where("workflow_run_id IN (?)", bun.In(runIDs)).
 			Order("created_at ASC", "id ASC").
-			Scan(c); err != nil {
+			Scan(c.Request.Context()); err != nil {
 			return err
 		}
 	}
@@ -107,7 +107,7 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 	} else {
 		agentQuery.Where("task_id = ?", taskID)
 	}
-	if err := agentQuery.Scan(c); err != nil {
+	if err := agentQuery.Scan(c.Request.Context()); err != nil {
 		return err
 	}
 
@@ -126,7 +126,7 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 		modelCallQuery = nil
 	}
 	if modelCallQuery != nil {
-		if err := modelCallQuery.Scan(c); err != nil {
+		if err := modelCallQuery.Scan(c.Request.Context()); err != nil {
 			return err
 		}
 	}
@@ -139,7 +139,7 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 	} else {
 		retrievalQuery.Where("task_id = ?", taskID)
 	}
-	if err := retrievalQuery.Scan(c); err != nil {
+	if err := retrievalQuery.Scan(c.Request.Context()); err != nil {
 		return err
 	}
 
@@ -151,7 +151,7 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 	} else {
 		artifactQuery.Where("resource_type = ? AND resource_id = ?", "task", taskID)
 	}
-	if err := artifactQuery.Scan(c); err != nil {
+	if err := artifactQuery.Scan(c.Request.Context()); err != nil {
 		return err
 	}
 	var testCases []models.TestCase
@@ -159,14 +159,14 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 		Model(&testCases).
 		Where("task_id = ?", taskID).
 		Order("id ASC").
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		return err
 	}
 	if err := db.NewSelect().
 		Model(&view.Feedback).
 		Where("task_id = ?", taskID).
 		Order("created_at DESC", "id DESC").
-		Scan(c); err != nil {
+		Scan(c.Request.Context()); err != nil {
 		return err
 	}
 	view.FeedbackSummary = feedbackCounts(view.Feedback)

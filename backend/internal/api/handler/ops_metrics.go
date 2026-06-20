@@ -15,7 +15,7 @@ func (h *Handler) GetOpsMetrics(c *gin.Context) {
 	if !ok {
 		return
 	}
-	view, err := opsmetrics.New(DBFromContext(c)).Get(c, input)
+	view, err := opsmetrics.New(DBFromContext(c)).Get(c.Request.Context(), input)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -34,7 +34,7 @@ func (h *Handler) CreateCaseFeedback(c *gin.Context) {
 		return
 	}
 
-	row, err := feedbackservice.New(DBFromContext(c)).CreateCaseFeedback(c, feedbackservice.CreateInput{
+	row, err := feedbackservice.New(DBFromContext(c)).CreateCaseFeedback(c.Request.Context(), feedbackservice.CreateInput{
 		TaskID:       taskID,
 		TestCaseID:   caseID,
 		CaseIndex:    req.CaseIndex,
@@ -54,7 +54,7 @@ func (h *Handler) ListTaskFeedback(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := feedbackservice.New(DBFromContext(c)).ListTaskFeedback(c, taskID)
+	rows, err := feedbackservice.New(DBFromContext(c)).ListTaskFeedback(c.Request.Context(), taskID)
 	if err != nil {
 		writeFeedbackServiceError(c, err)
 		return
@@ -67,7 +67,7 @@ func (h *Handler) GetFeedbackSummary(c *gin.Context) {
 	if !ok {
 		return
 	}
-	summary, err := feedbackservice.New(DBFromContext(c)).FeedbackSummary(c, input)
+	summary, err := feedbackservice.New(DBFromContext(c)).FeedbackSummary(c.Request.Context(), input)
 	if err != nil {
 		writeFeedbackServiceError(c, err)
 		return
@@ -80,7 +80,7 @@ func (h *Handler) GetQualityOverview(c *gin.Context) {
 	if !ok {
 		return
 	}
-	overview, err := feedbackservice.New(DBFromContext(c)).QualityOverview(c, input)
+	overview, err := feedbackservice.New(DBFromContext(c)).QualityOverview(c.Request.Context(), input)
 	if err != nil {
 		writeFeedbackServiceError(c, err)
 		return

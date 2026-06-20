@@ -15,7 +15,7 @@ import (
 )
 
 func (h *Handler) GetVectorHealth(c *gin.Context) {
-	report, err := maintenanceservice.New(DBFromContext(c)).VectorHealth(c)
+	report, err := maintenanceservice.New(DBFromContext(c)).VectorHealth(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -25,7 +25,7 @@ func (h *Handler) GetVectorHealth(c *gin.Context) {
 }
 
 func (h *Handler) ListStaleIndex(c *gin.Context) {
-	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c)
+	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +42,7 @@ func (h *Handler) ReindexVectors(c *gin.Context) {
 	if !ok {
 		return
 	}
-	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c)
+	plan, err := maintenanceservice.New(DBFromContext(c)).RepairPlan(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -84,7 +84,7 @@ func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan, oper
 		"operator":      operator.Metadata(),
 	}
 	for _, id := range plan.DocumentIDs {
-		if _, err := jobs.Enqueue(c, jobservice.EnqueueInput{
+		if _, err := jobs.Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 			DocumentID: id,
 			JobType:    models.JobTypeDocumentReprocess,
 			MaxRetries: configuredJobMaxRetriesFor(models.JobTypeDocumentReprocess),
@@ -94,7 +94,7 @@ func enqueueRepairPlan(c *gin.Context, plan *maintenanceservice.RepairPlan, oper
 		}
 	}
 	for _, id := range plan.KnowledgeIDs {
-		if _, err := jobs.Enqueue(c, jobservice.EnqueueInput{
+		if _, err := jobs.Enqueue(c.Request.Context(), jobservice.EnqueueInput{
 			KnowledgeID: id,
 			JobType:     models.JobTypeKnowledgeReprocess,
 			MaxRetries:  configuredJobMaxRetriesFor(models.JobTypeKnowledgeReprocess),
@@ -134,7 +134,7 @@ func recordMaintenanceIntervention(c *gin.Context, plan *maintenanceservice.Repa
 		},
 		CreatedAt: time.Now(),
 	}
-	_, err := DBFromContext(c).NewInsert().Model(artifact).Exec(c)
+	_, err := DBFromContext(c).NewInsert().Model(artifact).Exec(c.Request.Context())
 	return err
 }
 

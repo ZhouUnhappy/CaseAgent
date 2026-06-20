@@ -223,7 +223,7 @@ poll_task_status() {
             return 1
         fi
 
-        log "task $task_id status=$status, waiting ($attempt/$POLL_ATTEMPTS)"
+        log "task $task_id status=$status, waiting ($attempt/$POLL_ATTEMPTS)" >&2
         sleep "$POLL_INTERVAL_SECONDS"
     done
 

@@ -59,7 +59,7 @@ func (h *Handler) ListJobs(c *gin.Context) {
 	}
 
 	var jobs []models.BackgroundJob
-	if err := query.Scan(c, &jobs); err != nil {
+	if err := query.Scan(c.Request.Context(), &jobs); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -161,7 +161,7 @@ func (h *Handler) RetryJob(c *gin.Context) {
 		Set("finished_at = NULL").
 		Set("updated_at = ?", now).
 		Where("id = ?", job.ID).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -205,7 +205,7 @@ func (h *Handler) CancelJob(c *gin.Context) {
 		Set("finished_at = ?", now).
 		Set("updated_at = ?", now).
 		Where("id = ?", job.ID).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -262,7 +262,7 @@ func (h *Handler) ReplayJob(c *gin.Context) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if _, err := DBFromContext(c).NewInsert().Model(replay).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(replay).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("replay job: %v", err)})
 		return
 	}
@@ -297,7 +297,7 @@ func (h *Handler) loadJobForAction(c *gin.Context) (*models.BackgroundJob, bool)
 
 func (h *Handler) getJobByID(c *gin.Context, jobID int) (*models.BackgroundJob, error) {
 	job := new(models.BackgroundJob)
-	if err := DBFromContext(c).NewSelect().Model(job).Where("id = ?", jobID).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(job).Where("id = ?", jobID).Scan(c.Request.Context()); err != nil {
 		return nil, err
 	}
 	return job, nil
@@ -334,7 +334,7 @@ func markJobResourceQueued(c *gin.Context, job models.BackgroundJob, updatedAt t
 			Set("status = ?", models.TaskStatusAnalyzing).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.TaskID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	case models.JobTypeGenerate:
 		if job.TaskID == nil {
@@ -344,7 +344,7 @@ func markJobResourceQueued(c *gin.Context, job models.BackgroundJob, updatedAt t
 			Set("status = ?", models.TaskStatusGenerating).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.TaskID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	case models.JobTypeDocumentProcess, models.JobTypeDocumentReprocess:
 		if job.DocumentID == nil {
@@ -354,7 +354,7 @@ func markJobResourceQueued(c *gin.Context, job models.BackgroundJob, updatedAt t
 			Set("status = ?", models.DocumentStatusProcessing).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.DocumentID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	case models.JobTypeKnowledgeProcess, models.JobTypeKnowledgeReprocess:
 		if job.KnowledgeID == nil {
@@ -364,7 +364,7 @@ func markJobResourceQueued(c *gin.Context, job models.BackgroundJob, updatedAt t
 			Set("status = ?", models.KnowledgeStatusProcessing).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.KnowledgeID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	default:
 		return nil
@@ -381,7 +381,7 @@ func markJobResourceCanceled(c *gin.Context, job models.BackgroundJob, updatedAt
 			Set("status = ?", models.TaskStatusFailed).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.TaskID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	case models.JobTypeDocumentProcess, models.JobTypeDocumentReprocess:
 		if job.DocumentID == nil {
@@ -391,7 +391,7 @@ func markJobResourceCanceled(c *gin.Context, job models.BackgroundJob, updatedAt
 			Set("status = ?", models.DocumentStatusFailed).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.DocumentID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	case models.JobTypeKnowledgeProcess, models.JobTypeKnowledgeReprocess:
 		if job.KnowledgeID == nil {
@@ -401,7 +401,7 @@ func markJobResourceCanceled(c *gin.Context, job models.BackgroundJob, updatedAt
 			Set("status = ?", models.KnowledgeStatusFailed).
 			Set("updated_at = ?", updatedAt).
 			Where("id = ?", *job.KnowledgeID).
-			Exec(c)
+			Exec(c.Request.Context())
 		return err
 	default:
 		return nil
@@ -419,7 +419,7 @@ func cancelJobWorkflow(c *gin.Context, job models.BackgroundJob, updatedAt time.
 		Set("updated_at = ?", updatedAt).
 		Where("id = ?", *job.WorkflowRunID).
 		Where("status IN (?)", bun.In([]string{models.WorkflowStatusPending, models.WorkflowStatusRunning})).
-		Exec(c); err != nil {
+		Exec(c.Request.Context()); err != nil {
 		return err
 	}
 	_, err := DBFromContext(c).NewUpdate().Model((*models.WorkflowStep)(nil)).
@@ -429,7 +429,7 @@ func cancelJobWorkflow(c *gin.Context, job models.BackgroundJob, updatedAt time.
 		Set("updated_at = ?", updatedAt).
 		Where("workflow_run_id = ?", *job.WorkflowRunID).
 		Where("status IN (?)", bun.In([]string{models.WorkflowStatusPending, models.WorkflowStatusRunning})).
-		Exec(c)
+		Exec(c.Request.Context())
 	return err
 }
 
@@ -461,7 +461,7 @@ func recordJobIntervention(c *gin.Context, job models.BackgroundJob, action stri
 		Payload:       payload,
 		CreatedAt:     time.Now(),
 	}
-	_, err := DBFromContext(c).NewInsert().Model(artifact).Exec(c)
+	_, err := DBFromContext(c).NewInsert().Model(artifact).Exec(c.Request.Context())
 	return err
 }
 

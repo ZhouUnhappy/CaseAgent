@@ -34,7 +34,7 @@ func (h *Handler) ListWorkflows(c *gin.Context) {
 	}
 
 	var runs []models.WorkflowRun
-	if err := query.Limit(200).Scan(c, &runs); err != nil {
+	if err := query.Limit(200).Scan(c.Request.Context(), &runs); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

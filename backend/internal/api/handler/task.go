@@ -37,7 +37,7 @@ func (h *Handler) CreateGenerationTask(c *gin.Context) {
 		return
 	}
 
-	task, err := taskservice.New(DBFromContext(c)).CreateTask(c, pid, req.DocumentIDs)
+	task, err := taskservice.New(DBFromContext(c)).CreateTask(c.Request.Context(), pid, req.DocumentIDs)
 	if err != nil {
 		writeTaskServiceError(c, err)
 		return
@@ -70,7 +70,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	}
 
 	var tasks []models.CaseGenerationTask
-	if err := DBFromContext(c).NewSelect().Model(&tasks).Where("project_id = ?", pid).Order("created_at DESC").Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(&tasks).Where("project_id = ?", pid).Order("created_at DESC").Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -82,7 +82,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task := &models.CaseGenerationTask{ID: 0}
 
-	if err := DBFromContext(c).NewSelect().Model(task).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(task).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
@@ -102,7 +102,7 @@ func (h *Handler) ReviewAffected(c *gin.Context) {
 		return
 	}
 
-	task, err := taskservice.New(DBFromContext(c)).ReviewAffected(c, taskID, req.AffectedProducts, req.AffectedModules)
+	task, err := taskservice.New(DBFromContext(c)).ReviewAffected(c.Request.Context(), taskID, req.AffectedProducts, req.AffectedModules)
 	if err != nil {
 		writeTaskServiceError(c, err)
 		return
@@ -123,7 +123,7 @@ func (h *Handler) GenerateCases(c *gin.Context) {
 		return
 	}
 
-	task, err := taskservice.New(DBFromContext(c)).StartGeneration(c, taskID)
+	task, err := taskservice.New(DBFromContext(c)).StartGeneration(c.Request.Context(), taskID)
 	if err != nil {
 		writeTaskServiceError(c, err)
 		return
@@ -149,7 +149,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 		return
 	}
 
-	decision, err := taskservice.New(DBFromContext(c)).RetryTask(c, taskID)
+	decision, err := taskservice.New(DBFromContext(c)).RetryTask(c.Request.Context(), taskID)
 	if err != nil {
 		writeTaskServiceError(c, err)
 		return

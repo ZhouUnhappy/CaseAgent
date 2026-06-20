@@ -71,7 +71,7 @@ func (h *Handler) UploadDocument(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	if _, err := DBFromContext(c).NewInsert().Model(document).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewInsert().Model(document).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -104,7 +104,7 @@ func (h *Handler) ListDocuments(c *gin.Context) {
 	}
 
 	var documents []models.Document
-	if err := DBFromContext(c).NewSelect().Model(&documents).Where("project_id = ?", pid).Order("created_at DESC").Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(&documents).Where("project_id = ?", pid).Order("created_at DESC").Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -116,7 +116,7 @@ func (h *Handler) GetDocument(c *gin.Context) {
 	id := c.Param("id")
 	document := &models.Document{ID: 0}
 
-	if err := DBFromContext(c).NewSelect().Model(document).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(document).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
 		return
 	}
@@ -127,7 +127,7 @@ func (h *Handler) GetDocument(c *gin.Context) {
 func (h *Handler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 
-	if _, err := DBFromContext(c).NewDelete().Model(&models.Document{}).Where("id = ?", id).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewDelete().Model(&models.Document{}).Where("id = ?", id).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -139,7 +139,7 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 	id := c.Param("id")
 	document := &models.Document{}
 
-	if err := DBFromContext(c).NewSelect().Model(document).Where("id = ?", id).Scan(c); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(document).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
 		return
 	}
@@ -147,7 +147,7 @@ func (h *Handler) ReprocessDocument(c *gin.Context) {
 	document.Status = "processing"
 	document.UpdatedAt = time.Now()
 
-	if _, err := DBFromContext(c).NewUpdate().Model(document).Where("id = ?", id).Exec(c); err != nil {
+	if _, err := DBFromContext(c).NewUpdate().Model(document).Where("id = ?", id).Exec(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
