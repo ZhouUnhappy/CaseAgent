@@ -752,9 +752,6 @@ function findSelectedJobWithError() {
             >
               重试
             </el-button>
-            <el-button :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
-              任务详情
-            </el-button>
           </div>
 
           <el-tag v-if="isPolling" type="warning" class="polling-tag">后台处理中，每 3 秒刷新</el-tag>
@@ -822,6 +819,9 @@ function findSelectedJobWithError() {
           <div class="result-tools">
             <el-tag type="info">{{ caseSectionCount }} sections</el-tag>
             <el-tag type="success">{{ totalCaseCount }} cases</el-tag>
+            <el-button :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
+              查看完整结果
+            </el-button>
             <el-button :icon="Refresh" :disabled="!selectedTaskId" :loading="casesLoading" @click="refreshCases">
               刷新
             </el-button>

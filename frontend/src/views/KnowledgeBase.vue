@@ -394,7 +394,7 @@ function latestKnowledgeJob(row) {
       <el-table-column label="更新时间" width="180">
         <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="400">
+      <el-table-column label="操作" width="400" fixed="right">
         <template #default="{ row }">
           <el-button size="small" :icon="View" :disabled="!row.content" @click="openPreview(row)">
             预览
@@ -413,7 +413,7 @@ function latestKnowledgeJob(row) {
     <el-drawer
       v-model="previewVisible"
       :title="previewKnowledge?.name || '知识预览'"
-      size="min(860px, 94vw)"
+      size="88%"
       destroy-on-close
       @closed="previewKnowledge = null"
     >

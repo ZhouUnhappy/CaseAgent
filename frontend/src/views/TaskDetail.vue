@@ -63,6 +63,7 @@ const provenanceCase = ref(null)
 const selectedCaseRefs = ref({})
 const expandedSections = ref([])
 const expandedCaseRows = ref({})
+const overviewExpanded = ref(true)
 const caseEditorVisible = ref(false)
 const editingCaseSection = ref(null)
 const editingCaseIndex = ref(-1)
@@ -1118,38 +1119,54 @@ async function submitKnowledgeFeedback() {
               <p class="muted small">{{ filteredCaseCount }} 条标题，按类别汇总</p>
             </div>
             <div class="overview-actions">
-              <el-button size="small" :icon="ArrowDownBold" @click="expandAllCases">
-                全部展开
-              </el-button>
-              <el-button size="small" :icon="ArrowUpBold" @click="collapseAllCases">
-                全部收起
+              <el-button
+                size="small"
+                :icon="overviewExpanded ? ArrowUpBold : ArrowDownBold"
+                @click="overviewExpanded = !overviewExpanded"
+              >
+                {{ overviewExpanded ? '收起概览' : '展开概览' }}
               </el-button>
             </div>
           </div>
-          <el-scrollbar max-height="380px" class="overview-scroll">
-            <div class="overview-sections">
-              <section
-                v-for="section in filteredSections"
-                :key="`overview-${section.id}`"
-                class="overview-section"
-              >
-                <div class="overview-section-header">
-                  <strong>{{ section.section }}</strong>
-                  <el-tag size="small" type="info">{{ section.display_cases.length }} 条</el-tag>
+          <el-collapse-transition>
+            <div v-show="overviewExpanded">
+              <el-scrollbar max-height="380px" class="overview-scroll">
+                <div class="overview-sections">
+                  <section
+                    v-for="section in filteredSections"
+                    :key="`overview-${section.id}`"
+                    class="overview-section"
+                  >
+                    <div class="overview-section-header">
+                      <strong>{{ section.section }}</strong>
+                      <el-tag size="small" type="info">{{ section.display_cases.length }} 条</el-tag>
+                    </div>
+                    <ol class="overview-title-list">
+                      <li v-for="row in section.display_cases" :key="caseRowKey(section, row)">
+                        <el-button link type="primary" @click="focusCase(section, row)">
+                          {{ row.title || `用例 #${row.__case_index + 1}` }}
+                        </el-button>
+                      </li>
+                    </ol>
+                  </section>
                 </div>
-                <ol class="overview-title-list">
-                  <li v-for="row in section.display_cases" :key="caseRowKey(section, row)">
-                    <el-button link type="primary" @click="focusCase(section, row)">
-                      {{ row.title || `用例 #${row.__case_index + 1}` }}
-                    </el-button>
-                  </li>
-                </ol>
-              </section>
+              </el-scrollbar>
             </div>
-          </el-scrollbar>
+          </el-collapse-transition>
         </div>
 
         <div class="case-review-tools">
+          <div class="case-detail-toolbar">
+            <span>用例详情</span>
+            <div>
+              <el-button size="small" :icon="ArrowDownBold" @click="expandAllCases">
+                展开全部用例详情
+              </el-button>
+              <el-button size="small" :icon="ArrowUpBold" @click="collapseAllCases">
+                收起全部用例详情
+              </el-button>
+            </div>
+          </div>
           <div class="filter-bar case-filter-bar">
             <el-select v-model="caseFilters.section" clearable placeholder="类别" class="filter-control">
               <el-option v-for="item in sectionOptions" :key="item" :label="item" :value="item" />
@@ -1237,12 +1254,12 @@ async function submitKnowledgeFeedback() {
               size="small"
               :icon="ArrowDownBold"
               @click="setSectionCasesExpanded(section, true)"
-            >展开本类</el-button>
+            >展开本类详情</el-button>
             <el-button
               size="small"
               :icon="ArrowUpBold"
               @click="setSectionCasesExpanded(section, false)"
-            >收起本类</el-button>
+            >收起本类详情</el-button>
             <el-button size="small" :icon="EditPen" @click="openEditor(section)">编辑 JSON</el-button>
             <el-button
               size="small"
@@ -2171,6 +2188,21 @@ async function submitKnowledgeFeedback() {
   flex-direction: column;
   gap: 10px;
   margin-bottom: 12px;
+}
+.case-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #ebeef5;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
+}
+.case-detail-toolbar > div {
+  display: flex;
+  gap: 8px;
 }
 .filter-bar,
 .batch-bar {

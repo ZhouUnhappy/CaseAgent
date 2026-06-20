@@ -252,7 +252,7 @@ function latestTaskJob(row) {
         <el-table-column label="更新时间" width="180">
           <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="300">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -355,7 +355,7 @@ function latestTaskJob(row) {
     <el-drawer
       v-model="previewVisible"
       :title="previewDocument?.name || '需求文档预览'"
-      size="min(860px, 94vw)"
+      size="88%"
       destroy-on-close
       @closed="previewDocument = null"
     >
