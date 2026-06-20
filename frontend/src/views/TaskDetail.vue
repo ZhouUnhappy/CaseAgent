@@ -164,6 +164,12 @@ const filteredSections = computed(() =>
 const filteredCaseCount = computed(() =>
   filteredSections.value.reduce((sum, section) => sum + section.display_cases.length, 0),
 )
+const allCaseDetailsExpanded = computed(() =>
+  filteredSections.value.length > 0 &&
+  filteredSections.value.every(
+    (section) => isSectionExpanded(section) && areSectionCasesExpanded(section),
+  ),
+)
 const editorDirty = computed(() => editorVisible.value && editorBuffer.value !== editorOriginal.value)
 const caseEditorDirty = computed(() => caseEditorVisible.value && serializeCaseForm() !== caseEditorOriginal.value)
 const caseOutputEmptyDescription = computed(() => {
@@ -545,6 +551,11 @@ function isCaseExpanded(section, row) {
   return (expandedCaseRows.value[section.id] || []).includes(caseRowKey(section, row))
 }
 
+function areSectionCasesExpanded(section) {
+  const rows = sectionCaseRows(section)
+  return rows.length > 0 && rows.every((row) => isCaseExpanded(section, row))
+}
+
 function ensureSectionExpanded(section) {
   if (isSectionExpanded(section)) return
   expandedSections.value = [...expandedSections.value, section.id]
@@ -583,6 +594,15 @@ function expandAllCases() {
 
 function collapseAllCases() {
   clearCaseExpansion()
+}
+
+function toggleAllCaseDetails() {
+  if (allCaseDetailsExpanded.value) collapseAllCases()
+  else expandAllCases()
+}
+
+function toggleSectionCaseDetails(section) {
+  setSectionCasesExpanded(section, !areSectionCasesExpanded(section))
 }
 
 function clearCaseExpansion() {
@@ -1159,11 +1179,12 @@ async function submitKnowledgeFeedback() {
           <div class="case-detail-toolbar">
             <span>用例详情</span>
             <div>
-              <el-button size="small" :icon="ArrowDownBold" @click="expandAllCases">
-                展开全部用例详情
-              </el-button>
-              <el-button size="small" :icon="ArrowUpBold" @click="collapseAllCases">
-                收起全部用例详情
+              <el-button
+                size="small"
+                :icon="allCaseDetailsExpanded ? ArrowUpBold : ArrowDownBold"
+                @click="toggleAllCaseDetails"
+              >
+                {{ allCaseDetailsExpanded ? '收起全部用例详情' : '展开全部用例详情' }}
               </el-button>
             </div>
           </div>
@@ -1252,14 +1273,9 @@ async function submitKnowledgeFeedback() {
           <div class="section-actions">
             <el-button
               size="small"
-              :icon="ArrowDownBold"
-              @click="setSectionCasesExpanded(section, true)"
-            >展开本类详情</el-button>
-            <el-button
-              size="small"
-              :icon="ArrowUpBold"
-              @click="setSectionCasesExpanded(section, false)"
-            >收起本类详情</el-button>
+              :icon="areSectionCasesExpanded(section) ? ArrowUpBold : ArrowDownBold"
+              @click="toggleSectionCaseDetails(section)"
+            >{{ areSectionCasesExpanded(section) ? '收起本类详情' : '展开本类详情' }}</el-button>
             <el-button size="small" :icon="EditPen" @click="openEditor(section)">编辑 JSON</el-button>
             <el-button
               size="small"

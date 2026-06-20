@@ -178,7 +178,7 @@ function parseMarkdown(content) {
 }
 
 .reading-surface {
-  max-width: 780px;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 20px 8px 32px;
   line-height: 1.75;
