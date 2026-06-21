@@ -46,7 +46,6 @@
 - 直接修改建库基线迁移，使任务、后台作业、workflow、step、agent、model、retrieval、feedback 等诊断链路的时间字段从首次建表起即使用 `TIMESTAMPTZ`，不再依赖后续迁移把 `TIMESTAMP` 转为带时区类型。
 - 后端所有应用侧诊断时间统一从一个 UTC 时钟入口取得，或明确使用 `time.Now().UTC()`；数据库侧时间继续使用 `CURRENT_TIMESTAMP`，并保证连接会话时区为 UTC。不得混用“UTC 值写入无时区字段”和“数据库本地时区时间”。
 - 从 `backend/migrations/011_diagnostic_timestamps.sql` 移除固定 `INTERVAL '8 hours'`、6 至 10 小时时差窗口及同类启发式修复；代码和迁移不得再根据相对时间差猜测历史数据时区。
-- 本项实跑固定使用现有 Halo 缩略图 Demo 项目：代码仓库为 [`halo-dev/halo`](https://github.com/halo-dev/halo)，产品需求为 Issue [`#2387 希望 Halo 支持附件缩略图功能`](https://github.com/halo-dev/halo/issues/2387)，后端设计为 [`halo-dev/rfcs#24 生成与管理附件缩略图`](https://github.com/halo-dev/rfcs/pull/24)。复用当前 Demo 中已导入的需求和设计文档，不以 `testdata/i1/requirement.md` 自造联调 fixture 替代本轮实跑语料。
 - 本轮无需迁移或修正旧任务、job、workflow、step、agent、model、retrieval 等历史运行数据，也无需重建需求文档、知识等 Demo 输入数据。完成代码与迁移调整后，直接按现有运行方式把需求分析、审核和用例生成的 Demo 完整重新跑一遍，由正常流程生成符合新时间基线的运行数据；以流程能够正常完成、生成结果可查看、任务详情与 Ops 各阶段时间显示正常作为实际运行验收，同时确认改动没有破坏后端主流程。
 - API 继续返回含明确时区的 RFC3339 时间；前端继续统一通过 `frontend/src/utils/date.js` 格式化，不在页面组件中重新实现时区换算。
 - 补充可机器复核的迁移/集成测试：断言新建 schema 的目标字段均为 `TIMESTAMPTZ`、迁移中不存在固定时差修复，并验证新生成任务满足 `task.created_at <= job.created_at <= job.started_at <= job.finished_at <= task.updated_at`；时间相等应视为合法，不使用脆弱的固定耗时断言。
