@@ -18,6 +18,13 @@ type createCaseFeedbackRequest struct {
 	Metadata     map[string]any `json:"metadata"`
 }
 
+type batchCaseFeedbackRequest struct {
+	Cases        []CaseRefRequest `json:"cases" binding:"required"`
+	FeedbackType string           `json:"feedback_type" binding:"required"`
+	Note         string           `json:"note"`
+	Metadata     map[string]any   `json:"metadata"`
+}
+
 func (h *Handler) CreateCaseFeedback(c *gin.Context) {
 	taskID, ok := parseTaskID(c)
 	if !ok {
@@ -47,6 +54,36 @@ func (h *Handler) CreateCaseFeedback(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, row)
+}
+
+func (h *Handler) CreateBatchCaseFeedback(c *gin.Context) {
+	taskID, ok := parseTaskID(c)
+	if !ok {
+		return
+	}
+	var req batchCaseFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	inputs := make([]feedbackservice.CreateInput, 0, len(req.Cases))
+	for _, item := range req.Cases {
+		inputs = append(inputs, feedbackservice.CreateInput{
+			TaskID:       taskID,
+			TestCaseID:   item.TestCaseID,
+			CaseIndex:    item.CaseIndex,
+			FeedbackType: req.FeedbackType,
+			Note:         req.Note,
+			Metadata:     req.Metadata,
+		})
+	}
+	rows, err := feedbackservice.New(DBFromContext(c)).CreateCaseFeedbackBatch(c.Request.Context(), inputs)
+	if err != nil {
+		writeFeedbackServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, rows)
 }
 
 func (h *Handler) ListTaskFeedback(c *gin.Context) {

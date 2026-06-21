@@ -8,17 +8,21 @@ import (
 )
 
 func TestSummarizeFeedbackRows(t *testing.T) {
+	now := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
 	rows := []models.TestCaseFeedback{
-		{FeedbackType: models.CaseFeedbackDuplicate, PromptID: "functional", PromptVersion: "v1"},
-		{FeedbackType: models.CaseFeedbackUseful, PromptID: "functional", PromptVersion: "v1"},
-		{FeedbackType: models.CaseFeedbackDuplicate, PromptID: "functional", PromptVersion: "v1"},
-		{FeedbackType: models.CaseFeedbackKnowledgeMissing, PromptID: "ops", PromptVersion: "v2"},
+		{ID: 1, TestCaseID: 10, CaseIndex: 0, FeedbackType: models.CaseFeedbackDuplicate, PromptID: "functional", PromptVersion: "v1", CreatedAt: now},
+		{ID: 2, TestCaseID: 10, CaseIndex: 0, FeedbackType: models.CaseFeedbackUseful, PromptID: "functional", PromptVersion: "v1", CreatedAt: now.Add(time.Minute)},
+		{ID: 3, TestCaseID: 10, CaseIndex: 1, FeedbackType: models.CaseFeedbackDuplicate, PromptID: "functional", PromptVersion: "v1", CreatedAt: now},
+		{ID: 4, TestCaseID: 11, CaseIndex: 0, FeedbackType: models.CaseFeedbackKnowledgeMissing, PromptID: "ops", PromptVersion: "v2", CreatedAt: now},
 	}
 
 	summary := SummarizeFeedbackRows(rows)
 
 	if summary.Total != 4 {
 		t.Fatalf("Total = %d, want 4", summary.Total)
+	}
+	if summary.ReviewedCases != 3 || summary.UsefulCases != 1 || summary.IssueCases != 2 {
+		t.Fatalf("latest review summary = %#v, want reviewed=3 useful=1 issue=2", summary)
 	}
 	if len(summary.ByType) != 3 || summary.ByType[0].FeedbackType != models.CaseFeedbackDuplicate || summary.ByType[0].Count != 2 {
 		t.Fatalf("ByType = %#v, want duplicate first with count 2", summary.ByType)

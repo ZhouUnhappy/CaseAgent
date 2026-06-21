@@ -274,60 +274,86 @@ func (h *Handler) BatchSubmitTestCases(c *gin.Context) {
 }
 
 func requireReviewedCases(c *gin.Context, sections []models.TestCase) bool {
-	pending, err := pendingCaseReviewCount(c.Request.Context(), DBFromContext(c), sections)
+	summary, err := summarizeCaseReviews(c.Request.Context(), DBFromContext(c), sections)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return false
 	}
-	if pending > 0 {
+	if summary.Pending > 0 || summary.Unresolved > 0 {
 		c.JSON(http.StatusConflict, gin.H{
-			"error":            fmt.Sprintf("%d test cases are pending review", pending),
-			"unreviewed_count": pending,
+			"code":             "case_review_incomplete",
+			"error":            fmt.Sprintf("%d test cases are pending review and %d have unresolved issues", summary.Pending, summary.Unresolved),
+			"pending_count":    summary.Pending,
+			"unreviewed_count": summary.Pending,
+			"unresolved_count": summary.Unresolved,
+			"review_summary":   summary,
 		})
 		return false
 	}
 	return true
 }
 
-func pendingCaseReviewCount(ctx context.Context, db bun.IDB, sections []models.TestCase) (int, error) {
+type caseReviewSummary struct {
+	Pending    int `json:"pending"`
+	Passed     int `json:"passed"`
+	Resolved   int `json:"resolved"`
+	Unresolved int `json:"unresolved"`
+}
+
+func summarizeCaseReviews(ctx context.Context, db bun.IDB, sections []models.TestCase) (caseReviewSummary, error) {
 	if len(sections) == 0 {
-		return 0, nil
+		return caseReviewSummary{}, nil
 	}
 
 	sectionIDs := make([]int, 0, len(sections))
-	expected := make(map[int]int, len(sections))
+	sectionsByID := make(map[int]models.TestCase, len(sections))
 	for _, section := range sections {
 		sectionIDs = append(sectionIDs, section.ID)
-		expected[section.ID] = len(section.Cases)
+		sectionsByID[section.ID] = section
 	}
 
 	feedbackRows := []models.TestCaseFeedback{}
 	if err := db.NewSelect().
 		Model(&feedbackRows).
-		Column("test_case_id", "case_index").
+		Column("id", "test_case_id", "case_index", "feedback_type", "created_at").
 		Where("test_case_id IN (?)", bun.In(sectionIDs)).
+		Order("created_at ASC", "id ASC").
 		Scan(ctx); err != nil {
-		return 0, err
+		return caseReviewSummary{}, err
 	}
 
-	reviewed := make(map[CaseRefRequest]struct{}, len(feedbackRows))
+	latest := make(map[CaseRefRequest]models.TestCaseFeedback, len(feedbackRows))
 	for _, row := range feedbackRows {
-		caseCount, ok := expected[row.TestCaseID]
-		if !ok || row.CaseIndex < 0 || row.CaseIndex >= caseCount {
+		section, ok := sectionsByID[row.TestCaseID]
+		if !ok || row.CaseIndex < 0 || row.CaseIndex >= len(section.Cases) {
 			continue
 		}
-		reviewed[CaseRefRequest{TestCaseID: row.TestCaseID, CaseIndex: row.CaseIndex}] = struct{}{}
+		latest[CaseRefRequest{TestCaseID: row.TestCaseID, CaseIndex: row.CaseIndex}] = row
 	}
 
-	pending := 0
-	for sectionID, caseCount := range expected {
-		for caseIndex := 0; caseIndex < caseCount; caseIndex++ {
-			if _, ok := reviewed[CaseRefRequest{TestCaseID: sectionID, CaseIndex: caseIndex}]; !ok {
-				pending++
+	summary := caseReviewSummary{}
+	for sectionID, section := range sectionsByID {
+		for caseIndex, item := range section.Cases {
+			feedback, ok := latest[CaseRefRequest{TestCaseID: sectionID, CaseIndex: caseIndex}]
+			if !ok {
+				summary.Pending++
+				continue
+			}
+			switch feedback.FeedbackType {
+			case models.CaseFeedbackUseful:
+				summary.Passed++
+			case models.CaseFeedbackDuplicate:
+				if hidden, _ := item["duplicate_hidden"].(bool); hidden {
+					summary.Resolved++
+				} else {
+					summary.Unresolved++
+				}
+			default:
+				summary.Unresolved++
 			}
 		}
 	}
-	return pending, nil
+	return summary, nil
 }
 
 func hasBatchPatch(patch BatchCasePatchRequest) bool {

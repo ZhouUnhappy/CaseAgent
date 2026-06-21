@@ -107,6 +107,7 @@ func SetupRouter(h *handler.Handler) *gin.Engine {
 			cases.GET("", h.ListTestCases)
 			cases.PUT("/batch", h.BatchUpdateTestCases)
 			cases.PUT("/batch/submit", h.BatchSubmitTestCases)
+			cases.POST("/batch/feedback", h.CreateBatchCaseFeedback)
 			cases.PUT("/:case_id", h.UpdateTestCase)
 			cases.PUT("/:case_id/submit", h.SubmitTestCase)
 			cases.POST("/:case_id/feedback", h.CreateCaseFeedback)

@@ -72,6 +72,22 @@ func TestBatchTestCaseHandlers(t *testing.T) {
 			"custom_steps_separated": []map[string]string{{"content": "save", "expected": "updated"}},
 		},
 	})
+	taskFeedback, sectionFeedback := insertCaseTestData(t, ctx, bunDB, tenantA.ID, "Batch Feedback", []map[string]any{
+		{
+			"title":                  "first selected case",
+			"priority_id":            2,
+			"affected_products":      []string{"Shop"},
+			"affected_modules":       []string{"Review"},
+			"custom_steps_separated": []map[string]string{{"content": "run", "expected": "pass"}},
+		},
+		{
+			"title":                  "second selected case",
+			"priority_id":            2,
+			"affected_products":      []string{"Shop"},
+			"affected_modules":       []string{"Review"},
+			"custom_steps_separated": []map[string]string{{"content": "run", "expected": "pass"}},
+		},
+	})
 
 	router := caseTestRouter(bunDB)
 	updated := caseRequest[[]models.TestCase](t, router, tenantA.Slug, http.MethodPut,
@@ -132,7 +148,16 @@ func TestBatchTestCaseHandlers(t *testing.T) {
 	if caseNumber(rejectedSingle["unreviewed_count"]) != len(sectionSingle.Cases) {
 		t.Fatalf("single submit rejection = %#v, want %d unreviewed cases", rejectedSingle, len(sectionSingle.Cases))
 	}
-	insertCaseTestFeedbacks(t, ctx, bunDB, tenantA.ID, taskSingle.ID, sectionSingle.ID, len(sectionSingle.Cases))
+	insertCaseTestFeedback(t, ctx, bunDB, tenantA.ID, taskSingle.ID, sectionSingle.ID, 0, models.CaseFeedbackMissingSteps)
+	unresolvedSingle := caseRequest[map[string]any](t, router, tenantA.Slug, http.MethodPut,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/%d/submit", taskSingle.ID, sectionSingle.ID),
+		nil,
+		http.StatusConflict,
+	)
+	if caseNumber(unresolvedSingle["pending_count"]) != 0 || caseNumber(unresolvedSingle["unresolved_count"]) != 1 {
+		t.Fatalf("single unresolved rejection = %#v, want unresolved_count=1", unresolvedSingle)
+	}
+	insertCaseTestFeedback(t, ctx, bunDB, tenantA.ID, taskSingle.ID, sectionSingle.ID, 0, models.CaseFeedbackUseful)
 	singleSubmitted := caseRequest[models.TestCase](t, router, tenantA.Slug, http.MethodPut,
 		fmt.Sprintf("/api/v1/tasks/%d/cases/%d/submit", taskSingle.ID, sectionSingle.ID),
 		nil,
@@ -140,6 +165,59 @@ func TestBatchTestCaseHandlers(t *testing.T) {
 	)
 	if singleSubmitted.Status != models.TestCaseStatusSubmitted {
 		t.Fatalf("single submit response = %#v, want submitted section", singleSubmitted)
+	}
+
+	batchPayload := map[string]any{
+		"cases": []map[string]any{
+			{"test_case_id": sectionFeedback.ID, "case_index": 0},
+			{"test_case_id": sectionFeedback.ID, "case_index": 1},
+		},
+		"feedback_type": models.CaseFeedbackUseful,
+		"note":          "batch pass",
+	}
+	createdFeedback := caseRequest[[]models.TestCaseFeedback](t, router, tenantA.Slug, http.MethodPost,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/feedback", taskFeedback.ID),
+		batchPayload,
+		http.StatusCreated,
+	)
+	if len(createdFeedback) != len(sectionFeedback.Cases) {
+		t.Fatalf("batch feedback response = %#v, want %d rows", createdFeedback, len(sectionFeedback.Cases))
+	}
+	caseRequest[[]models.TestCaseFeedback](t, router, tenantA.Slug, http.MethodPost,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/feedback", taskFeedback.ID),
+		batchPayload,
+		http.StatusCreated,
+	)
+	beforeInvalid := countCaseTestFeedback(t, ctx, bunDB, tenantA.ID, taskFeedback.ID)
+	caseRequest[map[string]any](t, router, tenantA.Slug, http.MethodPost,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/feedback", taskFeedback.ID),
+		map[string]any{
+			"cases": []map[string]any{
+				{"test_case_id": sectionFeedback.ID, "case_index": 0},
+				{"test_case_id": sectionFeedback.ID, "case_index": 99},
+			},
+			"feedback_type": models.CaseFeedbackUseful,
+		},
+		http.StatusBadRequest,
+	)
+	if afterInvalid := countCaseTestFeedback(t, ctx, bunDB, tenantA.ID, taskFeedback.ID); afterInvalid != beforeInvalid {
+		t.Fatalf("partial invalid batch inserted feedback: before=%d after=%d", beforeInvalid, afterInvalid)
+	}
+	caseRequest[map[string]any](t, router, tenantA.Slug, http.MethodPost,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/feedback", taskB.ID),
+		map[string]any{
+			"cases":         []map[string]any{{"test_case_id": sectionB.ID, "case_index": 0}},
+			"feedback_type": models.CaseFeedbackUseful,
+		},
+		http.StatusNotFound,
+	)
+	feedbackSubmitted := caseRequest[[]models.TestCase](t, router, tenantA.Slug, http.MethodPut,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/submit", taskFeedback.ID),
+		map[string]any{"test_case_ids": []int{sectionFeedback.ID}},
+		http.StatusOK,
+	)
+	if len(feedbackSubmitted) != 1 || feedbackSubmitted[0].Status != models.TestCaseStatusSubmitted {
+		t.Fatalf("batch feedback section submit = %#v", feedbackSubmitted)
 	}
 }
 
@@ -153,6 +231,7 @@ func caseTestRouter(db *bun.DB) *gin.Engine {
 	{
 		cases.PUT("/batch", h.BatchUpdateTestCases)
 		cases.PUT("/batch/submit", h.BatchSubmitTestCases)
+		cases.POST("/batch/feedback", h.CreateBatchCaseFeedback)
 		cases.PUT("/:case_id/submit", h.SubmitTestCase)
 	}
 	return router
@@ -220,6 +299,37 @@ func insertCaseTestFeedbacks(t *testing.T, ctx context.Context, db *bun.DB, tena
 	}); err != nil {
 		t.Fatalf("insert feedback for test case %d: %v", testCaseID, err)
 	}
+}
+
+func insertCaseTestFeedback(t *testing.T, ctx context.Context, db *bun.DB, tenantID, taskID, testCaseID, caseIndex int, feedbackType string) {
+	t.Helper()
+	if err := tenantdb.RunInTenantTx(tenantdb.WithTenant(ctx, tenantID), db, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(&models.TestCaseFeedback{
+			TenantID:     tenantID,
+			TaskID:       taskID,
+			TestCaseID:   testCaseID,
+			CaseIndex:    caseIndex,
+			FeedbackType: feedbackType,
+			CreatedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+		}).Exec(ctx)
+		return err
+	}); err != nil {
+		t.Fatalf("insert %s feedback for test case %d[%d]: %v", feedbackType, testCaseID, caseIndex, err)
+	}
+}
+
+func countCaseTestFeedback(t *testing.T, ctx context.Context, db *bun.DB, tenantID, taskID int) int {
+	t.Helper()
+	count := 0
+	if err := tenantdb.RunInTenantTx(tenantdb.WithTenant(ctx, tenantID), db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*models.TestCaseFeedback)(nil)).Where("task_id = ?", taskID).Count(ctx)
+		return err
+	}); err != nil {
+		t.Fatalf("count feedback for task %d: %v", taskID, err)
+	}
+	return count
 }
 
 func caseRequest[T any](t *testing.T, router *gin.Engine, tenantSlug string, method string, path string, payload any, wantStatus int) T {

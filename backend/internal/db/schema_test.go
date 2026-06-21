@@ -90,4 +90,14 @@ func TestLoadSchemaSQL(t *testing.T) {
 		!strings.Contains(schema, "knowledge_base_duplicate_idx") {
 		t.Fatalf("expected knowledge governance columns and indexes in schema, got: %s", schema)
 	}
+	if !strings.Contains(schema, "ALTER COLUMN %I TYPE TIMESTAMPTZ") ||
+		!strings.Contains(schema, "('case_generation_tasks', 'created_at')") ||
+		!strings.Contains(schema, "('background_jobs', 'started_at')") ||
+		!strings.Contains(schema, "('test_case_feedback', 'created_at')") {
+		t.Fatalf("expected diagnostic timestamps to migrate to timestamptz, got: %s", schema)
+	}
+	if !strings.Contains(schema, "started_at = started_at - INTERVAL '8 hours'") ||
+		!strings.Contains(schema, "started_at > created_at + INTERVAL '6 hours'") {
+		t.Fatalf("expected bounded legacy job timestamp repair, got: %s", schema)
+	}
 }

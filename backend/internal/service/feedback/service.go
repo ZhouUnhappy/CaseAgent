@@ -42,10 +42,13 @@ type SummaryInput struct {
 }
 
 type Summary struct {
-	Total    int                       `json:"total"`
-	ByType   []TypeSummary             `json:"by_type"`
-	ByPrompt []PromptSummary           `json:"by_prompt"`
-	Recent   []models.TestCaseFeedback `json:"recent"`
+	Total         int                       `json:"total"`
+	ReviewedCases int                       `json:"reviewed_cases"`
+	UsefulCases   int                       `json:"useful_cases"`
+	IssueCases    int                       `json:"issue_cases"`
+	ByType        []TypeSummary             `json:"by_type"`
+	ByPrompt      []PromptSummary           `json:"by_prompt"`
+	Recent        []models.TestCaseFeedback `json:"recent"`
 }
 
 type TypeSummary struct {
@@ -100,49 +103,90 @@ func New(db bun.IDB) *Service {
 }
 
 func (s *Service) CreateCaseFeedback(ctx context.Context, input CreateInput) (*models.TestCaseFeedback, error) {
-	if err := validateCreateInput(input); err != nil {
+	rows, err := s.CreateCaseFeedbackBatch(ctx, []CreateInput{input})
+	if err != nil {
 		return nil, err
+	}
+	return &rows[0], nil
+}
+
+func (s *Service) CreateCaseFeedbackBatch(ctx context.Context, inputs []CreateInput) ([]models.TestCaseFeedback, error) {
+	if len(inputs) == 0 {
+		return nil, fmt.Errorf("%w: cases is required", ErrInvalidInput)
+	}
+	if len(inputs) > 200 {
+		return nil, fmt.Errorf("%w: at most 200 cases are allowed", ErrInvalidInput)
 	}
 	tenantID, ok := tenantdb.TenantFromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("%w: no tenant in context", ErrInvalidInput)
 	}
 
-	testCase := new(models.TestCase)
-	if err := s.db.NewSelect().
-		Model(testCase).
-		Where("id = ?", input.TestCaseID).
-		Where("task_id = ?", input.TaskID).
-		Scan(ctx); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTestCaseNotFound, err)
-	}
-	if input.CaseIndex >= len(testCase.Cases) {
-		return nil, fmt.Errorf("%w: case_index out of range", ErrInvalidInput)
+	caseIDs := make([]int, 0, len(inputs))
+	seenIDs := make(map[int]struct{}, len(inputs))
+	seenRefs := make(map[string]struct{}, len(inputs))
+	for _, input := range inputs {
+		if err := validateCreateInput(input); err != nil {
+			return nil, err
+		}
+		key := fmt.Sprintf("%d:%d", input.TestCaseID, input.CaseIndex)
+		if _, exists := seenRefs[key]; exists {
+			return nil, fmt.Errorf("%w: duplicate case reference %s", ErrInvalidInput, key)
+		}
+		seenRefs[key] = struct{}{}
+		if _, exists := seenIDs[input.TestCaseID]; !exists {
+			seenIDs[input.TestCaseID] = struct{}{}
+			caseIDs = append(caseIDs, input.TestCaseID)
+		}
 	}
 
-	caseItem := testCase.Cases[input.CaseIndex]
-	modelCallID, promptID, promptVersion := SelectTraceModelCall(testCase.SourceContext)
-	now := time.Now()
-	row := &models.TestCaseFeedback{
-		TenantID:             tenantID,
-		TaskID:               input.TaskID,
-		TestCaseID:           input.TestCaseID,
-		CaseIndex:            input.CaseIndex,
-		CaseTitle:            stringFromAny(caseItem["title"]),
-		FeedbackType:         strings.TrimSpace(input.FeedbackType),
-		Note:                 strings.TrimSpace(input.Note),
-		SourceContextSummary: SummarizeSourceContext(testCase.SourceContext),
-		PromptID:             promptID,
-		PromptVersion:        promptVersion,
-		ModelCallID:          modelCallID,
-		Metadata:             defaultMap(input.Metadata),
-		CreatedAt:            now,
-		UpdatedAt:            now,
-	}
-	if _, err := s.db.NewInsert().Model(row).Exec(ctx); err != nil {
+	var testCases []models.TestCase
+	if err := s.db.NewSelect().
+		Model(&testCases).
+		Where("id IN (?)", bun.In(caseIDs)).
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	return row, nil
+	testCasesByID := make(map[int]models.TestCase, len(testCases))
+	for _, testCase := range testCases {
+		testCasesByID[testCase.ID] = testCase
+	}
+
+	now := time.Now().UTC()
+	rows := make([]models.TestCaseFeedback, 0, len(inputs))
+	for _, input := range inputs {
+		testCase, exists := testCasesByID[input.TestCaseID]
+		if !exists || testCase.TaskID != input.TaskID {
+			return nil, fmt.Errorf("%w: test_case_id %d", ErrTestCaseNotFound, input.TestCaseID)
+		}
+		if input.CaseIndex >= len(testCase.Cases) {
+			return nil, fmt.Errorf("%w: case_index out of range", ErrInvalidInput)
+		}
+
+		caseItem := testCase.Cases[input.CaseIndex]
+		modelCallID, promptID, promptVersion := SelectTraceModelCall(testCase.SourceContext)
+		rows = append(rows, models.TestCaseFeedback{
+			TenantID:             tenantID,
+			TaskID:               input.TaskID,
+			TestCaseID:           input.TestCaseID,
+			CaseIndex:            input.CaseIndex,
+			CaseTitle:            stringFromAny(caseItem["title"]),
+			FeedbackType:         strings.TrimSpace(input.FeedbackType),
+			Note:                 strings.TrimSpace(input.Note),
+			SourceContextSummary: SummarizeSourceContext(testCase.SourceContext),
+			PromptID:             promptID,
+			PromptVersion:        promptVersion,
+			ModelCallID:          modelCallID,
+			Metadata:             defaultMap(input.Metadata),
+			CreatedAt:            now,
+			UpdatedAt:            now,
+		})
+	}
+
+	if _, err := s.db.NewInsert().Model(&rows).Exec(ctx); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (s *Service) ListTaskFeedback(ctx context.Context, taskID int) ([]models.TestCaseFeedback, error) {
@@ -275,8 +319,14 @@ func (s *Service) loadQualityReportArtifacts(ctx context.Context, input SummaryI
 func SummarizeFeedbackRows(rows []models.TestCaseFeedback) *Summary {
 	byType := map[string]int{}
 	byPrompt := map[string]*PromptSummary{}
+	latestByCase := map[string]models.TestCaseFeedback{}
 	for _, row := range rows {
 		byType[row.FeedbackType]++
+		caseKey := fmt.Sprintf("%d:%d", row.TestCaseID, row.CaseIndex)
+		current, exists := latestByCase[caseKey]
+		if !exists || row.CreatedAt.After(current.CreatedAt) || (row.CreatedAt.Equal(current.CreatedAt) && row.ID > current.ID) {
+			latestByCase[caseKey] = row
+		}
 		key := row.PromptID + "\x00" + row.PromptVersion
 		prompt := byPrompt[key]
 		if prompt == nil {
@@ -295,10 +345,18 @@ func SummarizeFeedbackRows(rows []models.TestCaseFeedback) *Summary {
 	}
 
 	summary := &Summary{
-		Total:    len(rows),
-		ByType:   make([]TypeSummary, 0, len(byType)),
-		ByPrompt: make([]PromptSummary, 0, len(byPrompt)),
-		Recent:   []models.TestCaseFeedback{},
+		Total:         len(rows),
+		ReviewedCases: len(latestByCase),
+		ByType:        make([]TypeSummary, 0, len(byType)),
+		ByPrompt:      make([]PromptSummary, 0, len(byPrompt)),
+		Recent:        []models.TestCaseFeedback{},
+	}
+	for _, row := range latestByCase {
+		if row.FeedbackType == models.CaseFeedbackUseful {
+			summary.UsefulCases++
+		} else {
+			summary.IssueCases++
+		}
 	}
 	for feedbackType, count := range byType {
 		summary.ByType = append(summary.ByType, TypeSummary{FeedbackType: feedbackType, Count: count})

@@ -19,7 +19,7 @@ var DB *bun.DB
 func Init(ctx context.Context) error {
 	cfg := config.Get().Database
 
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s&timezone=UTC",
 		cfg.User,
 		cfg.Password,
 		cfg.Host,
