@@ -3,21 +3,18 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
-import { View } from '@element-plus/icons-vue'
+import { MoreFilled, View } from '@element-plus/icons-vue'
 import MarkdownPreview from '../components/MarkdownPreview.vue'
 import StatusTag from '../components/StatusTag.vue'
-import { listJobs } from '../api/jobs'
-import { listKnowledgeImpactedTasks } from '../api/knowledge'
 import { updateKnowledgeSuggestion } from '../api/knowledgeSuggestions'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { readAndClearSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
 import { notifySuccess } from '../utils/error'
-import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
 
 const route = useRoute()
 const router = useRouter()
 const store = useKnowledgeStore()
-const { items, loading, saving, typeFilter, sourceFilter, expiredFilter, duplicateFilter } = storeToRefs(store)
+const { items, loading, saving, typeFilter } = storeToRefs(store)
 
 const dialogVisible = ref(false)
 const editing = ref(null)
@@ -33,11 +30,6 @@ const form = reactive({
   duplicate_of_id: null,
 })
 const formRef = ref(null)
-const knowledgeJobs = ref({})
-const impactDialogVisible = ref(false)
-const impactLoading = ref(false)
-const impactRows = ref([])
-const impactKnowledge = ref(null)
 
 const rules = {
   type: [{ required: true, message: '请选择类型', trigger: 'change' }],
@@ -77,43 +69,14 @@ onMounted(() => {
 
 async function refreshKnowledge() {
   await store.fetch()
-  loadKnowledgeJobs().catch(() => {})
 }
 
 async function changeTypeFilter(value) {
   await store.setTypeFilter(value)
-  loadKnowledgeJobs().catch(() => {})
-}
-
-async function changeFilters(patch) {
-  await store.setFilters(patch)
-  loadKnowledgeJobs().catch(() => {})
 }
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '-'
-}
-
-function rowSource(row) {
-  return row.source || 'manual'
-}
-
-function isExpired(row) {
-  return row.expires_at ? new Date(row.expires_at).getTime() <= Date.now() : false
-}
-
-function expiryLabel(row) {
-  if (!row.expires_at) return '长期有效'
-  return isExpired(row) ? `已过期 ${formatDate(row.expires_at)}` : formatDate(row.expires_at)
-}
-
-function expiryTagType(row) {
-  if (!row.expires_at) return 'info'
-  return isExpired(row) ? 'danger' : 'success'
-}
-
-function duplicateLabel(row) {
-  return row.duplicate_of_id ? `#${row.duplicate_of_id}` : '-'
 }
 
 function openCreate() {
@@ -136,7 +99,7 @@ function openEdit(row) {
   form.name = row.name
   form.content = row.content
   form.metadata = row.metadata ? JSON.stringify(row.metadata, null, 2) : ''
-  form.source = rowSource(row)
+  form.source = row.source || 'manual'
   form.expires_at = row.expires_at || ''
   form.duplicate_of_id = row.duplicate_of_id || null
   dialogVisible.value = true
@@ -209,7 +172,6 @@ async function submit() {
       saved = await store.create(payload)
       notifySuccess('知识条目已创建，后台正在向量化')
     }
-    loadKnowledgeJobs().catch(() => {})
     try {
       await markSourceSuggestionAdopted(saved.id)
     } catch {
@@ -219,24 +181,6 @@ async function submit() {
   } catch {
     /* api/client.js 已弹错 */
   }
-}
-
-async function showImpactedTasks(row) {
-  impactKnowledge.value = row
-  impactRows.value = []
-  impactDialogVisible.value = true
-  impactLoading.value = true
-  try {
-    impactRows.value = await listKnowledgeImpactedTasks(row.id)
-  } catch {
-    /* api/client.js 已弹错 */
-  } finally {
-    impactLoading.value = false
-  }
-}
-
-function openTask(row) {
-  router.push({ name: 'task-detail', params: { id: row.task_id } }).catch(() => {})
 }
 
 async function markSourceSuggestionAdopted(knowledgeID) {
@@ -252,7 +196,6 @@ async function reprocess(row) {
   try {
     await store.reprocess(row.id)
     notifySuccess(`知识 ${row.name} 重新向量化已触发`)
-    loadKnowledgeJobs().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -277,23 +220,14 @@ async function remove(row) {
   try {
     await store.remove(row.id)
     notifySuccess('已删除')
-    const next = { ...knowledgeJobs.value }
-    delete next[row.id]
-    knowledgeJobs.value = next
   } catch {
     /* 错误已弹窗 */
   }
 }
 
-async function loadKnowledgeJobs() {
-  const entries = await Promise.all(
-    items.value.map(async (row) => [row.id, latestJob(await listJobs({ knowledge_id: row.id }))]),
-  )
-  knowledgeJobs.value = Object.fromEntries(entries.filter(([, job]) => job))
-}
-
-function latestKnowledgeJob(row) {
-  return knowledgeJobs.value[row.id] || null
+function handleRowCommand(row, command) {
+  if (command === 'reprocess') reprocess(row)
+  if (command === 'delete') remove(row)
 }
 </script>
 
@@ -313,34 +247,6 @@ function latestKnowledgeJob(row) {
           <el-radio-button value="product">product</el-radio-button>
           <el-radio-button value="module">module</el-radio-button>
         </el-radio-group>
-        <el-input
-          v-model="sourceFilter"
-          class="source-filter"
-          clearable
-          placeholder="来源"
-          @change="(v) => changeFilters({ sourceFilter: v }).catch(() => {})"
-          @clear="() => changeFilters({ sourceFilter: '' }).catch(() => {})"
-        />
-        <el-select
-          v-model="expiredFilter"
-          class="state-filter"
-          placeholder="有效期"
-          @change="(v) => changeFilters({ expiredFilter: v }).catch(() => {})"
-        >
-          <el-option label="全部有效期" value="" />
-          <el-option label="未过期" value="false" />
-          <el-option label="已过期" value="true" />
-        </el-select>
-        <el-select
-          v-model="duplicateFilter"
-          class="state-filter"
-          placeholder="重复"
-          @change="(v) => changeFilters({ duplicateFilter: v }).catch(() => {})"
-        >
-          <el-option label="全部条目" value="" />
-          <el-option label="原始条目" value="false" />
-          <el-option label="重复条目" value="true" />
-        </el-select>
         <el-button @click="refreshKnowledge" :loading="loading">刷新</el-button>
         <el-button type="primary" @click="openCreate">新建</el-button>
       </div>
@@ -350,61 +256,29 @@ function latestKnowledgeJob(row) {
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="type" label="类型" width="100" />
       <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
-      <el-table-column label="来源" width="140">
-        <template #default="{ row }">
-          <el-tag size="small" type="info">{{ rowSource(row) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="有效期" min-width="190">
-        <template #default="{ row }">
-          <el-tag size="small" :type="expiryTagType(row)">{{ expiryLabel(row) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="重复" width="110">
-        <template #default="{ row }">
-          <el-tag v-if="row.duplicate_of_id" size="small" type="warning">
-            {{ duplicateLabel(row) }}
-          </el-tag>
-          <span v-else class="muted">-</span>
-        </template>
-      </el-table-column>
       <el-table-column label="状态" width="140">
         <template #default="{ row }"><StatusTag :status="row.status" /></template>
-      </el-table-column>
-      <el-table-column label="最近任务" min-width="260">
-        <template #default="{ row }">
-          <div v-if="latestKnowledgeJob(row)" class="job-cell">
-            <div class="job-line">
-              <span>{{ jobTypeLabel(latestKnowledgeJob(row).job_type) }}</span>
-              <el-tag size="small" :type="jobStatusType(latestKnowledgeJob(row).status)">
-                {{ jobStatusLabel(latestKnowledgeJob(row).status) }}
-              </el-tag>
-              <span class="muted small">
-                {{ latestKnowledgeJob(row).retry_count }}/{{ latestKnowledgeJob(row).max_retries }}
-              </span>
-            </div>
-            <span
-              v-if="row.status === 'failed' && latestKnowledgeJob(row).last_error"
-              class="muted danger small"
-            >{{ compactJobError(latestKnowledgeJob(row)) }}</span>
-          </div>
-          <span v-else class="muted">-</span>
-        </template>
       </el-table-column>
       <el-table-column label="更新时间" width="180">
         <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="400" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button size="small" :icon="View" :disabled="!row.content" @click="openPreview(row)">
             预览
           </el-button>
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" @click="showImpactedTasks(row)">影响任务</el-button>
-          <el-button size="small" :disabled="row.status === 'processing'" @click="reprocess(row)">
-            重新处理
-          </el-button>
-          <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+          <el-dropdown trigger="click" @command="(command) => handleRowCommand(row, command)">
+            <el-button size="small" :icon="MoreFilled">更多</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="reprocess" :disabled="row.status === 'processing'">
+                  重新处理
+                </el-dropdown-item>
+                <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
       <template #empty>暂无知识条目，点击右上角新建。</template>
@@ -419,7 +293,6 @@ function latestKnowledgeJob(row) {
     >
       <div v-if="previewKnowledge" class="preview-meta">
         <el-tag size="small">{{ previewKnowledge.type }}</el-tag>
-        <el-tag size="small" type="info">{{ rowSource(previewKnowledge) }}</el-tag>
         <StatusTag :status="previewKnowledge.status" />
         <el-link
           v-if="previewKnowledge.metadata?.source_url"
@@ -430,28 +303,6 @@ function latestKnowledgeJob(row) {
       </div>
       <MarkdownPreview :content="previewKnowledge?.content || ''" />
     </el-drawer>
-
-    <el-dialog
-      v-model="impactDialogVisible"
-      :title="impactKnowledge ? `受影响任务：${impactKnowledge.name}` : '受影响任务'"
-      width="720px"
-    >
-      <el-table :data="impactRows" v-loading="impactLoading" stripe>
-        <el-table-column prop="task_id" label="任务 ID" width="110" />
-        <el-table-column prop="status" label="状态" width="140" />
-        <el-table-column prop="section_count" label="章节" width="90" />
-        <el-table-column prop="case_count" label="用例" width="90" />
-        <el-table-column label="最近追溯" min-width="180">
-          <template #default="{ row }">{{ formatDate(row.last_source_context_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button size="small" @click="openTask(row)">打开</el-button>
-          </template>
-        </el-table-column>
-        <template #empty>暂无任务在 source_context 中引用该知识。</template>
-      </el-table>
-    </el-dialog>
 
     <el-dialog
       v-model="dialogVisible"
@@ -469,26 +320,6 @@ function latestKnowledgeJob(row) {
         <el-form-item label="名称" prop="name">
           <el-input v-model="form.name" maxlength="120" show-word-limit />
         </el-form-item>
-        <el-form-item label="来源">
-          <el-input v-model="form.source" maxlength="64" placeholder="manual / fixture / suggestion" />
-        </el-form-item>
-        <el-form-item label="过期时间">
-          <el-date-picker
-            v-model="form.expires_at"
-            type="datetime"
-            clearable
-            value-format="YYYY-MM-DDTHH:mm:ssZ"
-            placeholder="留空表示长期有效"
-          />
-        </el-form-item>
-        <el-form-item label="重复指向">
-          <el-input
-            v-model="form.duplicate_of_id"
-            clearable
-            placeholder="canonical 知识 ID，留空表示非重复"
-          />
-          <p class="muted small">标记后该条目不再参与知识检索。</p>
-        </el-form-item>
         <el-form-item label="内容" prop="content">
           <el-input
             v-model="form.content"
@@ -496,15 +327,6 @@ function latestKnowledgeJob(row) {
             :rows="10"
             placeholder="markdown 内容；保存后会自动重新向量化"
           />
-        </el-form-item>
-        <el-form-item label="metadata">
-          <el-input
-            v-model="form.metadata"
-            type="textarea"
-            :rows="4"
-            placeholder='例如：{"aliases":["billing","账单"]}'
-          />
-          <p class="muted small">JSON 对象，留空表示无 metadata。</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -545,27 +367,6 @@ function latestKnowledgeJob(row) {
   justify-content: flex-end;
   flex-wrap: wrap;
   max-width: 860px;
-}
-.source-filter {
-  width: 150px;
-}
-.state-filter {
-  width: 130px;
-}
-.job-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.job-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.job-cell .small {
-  margin: 0;
 }
 .muted {
   color: #909399;

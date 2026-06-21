@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"caseagent/internal/db/models"
 
@@ -169,8 +170,12 @@ func scanTraceRows(c *gin.Context, taskID int, runIDs []int, view *taskTraceView
 		Scan(c.Request.Context()); err != nil {
 		return err
 	}
+	knowledgePreviews, err := loadKnowledgePreviews(c, testCases)
+	if err != nil {
+		return err
+	}
 	view.FeedbackSummary = feedbackCounts(view.Feedback)
-	view.CaseProvenance = buildCaseProvenanceViews(testCases, view.AgentRuns, view.ModelCalls, view.Feedback)
+	view.CaseProvenance = buildCaseProvenanceViews(testCases, view.AgentRuns, view.ModelCalls, view.Feedback, knowledgePreviews)
 	return nil
 }
 
@@ -207,7 +212,7 @@ func agentRunIDs(runs []models.AgentRun) []int {
 	return ids
 }
 
-func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.AgentRun, modelCalls []models.ModelCall, feedbackRows []models.TestCaseFeedback) []caseProvenanceView {
+func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.AgentRun, modelCalls []models.ModelCall, feedbackRows []models.TestCaseFeedback, knowledgePreviews map[int]string) []caseProvenanceView {
 	agentByID := make(map[int]models.AgentRun, len(agentRuns))
 	for _, agent := range agentRuns {
 		agentByID[agent.ID] = agent
@@ -244,7 +249,7 @@ func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.Ag
 				DocumentQueries:  sourceValue(source, "document_queries"),
 				KnowledgeQueries: sourceValue(source, "knowledge_queries"),
 				DocumentHits:     sourceValue(source, "document_hits"),
-				KnowledgeHits:    sourceValue(source, "knowledge_hits"),
+				KnowledgeHits:    enrichKnowledgeHits(sourceValue(source, "knowledge_hits"), knowledgePreviews),
 				AgentRuns:        agentProvenance(agentIDs, agentByID),
 				ModelCalls:       modelProvenance(modelIDs, modelByID),
 				Feedback:         caseFeedback,
@@ -253,6 +258,60 @@ func buildCaseProvenanceViews(testCases []models.TestCase, agentRuns []models.Ag
 		}
 	}
 	return rows
+}
+
+func loadKnowledgePreviews(c *gin.Context, testCases []models.TestCase) (map[int]string, error) {
+	ids := make([]int, 0)
+	for _, section := range testCases {
+		for _, hit := range mapsFromAny(sourceValue(section.SourceContext, "knowledge_hits")) {
+			ids = appendUniqueInt(ids, intFromAny(hit["id"]))
+		}
+	}
+	if len(ids) == 0 {
+		return map[int]string{}, nil
+	}
+
+	var rows []models.KnowledgeBase
+	if err := DBFromContext(c).NewSelect().
+		Model(&rows).
+		Column("id", "content").
+		Where("id IN (?)", bun.In(ids)).
+		Scan(c.Request.Context()); err != nil {
+		return nil, err
+	}
+	previews := make(map[int]string, len(rows))
+	for _, row := range rows {
+		previews[row.ID] = contentPreview(row.Content, 800)
+	}
+	return previews, nil
+}
+
+func enrichKnowledgeHits(value any, previews map[int]string) any {
+	rows := mapsFromAny(value)
+	if len(rows) == 0 {
+		return value
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		copyRow := make(map[string]any, len(row)+1)
+		for key, item := range row {
+			copyRow[key] = item
+		}
+		if preview := previews[intFromAny(row["id"])]; preview != "" {
+			copyRow["content_preview"] = preview
+		}
+		out = append(out, copyRow)
+	}
+	return out
+}
+
+func contentPreview(content string, maxRunes int) string {
+	text := strings.TrimSpace(content)
+	runes := []rune(text)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
 }
 
 type caseFeedbackKey struct {

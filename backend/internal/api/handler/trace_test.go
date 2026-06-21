@@ -73,7 +73,9 @@ func TestBuildCaseProvenanceViewsLinksCasesToTraceRows(t *testing.T) {
 		},
 	}
 
-	views := buildCaseProvenanceViews(testCases, agentRuns, modelCalls, feedbackRows)
+	views := buildCaseProvenanceViews(testCases, agentRuns, modelCalls, feedbackRows, map[int]string{
+		11: "Product-A knowledge preview",
+	})
 	if len(views) != 1 {
 		t.Fatalf("views = %#v, want one row", views)
 	}
@@ -89,6 +91,10 @@ func TestBuildCaseProvenanceViewsLinksCasesToTraceRows(t *testing.T) {
 	}
 	if view.DocumentQueries == nil || view.KnowledgeHits == nil {
 		t.Fatalf("expected retrieval provenance in view: %#v", view)
+	}
+	knowledgeHits := mapsFromAny(view.KnowledgeHits)
+	if len(knowledgeHits) != 1 || knowledgeHits[0]["content_preview"] != "Product-A knowledge preview" {
+		t.Fatalf("expected enriched knowledge preview, got %#v", view.KnowledgeHits)
 	}
 	if len(view.Feedback) != 2 {
 		t.Fatalf("expected feedback rows in provenance: %#v", view.Feedback)

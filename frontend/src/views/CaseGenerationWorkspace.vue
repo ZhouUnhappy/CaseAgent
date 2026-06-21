@@ -54,6 +54,16 @@ const task = computed(() => {
   if (loadedTask.value?.id === selectedTaskId.value) return loadedTask.value
   return tasks.value.find((item) => item.id === selectedTaskId.value) || null
 })
+const taskDocumentIds = computed(() => task.value?.document_ids || [])
+const taskDocuments = computed(() =>
+  taskDocumentIds.value.map((id) => documents.value.find((doc) => doc.id === id) || { id, name: `文档 #${id}` }),
+)
+const documentSelectionMatchesTask = computed(() => {
+  if (!task.value) return true
+  const selected = [...selectedDocumentIds.value].sort((a, b) => a - b)
+  const taskInput = [...taskDocumentIds.value].sort((a, b) => a - b)
+  return selected.length === taskInput.length && selected.every((id, index) => id === taskInput[index])
+})
 
 const completedDocuments = computed(() => documents.value.filter((doc) => doc.status === 'completed'))
 const latestCompletedTask = computed(() => tasks.value.find((item) => item.status === 'completed') || null)
@@ -384,6 +394,7 @@ async function selectTask(row) {
   loadSelectedTaskJobs(row.id).catch(() => {})
   try {
     const loaded = await tasksStore.load(row.id)
+    selectedDocumentIds.value = [...(loaded.document_ids || [])]
     reviewForm.products = [...(loaded.affected_products || [])]
     reviewForm.modules = [...(loaded.affected_modules || [])]
     if (['completed', 'failed'].includes(loaded.status)) {
@@ -696,6 +707,7 @@ function findSelectedJobWithError() {
                   {{ jobTypeLabel(latestTaskJob(item).job_type) }}
                   {{ jobStatusLabel(latestTaskJob(item).status) }}
                 </small>
+                <small>{{ (item.document_ids || []).length }} 份文档 · {{ formatDate(item.updated_at) }}</small>
               </div>
               <StatusTag v-if="!latestTaskJob(item)" :status="item.status" />
               <el-tag v-else size="small" :type="jobStatusType(latestTaskJob(item).status)">
@@ -830,6 +842,25 @@ function findSelectedJobWithError() {
             </el-button>
           </div>
         </header>
+
+        <div v-if="task" class="result-source">
+          <div class="result-source-head">
+            <strong>结果输入</strong>
+            <span>任务 #{{ task.id }} · {{ formatDate(task.updated_at) }}</span>
+          </div>
+          <div class="result-source-docs">
+            <el-tag v-for="doc in taskDocuments" :key="doc.id" size="small" type="info">
+              {{ doc.name }}
+            </el-tag>
+          </div>
+          <el-alert
+            v-if="!documentSelectionMatchesTask"
+            title="当前勾选文档与该任务输入不同；这里仍展示任务原始结果。创建新任务后才会按新选择生成。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+        </div>
 
         <el-empty v-if="!cases.length && !casesLoading" :description="emptyCaseDescription" />
 
@@ -1020,6 +1051,30 @@ function findSelectedJobWithError() {
 .generate-actions :deep(.el-button + .el-button),
 .section-actions :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+.result-source {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.result-source-head,
+.result-source-docs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.result-source-head {
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 12px;
+}
+.result-source-head strong {
+  color: #111827;
+  font-size: 13px;
 }
 .project-strip {
   display: flex;

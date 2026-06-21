@@ -13,6 +13,7 @@ import {
   EditPen,
   Plus,
   Refresh,
+  Search,
   View,
   Warning,
 } from '@element-plus/icons-vue'
@@ -61,9 +62,12 @@ const editorOriginal = ref('')
 const provenanceVisible = ref(false)
 const provenanceCase = ref(null)
 const selectedCaseRefs = ref({})
+const selectedSectionIds = ref([])
 const expandedSections = ref([])
 const expandedCaseRows = ref({})
 const overviewExpanded = ref(true)
+const activeTaskView = ref('review')
+const provenanceTab = ref('sources')
 const caseEditorVisible = ref(false)
 const editingCaseSection = ref(null)
 const editingCaseIndex = ref(-1)
@@ -77,11 +81,13 @@ const caseForm = reactive({
   custom_steps_separated: [],
 })
 const caseFilters = reactive({
+  keyword: '',
   section: '',
   priority_id: '',
   product: '',
   module: '',
   feedback_type: '',
+  review_status: '',
   provenance: '',
   hide_duplicates: true,
 })
@@ -140,13 +146,37 @@ const totalCaseCount = computed(() =>
 const sectionOptions = computed(() => cases.value.map((section) => section.section).filter(Boolean))
 const selectedCases = computed(() => Object.values(selectedCaseRefs.value).flat())
 const selectedCaseCount = computed(() => selectedCases.value.length)
+const selectedSectionCount = computed(() => selectedSectionIds.value.length)
+const latestFeedbackByCase = computed(() => {
+  const result = new Map()
+  for (const item of trace.value?.feedback || []) {
+    const key = `${item.test_case_id}:${item.case_index}`
+    if (!result.has(key)) result.set(key, item)
+  }
+  return result
+})
+const reviewedCaseCount = computed(() =>
+  cases.value.reduce(
+    (sum, section) => sum + (section.cases || []).filter((row, index) => caseReviewState(section, row, index) !== 'pending').length,
+    0,
+  ),
+)
+const passedCaseCount = computed(() =>
+  cases.value.reduce(
+    (sum, section) => sum + (section.cases || []).filter((row, index) => caseReviewState(section, row, index) === 'passed').length,
+    0,
+  ),
+)
+const issueCaseCount = computed(() => reviewedCaseCount.value - passedCaseCount.value)
 const hasActiveCaseFilters = computed(() =>
   Boolean(
     caseFilters.section ||
+      caseFilters.keyword ||
       caseFilters.priority_id ||
       caseFilters.product ||
       caseFilters.module ||
       caseFilters.feedback_type ||
+      caseFilters.review_status ||
       caseFilters.provenance ||
       caseFilters.hide_duplicates,
   ),
@@ -284,6 +314,7 @@ watch(taskId, () => {
   stopPolling()
   casesStore.clear()
   clearSelectedCases()
+  selectedSectionIds.value = []
   clearCaseExpansion()
   loadTask()
 })
@@ -345,6 +376,9 @@ async function loadTrace() {
 async function refreshCases() {
   await casesStore.fetch(taskId.value)
   clearSelectedCases()
+  selectedSectionIds.value = selectedSectionIds.value.filter((id) =>
+    cases.value.some((section) => section.id === id && !['submitted', 'approved'].includes(section.status)),
+  )
 }
 
 function ensurePolling() {
@@ -481,16 +515,39 @@ function feedbackCountTotal(counts) {
   return Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0)
 }
 
-function caseFeedbackCount(section, row, index) {
-  return feedbackCountTotal(findCaseProvenance(section, row, index)?.feedback_counts)
-}
-
 function caseFeedbackCounts(section, row, index) {
   return findCaseProvenance(section, row, index)?.feedback_counts || {}
 }
 
+function latestCaseFeedback(section, row, index) {
+  return latestFeedbackByCase.value.get(`${section.id}:${index ?? row.__case_index}`) || null
+}
+
+function caseReviewState(section, row, index) {
+  const feedback = latestCaseFeedback(section, row, index)
+  if (!feedback) return 'pending'
+  return feedback.feedback_type === 'useful' ? 'passed' : 'issue'
+}
+
+function caseReviewLabel(section, row, index) {
+  return { pending: '待审核', passed: '已通过', issue: '有问题' }[caseReviewState(section, row, index)]
+}
+
+function caseReviewTagType(section, row, index) {
+  return { pending: 'info', passed: 'success', issue: 'warning' }[caseReviewState(section, row, index)]
+}
+
 function matchesCaseFilters(section, row, index) {
   if (caseFilters.hide_duplicates && row.duplicate_hidden) return false
+  if (caseFilters.keyword) {
+    const keyword = caseFilters.keyword.trim().toLowerCase()
+    const searchable = [
+      row.title,
+      row.custom_preconds,
+      ...(row.custom_steps_separated || []).flatMap((step) => [step.content, step.expected]),
+    ].join('\n').toLowerCase()
+    if (keyword && !searchable.includes(keyword)) return false
+  }
   if (caseFilters.section && section.section !== caseFilters.section) return false
   if (caseFilters.priority_id && Number(row.priority_id) !== Number(caseFilters.priority_id)) return false
   if (caseFilters.product && !(row.affected_products || []).includes(caseFilters.product)) return false
@@ -503,6 +560,7 @@ function matchesCaseFilters(section, row, index) {
       return false
     }
   }
+  if (caseFilters.review_status && caseReviewState(section, row, index) !== caseFilters.review_status) return false
   if (caseFilters.provenance === 'with_sources' && !caseHasSources(section, row, index)) return false
   if (caseFilters.provenance === 'without_sources' && caseHasSources(section, row, index)) return false
   return true
@@ -521,11 +579,13 @@ function caseHasSources(section, row, index) {
 
 function resetCaseFilters() {
   Object.assign(caseFilters, {
+    keyword: '',
     section: '',
     priority_id: '',
     product: '',
     module: '',
     feedback_type: '',
+    review_status: '',
     provenance: '',
     hide_duplicates: true,
   })
@@ -628,12 +688,19 @@ function onCaseSelectionChange(section, selection) {
   }
 }
 
-function selectedTestCaseIDs() {
-  return [...new Set(selectedCases.value.map((item) => item.test_case_id))]
-}
-
 function clearSelectedCases() {
   selectedCaseRefs.value = {}
+}
+
+function isSectionSelected(section) {
+  return selectedSectionIds.value.includes(section.id)
+}
+
+function toggleSectionSelection(section, selected) {
+  const current = new Set(selectedSectionIds.value)
+  if (selected) current.add(section.id)
+  else current.delete(section.id)
+  selectedSectionIds.value = [...current]
 }
 
 function openCaseProvenance(section, row, index) {
@@ -653,6 +720,7 @@ function openCaseProvenance(section, row, index) {
     feedback: [],
     feedback_counts: {},
   }
+  provenanceTab.value = 'sources'
   provenanceVisible.value = true
 }
 
@@ -761,6 +829,7 @@ async function submitSection(section) {
   }
   try {
     await casesStore.submit(taskId.value, section.id)
+    toggleSectionSelection(section, false)
     notifySuccess('已提交')
   } catch {
     /* 错误已弹窗 */
@@ -768,22 +837,23 @@ async function submitSection(section) {
 }
 
 async function submitSelectedSections() {
-  const ids = selectedTestCaseIDs()
+  const ids = [...selectedSectionIds.value]
   if (!ids.length) {
-    ElMessageBox.alert('请先选择用例')
+    ElMessageBox.alert('请先选择要提交的类别')
     return
   }
   const sections = cases.value.filter((section) => ids.includes(section.id))
   if (!showCaseValidationResult(sections.flatMap((section) => validateSection(section)))) return
   try {
-    await ElMessageBox.confirm(`提交已选用例所属的 ${ids.length} 个 section？`, '确认', { type: 'info' })
+    const caseCount = sections.reduce((sum, section) => sum + (section.cases?.length || 0), 0)
+    await ElMessageBox.confirm(`提交已选的 ${ids.length} 个类别，共 ${caseCount} 条用例？`, '确认提交', { type: 'info' })
   } catch {
     return
   }
   try {
     await casesStore.batchSubmit(taskId.value, ids)
-    clearSelectedCases()
-    notifySuccess('已批量提交')
+    selectedSectionIds.value = []
+    notifySuccess('已提交选中类别')
   } catch {
     /* 错误已弹窗 */
   }
@@ -957,15 +1027,29 @@ async function saveCaseEditor() {
   }
 }
 
-function openQualityFeedback(section, row, index) {
+function openQualityFeedback(section, row, index, initialType = 'requirement_mismatch') {
   Object.assign(qualityFeedbackForm, {
     test_case_id: section.id,
     case_index: index,
     case_title: row.title || section.section || '',
-    feedback_type: 'useful',
+    feedback_type: initialType,
     note: '',
   })
   qualityFeedbackVisible.value = true
+}
+
+async function markCasePassed(section, row, index) {
+  try {
+    await casesStore.feedback(taskId.value, section.id, {
+      case_index: index,
+      feedback_type: 'useful',
+      note: '',
+    })
+    notifySuccess('已标记为通过')
+    await loadTrace()
+  } catch {
+    /* 错误已弹窗 */
+  }
 }
 
 async function submitQualityFeedback() {
@@ -1054,7 +1138,14 @@ async function submitKnowledgeFeedback() {
       </p>
     </header>
 
-    <el-card shadow="never" class="card">
+    <div class="task-view-switch">
+      <el-radio-group v-model="activeTaskView">
+        <el-radio-button value="review">用例审核</el-radio-button>
+        <el-radio-button value="diagnostics">技术诊断</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <el-card v-show="activeTaskView === 'review'" shadow="never" class="card">
       <template #header><span>影响范围审核</span></template>
       <el-form label-width="100px">
         <el-form-item label="受影响产品">
@@ -1102,13 +1193,22 @@ async function submitKnowledgeFeedback() {
       </el-form>
     </el-card>
 
-    <el-card shadow="never" class="card case-output-card">
+    <el-card v-show="activeTaskView === 'review'" shadow="never" class="card case-output-card">
       <template #header>
         <div class="card-header">
           <span>测试用例输出</span>
           <div class="header-actions">
             <el-tag type="info" size="small">{{ caseSectionCount }} 个类别</el-tag>
             <el-tag type="success" size="small">{{ totalCaseCount }} 条用例</el-tag>
+            <el-tag type="success" effect="plain" size="small">
+              已审核 {{ reviewedCaseCount }}/{{ totalCaseCount }}
+            </el-tag>
+            <el-tag v-if="passedCaseCount" type="success" size="small">
+              通过 {{ passedCaseCount }}
+            </el-tag>
+            <el-tag v-if="issueCaseCount" type="warning" size="small">
+              有问题 {{ issueCaseCount }}
+            </el-tag>
             <el-tag v-if="filteredCaseCount !== totalCaseCount" type="warning" size="small">
               当前显示 {{ filteredCaseCount }} 条
             </el-tag>
@@ -1179,6 +1279,15 @@ async function submitKnowledgeFeedback() {
           <div class="case-detail-toolbar">
             <span>用例详情</span>
             <div>
+              <el-tag type="info" size="small">已选 {{ selectedSectionCount }} 个类别</el-tag>
+              <el-button
+                size="small"
+                type="primary"
+                :icon="Check"
+                :disabled="!selectedSectionCount"
+                :loading="batchSaving"
+                @click="submitSelectedSections"
+              >提交已选类别</el-button>
               <el-button
                 size="small"
                 :icon="allCaseDetailsExpanded ? ArrowUpBold : ArrowDownBold"
@@ -1189,6 +1298,13 @@ async function submitKnowledgeFeedback() {
             </div>
           </div>
           <div class="filter-bar case-filter-bar">
+            <el-input
+              v-model="caseFilters.keyword"
+              clearable
+              placeholder="搜索标题、前置条件或步骤"
+              class="filter-control keyword-filter"
+              :prefix-icon="Search"
+            />
             <el-select v-model="caseFilters.section" clearable placeholder="类别" class="filter-control">
               <el-option v-for="item in sectionOptions" :key="item" :label="item" :value="item" />
             </el-select>
@@ -1209,6 +1325,11 @@ async function submitKnowledgeFeedback() {
                 :label="item.label"
                 :value="item.value"
               />
+            </el-select>
+            <el-select v-model="caseFilters.review_status" clearable placeholder="审核状态" class="filter-control">
+              <el-option label="待审核" value="pending" />
+              <el-option label="已通过" value="passed" />
+              <el-option label="有问题" value="issue" />
             </el-select>
             <el-select v-model="caseFilters.provenance" clearable placeholder="依据" class="filter-control compact">
               <el-option label="有依据" value="with_sources" />
@@ -1247,7 +1368,6 @@ async function submitKnowledgeFeedback() {
             </el-select>
             <el-button :icon="EditPen" :loading="batchSaving" @click="applyBatchPatch">批量修改</el-button>
             <el-button :icon="Warning" :loading="batchSaving" @click="hideSelectedDuplicates">标记重复</el-button>
-            <el-button type="primary" :icon="Check" :loading="batchSaving" @click="submitSelectedSections">批量提交</el-button>
           </div>
         </div>
         <el-empty
@@ -1262,6 +1382,13 @@ async function submitKnowledgeFeedback() {
           >
           <template #title>
             <div class="section-title">
+              <span @click.stop>
+                <el-checkbox
+                  :model-value="isSectionSelected(section)"
+                  :disabled="['submitted', 'approved'].includes(section.status)"
+                  @change="(selected) => toggleSectionSelection(section, selected)"
+                />
+              </span>
               <span>{{ section.section }}</span>
               <el-tag size="small" type="info">
                 {{ section.display_cases?.length || 0 }}/{{ section.cases?.length || 0 }} 条
@@ -1295,8 +1422,8 @@ async function submitKnowledgeFeedback() {
             @expand-change="(row, expanded) => onCaseExpandChange(section, row, expanded)"
             @selection-change="(selection) => onCaseSelectionChange(section, selection)"
           >
-            <el-table-column type="selection" width="44" />
-            <el-table-column type="expand" width="48">
+            <el-table-column type="selection" width="44" fixed="left" />
+            <el-table-column type="expand" width="48" fixed="left">
               <template #default="{ row }">
                 <div class="case-expand">
                   <div class="case-field">
@@ -1321,7 +1448,7 @@ async function submitKnowledgeFeedback() {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="title" label="标题" min-width="300">
+            <el-table-column prop="title" label="标题" min-width="320" fixed="left">
               <template #default="{ row }">
                 <el-button
                   :id="caseAnchorId(section, row)"
@@ -1377,47 +1504,50 @@ async function submitKnowledgeFeedback() {
                   size="small"
                   :icon="View"
                   @click="openCaseProvenance(section, row, row.__case_index)"
-                >调试</el-button>
+                >查看依据</el-button>
               </template>
             </el-table-column>
-            <el-table-column label="反馈" width="190" align="center">
+            <el-table-column label="审核" width="270" align="center" fixed="right">
               <template #default="{ row }">
-                <div class="case-feedback-actions">
+                <div class="case-review-actions">
+                  <el-tag size="small" :type="caseReviewTagType(section, row, row.__case_index)">
+                    {{ caseReviewLabel(section, row, row.__case_index) }}
+                  </el-tag>
                   <el-button
                     size="small"
+                    type="success"
+                    link
+                    :loading="feedbackSaving"
+                    @click="markCasePassed(section, row, row.__case_index)"
+                  >通过</el-button>
+                  <el-button
+                    size="small"
+                    link
                     :icon="ChatDotRound"
                     @click="openQualityFeedback(section, row, row.__case_index)"
-                  >
-                    质量
-                    <span v-if="caseFeedbackCount(section, row, row.__case_index)">
-                      ({{ caseFeedbackCount(section, row, row.__case_index) }})
-                    </span>
-                  </el-button>
+                  >有问题</el-button>
                   <el-button
                     size="small"
+                    link
                     :icon="Warning"
                     @click="openKnowledgeFeedback(section, row)"
-                  >
-                    知识
-                  </el-button>
+                  >知识缺失</el-button>
                 </div>
               </template>
             </el-table-column>
           </el-table>
 
-          <details v-if="section.source_context" class="source-ctx">
-            <summary>source_context 追溯（{{
-              (section.source_context.knowledge_shipped_ids || []).length
-            }} knowledge ids,
-            {{ (section.source_context.document_hits || []).length }} doc hits）</summary>
-            <pre>{{ JSON.stringify(section.source_context, null, 2) }}</pre>
-          </details>
           </el-collapse-item>
         </el-collapse>
       </template>
     </el-card>
 
-    <el-card shadow="never" class="card diagnostics-card" v-loading="traceLoading">
+    <el-card
+      v-show="activeTaskView === 'diagnostics'"
+      shadow="never"
+      class="card diagnostics-card"
+      v-loading="traceLoading"
+    >
       <template #header>
         <div class="card-header">
           <span>诊断信息</span>
@@ -1590,14 +1720,15 @@ async function submitKnowledgeFeedback() {
 
     <el-dialog
       v-model="provenanceVisible"
-      :title="`生成依据: ${provenanceCase?.case_title || ''}`"
-      width="860px"
+      :title="`用例依据: ${provenanceCase?.case_title || ''}`"
+      width="88%"
     >
       <div v-if="provenanceCase" class="provenance-view">
+        <el-tabs v-model="provenanceTab">
+          <el-tab-pane label="依据内容" name="sources">
         <div class="provenance-tags">
           <el-tag size="small" type="info">{{ provenanceCase.section }}</el-tag>
           <el-tag size="small">case #{{ provenanceCase.case_index + 1 }}</el-tag>
-          <el-tag size="small" type="success">{{ provenanceTokenTotal() }} tokens</el-tag>
           <el-tag
             v-for="(count, type) in provenanceCase.feedback_counts || {}"
             :key="type"
@@ -1609,7 +1740,7 @@ async function submitKnowledgeFeedback() {
         </div>
 
         <div v-if="provenanceFeedbackRows().length" class="provenance-block">
-          <h3>Feedback</h3>
+          <h3>审核记录</h3>
           <div
             v-for="item in provenanceFeedbackRows()"
             :key="item.id"
@@ -1623,8 +1754,8 @@ async function submitKnowledgeFeedback() {
           </div>
         </div>
 
-        <div class="provenance-block">
-          <h3>Queries</h3>
+        <details class="source-ctx provenance-queries">
+          <summary>检索关键词</summary>
           <div class="query-list">
             <el-tag
               v-for="query in provenanceArray('document_queries')"
@@ -1638,59 +1769,51 @@ async function submitKnowledgeFeedback() {
               size="small"
             >kb: {{ query }}</el-tag>
           </div>
-        </div>
+        </details>
 
         <div class="provenance-grid">
           <div class="provenance-block">
-            <h3>Documents</h3>
+            <h3>需求文档片段</h3>
             <div v-for="doc in provenanceArray('document_hits')" :key="`${doc.document_id}-${doc.rank}`" class="trace-row">
               <div class="trace-row-main">
                 <span class="trace-title">{{ doc.name || `document #${doc.document_id}` }}</span>
-                <el-tag size="small" type="info">rank {{ doc.rank }}</el-tag>
               </div>
-              <div class="muted small">score {{ doc.best_score ?? '-' }}</div>
               <p
                 v-for="chunk in doc.top_chunks || []"
                 :key="`${chunk.rank}-${chunk.query}`"
                 class="trace-snippet"
               >
-                [{{ chunk.rank }} · {{ chunk.score }}] {{ chunk.text }}
+                {{ chunk.text }}
               </p>
             </div>
             <el-empty v-if="!provenanceArray('document_hits').length" description="暂无文档命中" />
           </div>
 
           <div class="provenance-block">
-            <h3>Knowledge</h3>
+            <h3>知识片段</h3>
             <div v-for="hit in provenanceArray('knowledge_hits')" :key="`${hit.id}-${hit.rank}`" class="trace-row">
               <div class="trace-row-main">
                 <span class="trace-title">{{ hit.name || `knowledge #${hit.id}` }}</span>
                 <el-tag size="small">{{ hit.type || 'knowledge' }}</el-tag>
-                <el-tag v-if="hit.source_highlight?.source || hit.source" size="small" type="info">
-                  source: {{ hit.source_highlight?.source || hit.source }}
-                </el-tag>
-                <el-tag v-if="hit.source_highlight?.is_expired" size="small" type="danger">
-                  expired
-                </el-tag>
-                <el-tag
-                  v-if="hit.source_highlight?.is_duplicate || hit.duplicate_of_id"
-                  size="small"
-                  type="warning"
-                >
-                  duplicate #{{ hit.source_highlight?.duplicate_of_id || hit.duplicate_of_id }}
-                </el-tag>
               </div>
-              <div class="muted small">rank {{ hit.rank }} · score {{ hit.score ?? '-' }}</div>
               <div class="query-list mini">
                 <el-tag v-for="query in hit.hit_queries || []" :key="query" size="small" type="info">
                   {{ query }}
                 </el-tag>
               </div>
+              <p v-if="hit.content_preview" class="trace-snippet knowledge-preview">
+                {{ hit.content_preview }}
+              </p>
             </div>
             <el-empty v-if="!provenanceArray('knowledge_hits').length" description="暂无知识命中" />
           </div>
         </div>
+          </el-tab-pane>
 
+          <el-tab-pane label="技术详情" name="technical">
+            <div class="provenance-tags">
+              <el-tag size="small" type="success">{{ provenanceTokenTotal() }} tokens</el-tag>
+            </div>
         <div class="provenance-grid">
           <div class="provenance-block">
             <h3>Agents</h3>
@@ -1730,6 +1853,8 @@ async function submitKnowledgeFeedback() {
             </div>
           </div>
         </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </el-dialog>
 
@@ -1950,6 +2075,10 @@ async function submitKnowledgeFeedback() {
   gap: 12px;
   margin-top: 12px;
 }
+.task-view-switch {
+  display: flex;
+  justify-content: flex-start;
+}
 .muted {
   color: #909399;
   font-size: 13px;
@@ -2052,6 +2181,9 @@ async function submitKnowledgeFeedback() {
   line-height: 1.5;
   word-break: break-word;
 }
+.knowledge-preview {
+  white-space: pre-wrap;
+}
 .trace-error {
   margin-bottom: 8px;
   word-break: break-word;
@@ -2086,6 +2218,9 @@ async function submitKnowledgeFeedback() {
   color: #606266;
   font-size: 13px;
   font-weight: 600;
+}
+.provenance-queries {
+  margin-bottom: 12px;
 }
 .job-timeline {
   padding: 4px 0 0;
@@ -2218,6 +2353,7 @@ async function submitKnowledgeFeedback() {
 }
 .case-detail-toolbar > div {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 .filter-bar,
@@ -2240,6 +2376,9 @@ async function submitKnowledgeFeedback() {
 .filter-control.compact,
 .batch-control.compact {
   width: 128px;
+}
+.keyword-filter {
+  width: 280px;
 }
 .batch-bar {
   min-height: 40px;
@@ -2286,12 +2425,14 @@ async function submitKnowledgeFeedback() {
 .chip {
   margin-right: 4px;
 }
-.case-feedback-actions {
+.case-review-actions {
   display: flex;
+  align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
 }
-.case-feedback-actions :deep(.el-button) {
+.case-review-actions :deep(.el-button) {
   margin-left: 0;
 }
 .feedback-type-group {
