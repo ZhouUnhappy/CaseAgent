@@ -63,6 +63,15 @@ func TestBatchTestCaseHandlers(t *testing.T) {
 	taskB, sectionB := insertCaseTestData(t, ctx, bunDB, tenantB.ID, "External", []map[string]any{
 		{"title": "other tenant", "priority_id": 1},
 	})
+	taskSingle, sectionSingle := insertCaseTestData(t, ctx, bunDB, tenantA.ID, "Profile", []map[string]any{
+		{
+			"title":                  "update profile",
+			"priority_id":            2,
+			"affected_products":      []string{"Shop"},
+			"affected_modules":       []string{"Profile"},
+			"custom_steps_separated": []map[string]string{{"content": "save", "expected": "updated"}},
+		},
+	})
 
 	router := caseTestRouter(bunDB)
 	updated := caseRequest[[]models.TestCase](t, router, tenantA.Slug, http.MethodPut,
@@ -91,6 +100,15 @@ func TestBatchTestCaseHandlers(t *testing.T) {
 		t.Fatalf("affected_products = %#v", changed["affected_products"])
 	}
 
+	rejectedBatch := caseRequest[map[string]any](t, router, tenantA.Slug, http.MethodPut,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/submit", taskA.ID),
+		map[string]any{"test_case_ids": []int{sectionA.ID}},
+		http.StatusConflict,
+	)
+	if caseNumber(rejectedBatch["unreviewed_count"]) != len(sectionA.Cases) {
+		t.Fatalf("batch submit rejection = %#v, want %d unreviewed cases", rejectedBatch, len(sectionA.Cases))
+	}
+	insertCaseTestFeedbacks(t, ctx, bunDB, tenantA.ID, taskA.ID, sectionA.ID, len(sectionA.Cases))
 	submitted := caseRequest[[]models.TestCase](t, router, tenantA.Slug, http.MethodPut,
 		fmt.Sprintf("/api/v1/tasks/%d/cases/batch/submit", taskA.ID),
 		map[string]any{"test_case_ids": []int{sectionA.ID}},
@@ -105,6 +123,24 @@ func TestBatchTestCaseHandlers(t *testing.T) {
 		map[string]any{"test_case_ids": []int{sectionB.ID}},
 		http.StatusNotFound,
 	)
+
+	rejectedSingle := caseRequest[map[string]any](t, router, tenantA.Slug, http.MethodPut,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/%d/submit", taskSingle.ID, sectionSingle.ID),
+		nil,
+		http.StatusConflict,
+	)
+	if caseNumber(rejectedSingle["unreviewed_count"]) != len(sectionSingle.Cases) {
+		t.Fatalf("single submit rejection = %#v, want %d unreviewed cases", rejectedSingle, len(sectionSingle.Cases))
+	}
+	insertCaseTestFeedbacks(t, ctx, bunDB, tenantA.ID, taskSingle.ID, sectionSingle.ID, len(sectionSingle.Cases))
+	singleSubmitted := caseRequest[models.TestCase](t, router, tenantA.Slug, http.MethodPut,
+		fmt.Sprintf("/api/v1/tasks/%d/cases/%d/submit", taskSingle.ID, sectionSingle.ID),
+		nil,
+		http.StatusOK,
+	)
+	if singleSubmitted.Status != models.TestCaseStatusSubmitted {
+		t.Fatalf("single submit response = %#v, want submitted section", singleSubmitted)
+	}
 }
 
 func caseTestRouter(db *bun.DB) *gin.Engine {
@@ -117,6 +153,7 @@ func caseTestRouter(db *bun.DB) *gin.Engine {
 	{
 		cases.PUT("/batch", h.BatchUpdateTestCases)
 		cases.PUT("/batch/submit", h.BatchSubmitTestCases)
+		cases.PUT("/:case_id/submit", h.SubmitTestCase)
 	}
 	return router
 }
@@ -163,6 +200,26 @@ func insertCaseTestData(t *testing.T, ctx context.Context, db *bun.DB, tenantID 
 		t.Fatalf("insert case test data for tenant %d: %v", tenantID, err)
 	}
 	return task, testcase
+}
+
+func insertCaseTestFeedbacks(t *testing.T, ctx context.Context, db *bun.DB, tenantID, taskID, testCaseID, caseCount int) {
+	t.Helper()
+	if err := tenantdb.RunInTenantTx(tenantdb.WithTenant(ctx, tenantID), db, func(ctx context.Context, tx bun.Tx) error {
+		rows := make([]models.TestCaseFeedback, 0, caseCount)
+		for caseIndex := 0; caseIndex < caseCount; caseIndex++ {
+			rows = append(rows, models.TestCaseFeedback{
+				TenantID:     tenantID,
+				TaskID:       taskID,
+				TestCaseID:   testCaseID,
+				CaseIndex:    caseIndex,
+				FeedbackType: models.CaseFeedbackUseful,
+			})
+		}
+		_, err := tx.NewInsert().Model(&rows).Exec(ctx)
+		return err
+	}); err != nil {
+		t.Fatalf("insert feedback for test case %d: %v", testCaseID, err)
+	}
 }
 
 func caseRequest[T any](t *testing.T, router *gin.Engine, tenantSlug string, method string, path string, payload any, wantStatus int) T {

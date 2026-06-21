@@ -11,6 +11,7 @@ import {
   Delete,
   Download,
   EditPen,
+  Filter,
   Plus,
   Refresh,
   Search,
@@ -26,6 +27,7 @@ import { useKnowledgeStore } from '../stores/knowledge'
 import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
 import { notifySuccess } from '../utils/error'
 import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel } from '../utils/jobs'
+import { knowledgeTypeLabel } from '../utils/labels'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,6 +68,7 @@ const selectedSectionIds = ref([])
 const expandedSections = ref([])
 const expandedCaseRows = ref({})
 const overviewExpanded = ref(true)
+const advancedFiltersVisible = ref(false)
 const activeTaskView = ref('review')
 const provenanceTab = ref('sources')
 const caseEditorVisible = ref(false)
@@ -109,6 +112,7 @@ const feedbackForm = reactive({
   candidate_type: 'module',
   candidate_name: '',
   source_case_id: 0,
+  source_case_index: 0,
   source_task_id: 0,
   source_case_title: '',
   note: '',
@@ -168,6 +172,15 @@ const passedCaseCount = computed(() =>
   ),
 )
 const issueCaseCount = computed(() => reviewedCaseCount.value - passedCaseCount.value)
+const hasAdvancedCaseFilters = computed(() =>
+  Boolean(
+    caseFilters.priority_id ||
+      caseFilters.product ||
+      caseFilters.module ||
+      caseFilters.feedback_type ||
+      caseFilters.provenance,
+  ),
+)
 const hasActiveCaseFilters = computed(() =>
   Boolean(
     caseFilters.section ||
@@ -226,7 +239,7 @@ const jobTimeline = computed(() => {
   const rows = [
     {
       key: 'created',
-      label: 'Created',
+      label: '任务已创建',
       status: 'succeeded',
       time: task.value.created_at,
     },
@@ -247,7 +260,7 @@ const jobTimeline = computed(() => {
   if (['awaiting_review', 'ready_to_generate'].includes(task.value.status)) {
     rows.push({
       key: 'review',
-      label: 'Review',
+      label: '影响范围确认',
       status: task.value.status === 'awaiting_review' ? 'running' : 'succeeded',
       time: task.value.updated_at,
     })
@@ -255,7 +268,7 @@ const jobTimeline = computed(() => {
   if (['completed', 'failed'].includes(task.value.status)) {
     rows.push({
       key: 'final',
-      label: task.value.status === 'completed' ? 'Completed' : 'Failed',
+      label: task.value.status === 'completed' ? '任务已完成' : '任务失败',
       status: task.value.status === 'completed' ? 'succeeded' : 'failed',
       time: task.value.updated_at,
       error: lastJobError.value,
@@ -537,6 +550,14 @@ function caseReviewTagType(section, row, index) {
   return { pending: 'info', passed: 'success', issue: 'warning' }[caseReviewState(section, row, index)]
 }
 
+function sectionPendingReviewCount(section) {
+  return (section.cases || []).filter((row, index) => caseReviewState(section, row, index) === 'pending').length
+}
+
+function canSelectSection(section) {
+  return !['submitted', 'approved'].includes(section.status) && sectionPendingReviewCount(section) === 0
+}
+
 function matchesCaseFilters(section, row, index) {
   if (caseFilters.hide_duplicates && row.duplicate_hidden) return false
   if (caseFilters.keyword) {
@@ -697,6 +718,7 @@ function isSectionSelected(section) {
 }
 
 function toggleSectionSelection(section, selected) {
+  if (selected && !canSelectSection(section)) return
   const current = new Set(selectedSectionIds.value)
   if (selected) current.add(section.id)
   else current.delete(section.id)
@@ -817,10 +839,15 @@ async function saveEditor() {
 }
 
 async function submitSection(section) {
+  const pendingCount = sectionPendingReviewCount(section)
+  if (pendingCount > 0) {
+    await ElMessageBox.alert(`类别「${section.section}」还有 ${pendingCount} 条用例待审核，全部审核后才能提交。`)
+    return
+  }
   if (!showCaseValidationResult(validateSection(section))) return
   try {
     await ElMessageBox.confirm(
-      `提交 section「${section.section}」共 ${section.cases?.length || 0} 条用例？`,
+      `提交类别「${section.section}」共 ${section.cases?.length || 0} 条用例？`,
       '确认',
       { type: 'info' },
     )
@@ -843,6 +870,11 @@ async function submitSelectedSections() {
     return
   }
   const sections = cases.value.filter((section) => ids.includes(section.id))
+  const pendingCount = sections.reduce((sum, section) => sum + sectionPendingReviewCount(section), 0)
+  if (pendingCount > 0) {
+    await ElMessageBox.alert(`已选类别还有 ${pendingCount} 条用例待审核，全部审核后才能提交。`)
+    return
+  }
   if (!showCaseValidationResult(sections.flatMap((section) => validateSection(section)))) return
   try {
     const caseCount = sections.reduce((sum, section) => sum + (section.cases?.length || 0), 0)
@@ -889,12 +921,20 @@ async function hideSelectedDuplicates() {
     return
   }
   try {
+    await Promise.all(selectedCases.value.map((item) =>
+      casesStore.feedback(taskId.value, item.test_case_id, {
+        case_index: item.case_index,
+        feedback_type: 'duplicate',
+        note: '批量标记为重复用例',
+      }),
+    ))
     await casesStore.batchUpdate(taskId.value, {
       cases: selectedCases.value.map(({ test_case_id, case_index }) => ({ test_case_id, case_index })),
       patch: { duplicate_hidden: true },
     })
     clearSelectedCases()
     notifySuccess('已标记重复并隐藏')
+    loadTrace().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -1074,6 +1114,7 @@ function openKnowledgeFeedback(section, row) {
     candidate_type: moduleName ? 'module' : 'product',
     candidate_name: moduleName || productName || '',
     source_case_id: section.id,
+    source_case_index: row.__case_index,
     source_task_id: taskId.value,
     source_case_title: row.title || section.section || '',
     note: '',
@@ -1095,8 +1136,14 @@ async function submitKnowledgeFeedback() {
       source_case_title: feedbackForm.source_case_title,
       note: feedbackForm.note.trim(),
     })
+    await casesStore.feedback(taskId.value, feedbackForm.source_case_id, {
+      case_index: feedbackForm.source_case_index,
+      feedback_type: 'knowledge_missing',
+      note: feedbackForm.note.trim(),
+    })
     feedbackVisible.value = false
     notifySuccess('知识缺失反馈已提交')
+    loadTrace().catch(() => {})
   } catch {
     /* 错误已弹窗 */
   }
@@ -1133,7 +1180,7 @@ async function submitKnowledgeFeedback() {
       </div>
       <p v-if="task.status === 'failed'" class="muted danger">
         任务失败。常见原因：模型 API 失败、子 Agent 全部失败且 DeepAgent fallback 也失败。
-        点击"重试"会根据当前状态自动回到 analyze 或 ready_to_generate；若回到 ready_to_generate，
+        点击“重试”会根据当前状态自动回到“分析中”或“待生成”；若回到“待生成”，
         请确认根因（后端日志关键字 <code>agent</code> / <code>document</code>）已修复后再"开始生成"。
       </p>
     </header>
@@ -1145,7 +1192,7 @@ async function submitKnowledgeFeedback() {
       </el-radio-group>
     </div>
 
-    <el-card v-show="activeTaskView === 'review'" shadow="never" class="card">
+    <el-card v-if="activeTaskView === 'review' && canReview" shadow="never" class="card">
       <template #header><span>影响范围审核</span></template>
       <el-form label-width="100px">
         <el-form-item label="受影响产品">
@@ -1154,7 +1201,6 @@ async function submitKnowledgeFeedback() {
             multiple
             filterable
             allow-create
-            :disabled="!canReview"
             style="width: 100%"
             placeholder="留空表示不限定"
           >
@@ -1167,7 +1213,6 @@ async function submitKnowledgeFeedback() {
             multiple
             filterable
             allow-create
-            :disabled="!canReview"
             style="width: 100%"
             placeholder="留空表示不限定"
           >
@@ -1177,7 +1222,6 @@ async function submitKnowledgeFeedback() {
         <el-form-item>
           <el-button
             type="primary"
-            :disabled="!canReview"
             @click="submitReview"
           >提交审核</el-button>
           <el-button
@@ -1186,11 +1230,36 @@ async function submitKnowledgeFeedback() {
             :loading="generating"
             @click="startGenerate"
           >开始生成</el-button>
-          <span v-if="!canReview && !canGenerate" class="muted small">
-            当前状态 {{ task.status }} 不允许编辑影响范围或触发生成。
-          </span>
         </el-form-item>
       </el-form>
+    </el-card>
+
+    <el-card
+      v-else-if="activeTaskView === 'review' && ['completed', 'failed'].includes(task.status)"
+      shadow="never"
+      class="card"
+    >
+      <template #header><span>影响范围</span></template>
+      <div class="readonly-scope">
+        <div>
+          <span>受影响产品</span>
+          <div>
+            <el-tag v-for="item in task.affected_products || []" :key="item" size="small" type="info">
+              {{ item }}
+            </el-tag>
+            <span v-if="!(task.affected_products || []).length" class="muted">未限定</span>
+          </div>
+        </div>
+        <div>
+          <span>受影响模块</span>
+          <div>
+            <el-tag v-for="item in task.affected_modules || []" :key="item" size="small">
+              {{ item }}
+            </el-tag>
+            <span v-if="!(task.affected_modules || []).length" class="muted">未限定</span>
+          </div>
+        </div>
+      </div>
     </el-card>
 
     <el-card v-show="activeTaskView === 'review'" shadow="never" class="card case-output-card">
@@ -1279,6 +1348,7 @@ async function submitKnowledgeFeedback() {
           <div class="case-detail-toolbar">
             <span>用例详情</span>
             <div>
+              <span class="section-selection-label">选择已全部审核的类别提交</span>
               <el-tag type="info" size="small">已选 {{ selectedSectionCount }} 个类别</el-tag>
               <el-button
                 size="small"
@@ -1308,6 +1378,21 @@ async function submitKnowledgeFeedback() {
             <el-select v-model="caseFilters.section" clearable placeholder="类别" class="filter-control">
               <el-option v-for="item in sectionOptions" :key="item" :label="item" :value="item" />
             </el-select>
+            <el-select v-model="caseFilters.review_status" clearable placeholder="审核状态" class="filter-control">
+              <el-option label="待审核" value="pending" />
+              <el-option label="已通过" value="passed" />
+              <el-option label="有问题" value="issue" />
+            </el-select>
+            <el-button
+              :icon="Filter"
+              :type="advancedFiltersVisible || hasAdvancedCaseFilters ? 'primary' : ''"
+              plain
+              @click="advancedFiltersVisible = !advancedFiltersVisible"
+            >{{ advancedFiltersVisible ? '收起筛选' : '更多筛选' }}</el-button>
+            <el-button @click="resetCaseFilters">重置</el-button>
+          </div>
+
+          <div v-show="advancedFiltersVisible" class="filter-bar case-filter-bar advanced-filter-bar">
             <el-select v-model="caseFilters.priority_id" clearable placeholder="优先级" class="filter-control compact">
               <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
@@ -1326,20 +1411,14 @@ async function submitKnowledgeFeedback() {
                 :value="item.value"
               />
             </el-select>
-            <el-select v-model="caseFilters.review_status" clearable placeholder="审核状态" class="filter-control">
-              <el-option label="待审核" value="pending" />
-              <el-option label="已通过" value="passed" />
-              <el-option label="有问题" value="issue" />
-            </el-select>
             <el-select v-model="caseFilters.provenance" clearable placeholder="依据" class="filter-control compact">
               <el-option label="有依据" value="with_sources" />
               <el-option label="无依据" value="without_sources" />
             </el-select>
             <el-switch v-model="caseFilters.hide_duplicates" active-text="隐藏重复" />
-            <el-button @click="resetCaseFilters">重置</el-button>
           </div>
 
-          <div class="batch-bar">
+          <div v-if="selectedCaseCount" class="batch-bar">
             <el-tag type="info" size="small">已选 {{ selectedCaseCount }} 条</el-tag>
             <el-select v-model="batchPatch.priority_id" clearable placeholder="优先级" class="batch-control compact">
               <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -1385,7 +1464,8 @@ async function submitKnowledgeFeedback() {
               <span @click.stop>
                 <el-checkbox
                   :model-value="isSectionSelected(section)"
-                  :disabled="['submitted', 'approved'].includes(section.status)"
+                  :disabled="!canSelectSection(section)"
+                  :title="sectionPendingReviewCount(section) ? `还有 ${sectionPendingReviewCount(section)} 条待审核` : '选择类别提交'"
                   @change="(selected) => toggleSectionSelection(section, selected)"
                 />
               </span>
@@ -1393,6 +1473,10 @@ async function submitKnowledgeFeedback() {
               <el-tag size="small" type="info">
                 {{ section.display_cases?.length || 0 }}/{{ section.cases?.length || 0 }} 条
               </el-tag>
+              <el-tag v-if="sectionPendingReviewCount(section)" size="small" type="warning">
+                待审核 {{ sectionPendingReviewCount(section) }} 条
+              </el-tag>
+              <el-tag v-else size="small" type="success">已全部审核</el-tag>
               <StatusTag :status="section.status" />
             </div>
           </template>
@@ -1408,9 +1492,9 @@ async function submitKnowledgeFeedback() {
               size="small"
               type="primary"
               :icon="Check"
-              :disabled="section.status === 'submitted' || section.status === 'approved'"
+              :disabled="!canSelectSection(section)"
               @click="submitSection(section)"
-            >提交</el-button>
+            >提交类别</el-button>
           </div>
 
           <el-table
@@ -1608,7 +1692,7 @@ async function submitKnowledgeFeedback() {
                 <div class="job-row-main">
                   <span class="job-label">{{ item.label }}</span>
                   <el-tag size="small" :type="jobStatusType(item.status)">
-                    {{ jobStatusLabel(item.status) }}
+                    {{ jobStatusLabel(item.status) }} ({{ item.status }})
                   </el-tag>
                   <span v-if="item.retry" class="muted small">retry {{ item.retry }}</span>
                   <span v-if="item.nextRun" class="muted small">next {{ formatDate(item.nextRun) }}</span>
@@ -1632,9 +1716,9 @@ async function submitKnowledgeFeedback() {
               <h3>Runs</h3>
               <div v-for="run in traceRuns" :key="run.id" class="trace-row">
                 <div class="trace-row-main">
-                  <span class="trace-title">{{ jobTypeLabel(run.workflow_type) }}</span>
+                  <span class="trace-title">{{ jobTypeLabel(run.workflow_type) }} ({{ run.workflow_type }})</span>
                   <el-tag size="small" :type="jobStatusType(run.status)">
-                    {{ traceStatusLabel(run.status) }}
+                    {{ traceStatusLabel(run.status) }} ({{ run.status }})
                   </el-tag>
                 </div>
                 <div class="muted small">
@@ -1651,7 +1735,7 @@ async function submitKnowledgeFeedback() {
                 <div class="trace-row-main">
                   <span class="trace-title">{{ agent.agent_name }}</span>
                   <el-tag size="small" :type="jobStatusType(agent.status)">
-                    {{ traceStatusLabel(agent.status) }}
+                    {{ traceStatusLabel(agent.status) }} ({{ agent.status }})
                   </el-tag>
                 </div>
                 <div class="muted small">{{ agent.stage }} · {{ formatDate(agent.finished_at || agent.created_at) }}</div>
@@ -1670,7 +1754,7 @@ async function submitKnowledgeFeedback() {
                 <div class="trace-row-main">
                   <span class="trace-title">{{ call.provider || '-' }} / {{ call.model || '-' }}</span>
                   <el-tag size="small" :type="jobStatusType(call.status)">
-                    {{ traceStatusLabel(call.status) }}
+                    {{ traceStatusLabel(call.status) }} ({{ call.status }})
                   </el-tag>
                 </div>
                 <div class="muted small">
@@ -1691,7 +1775,7 @@ async function submitKnowledgeFeedback() {
                 <div class="trace-row-main">
                   <span class="trace-title">{{ retrieval.retriever_type }}</span>
                   <el-tag size="small" :type="jobStatusType(retrieval.status)">
-                    {{ traceStatusLabel(retrieval.status) }}
+                    {{ traceStatusLabel(retrieval.status) }} ({{ retrieval.status }})
                   </el-tag>
                 </div>
                 <div class="muted small">
@@ -2024,8 +2108,8 @@ async function submitKnowledgeFeedback() {
       <el-form label-width="100px">
         <el-form-item label="类型">
           <el-radio-group v-model="feedbackForm.candidate_type">
-            <el-radio value="product">product</el-radio>
-            <el-radio value="module">module</el-radio>
+            <el-radio value="product">{{ knowledgeTypeLabel('product') }}</el-radio>
+            <el-radio value="module">{{ knowledgeTypeLabel('module') }}</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="候选名称">
@@ -2092,6 +2176,23 @@ async function submitKnowledgeFeedback() {
 }
 .card {
   border-radius: 8px;
+}
+.readonly-scope {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.readonly-scope > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  color: #606266;
+  font-size: 14px;
+}
+.readonly-scope > div > div {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 .diagnostics-card {
   overflow: hidden;
@@ -2356,6 +2457,10 @@ async function submitKnowledgeFeedback() {
   align-items: center;
   gap: 8px;
 }
+.section-selection-label {
+  color: #909399;
+  font-weight: 400;
+}
 .filter-bar,
 .batch-bar {
   display: flex;
@@ -2368,6 +2473,12 @@ async function submitKnowledgeFeedback() {
   background: #fafafa;
   border: 1px solid #ebeef5;
   border-radius: 6px;
+}
+.advanced-filter-bar {
+  margin-top: -10px;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 .filter-control,
 .batch-control {

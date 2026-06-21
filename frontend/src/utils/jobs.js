@@ -5,23 +5,23 @@ export function latestJob(jobs) {
 
 export function jobTypeLabel(jobType) {
   return {
-    analyze: 'Analyze',
-    generate: 'Generate',
-    document_process: 'Document',
-    document_reprocess: 'Document',
-    knowledge_process: 'Knowledge',
-    knowledge_reprocess: 'Knowledge',
+    analyze: '影响范围分析',
+    generate: '用例生成',
+    document_process: '需求文档处理',
+    document_reprocess: '需求文档重处理',
+    knowledge_process: '知识处理',
+    knowledge_reprocess: '知识重处理',
   }[jobType] || jobType || '-'
 }
 
 export function jobStatusLabel(status) {
   return {
-    pending: 'pending',
-    running: 'running',
-    retrying: 'retrying',
-    failed: 'failed',
-    succeeded: 'succeeded',
-    canceled: 'canceled',
+    pending: '等待中',
+    running: '运行中',
+    retrying: '重试中',
+    failed: '失败',
+    succeeded: '已完成',
+    canceled: '已取消',
   }[status] || status || '-'
 }
 

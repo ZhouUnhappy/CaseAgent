@@ -129,7 +129,7 @@ function setDefault(row) {
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag :type="row.archived_at ? 'info' : 'success'" size="small">
-            {{ row.archived_at ? 'archived' : 'active' }}
+            {{ row.archived_at ? '已归档' : '使用中' }}
           </el-tag>
         </template>
       </el-table-column>

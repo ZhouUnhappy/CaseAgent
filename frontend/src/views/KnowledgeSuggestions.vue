@@ -6,6 +6,7 @@ import StatusTag from '../components/StatusTag.vue'
 import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
 import { writeSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
 import { notifySuccess } from '../utils/error'
+import { knowledgeTypeLabel } from '../utils/labels'
 
 const router = useRouter()
 const store = useKnowledgeSuggestionsStore()
@@ -27,7 +28,7 @@ function snippetText(snippet) {
     const products = Array.isArray(snippet.affected_products) ? snippet.affected_products.join(', ') : ''
     const modules = Array.isArray(snippet.affected_modules) ? snippet.affected_modules.join(', ') : ''
     const documents = Array.isArray(snippet.document_ids) ? snippet.document_ids.join(', ') : ''
-    return `影响范围：products=${products || '-'}；modules=${modules || '-'}；documents=${documents || '-'}`
+    return `影响范围：产品=${products || '-'}；模块=${modules || '-'}；文档=${documents || '-'}`
   }
   if (snippet.type === 'knowledge_context') {
     const ids = Array.isArray(snippet.knowledge_ids) ? snippet.knowledge_ids.join(', ') : ''
@@ -149,7 +150,7 @@ async function dismiss(row) {
       <el-table-column label="类型" width="100">
         <template #default="{ row }">
           <el-tag size="small" :type="candidateTagType(row.candidate_type)">
-            {{ row.candidate_type }}
+            {{ knowledgeTypeLabel(row.candidate_type) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -174,7 +175,7 @@ async function dismiss(row) {
       <el-table-column label="忽略原因" width="120">
         <template #default="{ row }">
           <el-tag v-if="row.dismissed_reason === 'auto_expired'" size="small" type="info">
-            auto_expired
+            自动过期
           </el-tag>
           <span v-else class="muted">-</span>
         </template>
@@ -187,7 +188,7 @@ async function dismiss(row) {
           <div v-if="row.status === 'pending'" class="op-buttons">
             <el-tooltip
               v-if="isContextGap(row)"
-              content="context_gap 需要先排查失败上下文，暂不自动生成知识草稿"
+              content="上下文缺失需要先排查失败原因，暂不自动生成知识草稿"
               placement="top"
             >
               <span>

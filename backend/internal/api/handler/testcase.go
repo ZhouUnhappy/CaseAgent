@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -174,15 +175,25 @@ func (h *Handler) BatchUpdateTestCases(c *gin.Context) {
 }
 
 func (h *Handler) SubmitTestCase(c *gin.Context) {
+	taskID, ok := parseTaskID(c)
+	if !ok {
+		return
+	}
 	id := c.Param("case_id")
 	tc := &models.TestCase{ID: 0}
 
-	if err := DBFromContext(c).NewSelect().Model(tc).Where("id = ?", id).Scan(c.Request.Context()); err != nil {
+	if err := DBFromContext(c).NewSelect().Model(tc).
+		Where("id = ?", id).
+		Where("task_id = ?", taskID).
+		Scan(c.Request.Context()); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Test case not found"})
 		return
 	}
 	if err := validateCaseRows(tc.Cases); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireReviewedCases(c, []models.TestCase{*tc}) {
 		return
 	}
 
@@ -239,6 +250,9 @@ func (h *Handler) BatchSubmitTestCases(c *gin.Context) {
 			return
 		}
 	}
+	if !requireReviewedCases(c, updated) {
+		return
+	}
 
 	now := time.Now()
 	if _, err := DBFromContext(c).NewUpdate().
@@ -257,6 +271,63 @@ func (h *Handler) BatchSubmitTestCases(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, updated)
+}
+
+func requireReviewedCases(c *gin.Context, sections []models.TestCase) bool {
+	pending, err := pendingCaseReviewCount(c.Request.Context(), DBFromContext(c), sections)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	if pending > 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":            fmt.Sprintf("%d test cases are pending review", pending),
+			"unreviewed_count": pending,
+		})
+		return false
+	}
+	return true
+}
+
+func pendingCaseReviewCount(ctx context.Context, db bun.IDB, sections []models.TestCase) (int, error) {
+	if len(sections) == 0 {
+		return 0, nil
+	}
+
+	sectionIDs := make([]int, 0, len(sections))
+	expected := make(map[int]int, len(sections))
+	for _, section := range sections {
+		sectionIDs = append(sectionIDs, section.ID)
+		expected[section.ID] = len(section.Cases)
+	}
+
+	feedbackRows := []models.TestCaseFeedback{}
+	if err := db.NewSelect().
+		Model(&feedbackRows).
+		Column("test_case_id", "case_index").
+		Where("test_case_id IN (?)", bun.In(sectionIDs)).
+		Scan(ctx); err != nil {
+		return 0, err
+	}
+
+	reviewed := make(map[CaseRefRequest]struct{}, len(feedbackRows))
+	for _, row := range feedbackRows {
+		caseCount, ok := expected[row.TestCaseID]
+		if !ok || row.CaseIndex < 0 || row.CaseIndex >= caseCount {
+			continue
+		}
+		reviewed[CaseRefRequest{TestCaseID: row.TestCaseID, CaseIndex: row.CaseIndex}] = struct{}{}
+	}
+
+	pending := 0
+	for sectionID, caseCount := range expected {
+		for caseIndex := 0; caseIndex < caseCount; caseIndex++ {
+			if _, ok := reviewed[CaseRefRequest{TestCaseID: sectionID, CaseIndex: caseIndex}]; !ok {
+				pending++
+			}
+		}
+	}
+	return pending, nil
 }
 
 func hasBatchPatch(patch BatchCasePatchRequest) bool {

@@ -21,7 +21,7 @@ const project = ref(null)
 const documents = useDocumentsStore()
 const tasks = useTasksStore()
 const { items: docItems, loading: docLoading, uploading } = storeToRefs(documents)
-const { items: taskItems, loading: taskLoading, creating: taskCreating } = storeToRefs(tasks)
+const { items: taskItems, loading: taskLoading } = storeToRefs(tasks)
 
 const uploadDialog = ref(false)
 const uploadForm = reactive({ name: '', file: null })
@@ -30,10 +30,6 @@ const previewVisible = ref(false)
 const previewDocument = ref(null)
 const documentJobs = ref({})
 const taskJobs = ref({})
-
-const taskDialog = ref(false)
-const taskForm = reactive({ documentIds: [] })
-const taskFormRef = ref(null)
 
 onMounted(() => {
   refresh()
@@ -126,45 +122,7 @@ async function removeDocument(doc) {
   }
 }
 
-const completedDocOptions = computed(() =>
-  docItems.value.map((d) => ({
-    value: d.id,
-    label: `${d.name} (#${d.id})`,
-    disabled: d.status !== 'completed',
-    status: d.status,
-  })),
-)
-
-function openCreateTask() {
-  taskForm.documentIds = []
-  taskDialog.value = true
-}
-
-async function submitCreateTask() {
-  if (taskForm.documentIds.length === 0) {
-    ElMessageBox.alert('请至少选择一份已完成处理的文档')
-    return
-  }
-  try {
-    const created = await tasks.create(projectId.value, {
-      document_ids: taskForm.documentIds,
-    })
-    notifySuccess(`任务 #${created.id} 已创建，正在分析影响范围`)
-    taskDialog.value = false
-    router.push({ name: 'task-detail', params: { id: created.id } })
-  } catch {
-    /* 错误已弹窗 */
-  }
-}
-
 function viewTask(task) {
-  if (task.status === 'completed') {
-    router.push({
-      name: 'generate',
-      query: { project_id: projectId.value, task_id: task.id },
-    })
-    return
-  }
   router.push({ name: 'task-detail', params: { id: task.id } })
 }
 
@@ -278,7 +236,6 @@ function latestTaskJob(row) {
           <span>生成任务与测试用例</span>
           <div class="header-actions">
             <el-button @click="tasks.fetch(projectId)" :loading="taskLoading">刷新</el-button>
-            <el-button type="primary" @click="openCreateTask">新建任务</el-button>
           </div>
         </div>
       </template>
@@ -395,41 +352,6 @@ function latestTaskJob(row) {
       </template>
     </el-dialog>
 
-    <el-dialog
-      v-model="taskDialog"
-      title="新建生成任务"
-      width="520px"
-      :close-on-click-modal="false"
-    >
-      <el-form ref="taskFormRef" :model="taskForm" label-width="80px">
-        <el-form-item label="文档">
-          <el-select
-            v-model="taskForm.documentIds"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="选择已完成处理的文档"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="opt in completedDocOptions"
-              :key="opt.value"
-              :value="opt.value"
-              :label="opt.label"
-              :disabled="opt.disabled"
-            >
-              <span style="float:left">{{ opt.label }}</span>
-              <span style="float:right; color: #909399; font-size: 12px">{{ opt.status }}</span>
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <p class="muted small">仅 status = completed 的文档可被选中；analyze 阶段会自动推断影响范围。</p>
-      </el-form>
-      <template #footer>
-        <el-button @click="taskDialog = false">取消</el-button>
-        <el-button type="primary" :loading="taskCreating" @click="submitCreateTask">创建</el-button>
-      </template>
-    </el-dialog>
   </section>
 </template>
 

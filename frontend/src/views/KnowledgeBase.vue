@@ -10,6 +10,7 @@ import { updateKnowledgeSuggestion } from '../api/knowledgeSuggestions'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { readAndClearSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
 import { notifySuccess } from '../utils/error'
+import { knowledgeTypeLabel } from '../utils/labels'
 
 const route = useRoute()
 const router = useRouter()
@@ -236,7 +237,7 @@ function handleRowCommand(row, command) {
     <header class="bar">
       <div>
         <h2>知识库</h2>
-        <p class="hint">维护 product / module 两类架构知识，供 analyze 阶段推断影响范围。</p>
+        <p class="hint">维护产品和模块两类架构知识，供影响范围分析使用。</p>
       </div>
       <div class="actions">
         <el-radio-group
@@ -244,8 +245,8 @@ function handleRowCommand(row, command) {
           @change="(v) => changeTypeFilter(v).catch(() => {})"
         >
           <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button value="product">product</el-radio-button>
-          <el-radio-button value="module">module</el-radio-button>
+          <el-radio-button value="product">产品</el-radio-button>
+          <el-radio-button value="module">模块</el-radio-button>
         </el-radio-group>
         <el-button @click="refreshKnowledge" :loading="loading">刷新</el-button>
         <el-button type="primary" @click="openCreate">新建</el-button>
@@ -254,7 +255,9 @@ function handleRowCommand(row, command) {
 
     <el-table :data="items" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="type" label="类型" width="100" />
+      <el-table-column label="类型" width="100">
+        <template #default="{ row }">{{ knowledgeTypeLabel(row.type) }}</template>
+      </el-table-column>
       <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
       <el-table-column label="状态" width="140">
         <template #default="{ row }"><StatusTag :status="row.status" /></template>
@@ -292,7 +295,7 @@ function handleRowCommand(row, command) {
       @closed="previewKnowledge = null"
     >
       <div v-if="previewKnowledge" class="preview-meta">
-        <el-tag size="small">{{ previewKnowledge.type }}</el-tag>
+        <el-tag size="small">{{ knowledgeTypeLabel(previewKnowledge.type) }}</el-tag>
         <StatusTag :status="previewKnowledge.status" />
         <el-link
           v-if="previewKnowledge.metadata?.source_url"
@@ -313,8 +316,8 @@ function handleRowCommand(row, command) {
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="类型" prop="type">
           <el-radio-group v-model="form.type" :disabled="!!editing">
-            <el-radio value="product">product</el-radio>
-            <el-radio value="module">module</el-radio>
+            <el-radio value="product">产品</el-radio>
+            <el-radio value="module">模块</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="名称" prop="name">

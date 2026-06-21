@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor, OfficeBuilding, VideoPlay } from '@element-plus/icons-vue'
+import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor, OfficeBuilding } from '@element-plus/icons-vue'
 import { useTenantStore } from '../stores/tenant'
 
 const route = useRoute()
@@ -21,7 +21,6 @@ const navItems = [
   { index: '/knowledge', label: '知识库', icon: Collection },
   { index: '/knowledge-suggestions', label: '知识建议', icon: DocumentChecked },
   { index: '/ops', label: '运维', icon: Monitor },
-  { index: '/demo', label: 'Demo', icon: VideoPlay },
   { index: '/tenants', label: '租户', icon: OfficeBuilding },
 ]
 
@@ -105,7 +104,7 @@ async function submitCreate() {
               :value="t.slug"
             />
           </el-select>
-          <el-button size="small" @click="openCreateDialog">新建</el-button>
+          <el-button size="small" @click="openCreateDialog">新建租户</el-button>
         </div>
       </el-header>
       <el-main class="layout-main">

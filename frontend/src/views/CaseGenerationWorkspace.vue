@@ -13,6 +13,7 @@ import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { notifySuccess } from '../utils/error'
 import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
+import { statusLabel } from '../utils/status'
 
 const route = useRoute()
 const router = useRouter()
@@ -81,7 +82,7 @@ const taskStatusText = computed(() => {
   if (!task.value) return '未创建任务'
   const job = latestSelectedJob.value
   if (job) return `${jobTypeLabel(job.job_type)} ${jobStatusLabel(job.status)}`
-  return task.value.status
+  return statusLabel(task.value.status)
 })
 const latestSelectedJob = computed(() => latestJob(selectedTaskJobs.value))
 const selectedJobError = computed(() => compactJobError(findSelectedJobWithError()))
@@ -90,7 +91,7 @@ const workspaceTimeline = computed(() => {
   const rows = [
     {
       key: 'created',
-      label: 'Created',
+      label: '任务已创建',
       status: 'succeeded',
       time: task.value.created_at,
     },
@@ -107,7 +108,7 @@ const workspaceTimeline = computed(() => {
   if (['awaiting_review', 'ready_to_generate'].includes(task.value.status)) {
     rows.push({
       key: 'review',
-      label: 'Review',
+      label: '影响范围确认',
       status: task.value.status === 'awaiting_review' ? 'running' : 'succeeded',
       time: task.value.updated_at,
     })
@@ -115,7 +116,7 @@ const workspaceTimeline = computed(() => {
   if (['completed', 'failed'].includes(task.value.status)) {
     rows.push({
       key: 'final',
-      label: task.value.status === 'completed' ? 'Completed' : 'Failed',
+      label: task.value.status === 'completed' ? '任务已完成' : '任务失败',
       status: task.value.status === 'completed' ? 'succeeded' : 'failed',
       time: task.value.updated_at,
     })
@@ -206,8 +207,7 @@ const primaryAction = computed(() => {
 const flowSteps = computed(() => {
   const status = task.value?.status || ''
   const hasDocuments = completedDocuments.value.length > 0
-  const hasReviewedScope = ['ready_to_generate', 'generating', 'completed'].includes(status)
-  const hasGenerationStarted = ['generating', 'completed'].includes(status)
+  const hasGenerated = ['completed'].includes(status)
   return [
     {
       label: '文档',
@@ -215,18 +215,13 @@ const flowSteps = computed(() => {
       state: hasDocuments ? 'done' : selectedProjectId.value ? 'active' : 'waiting',
     },
     {
-      label: '范围',
-      value: task.value ? status : '未创建任务',
-      state: hasReviewedScope ? 'done' : task.value ? 'active' : 'waiting',
-    },
-    {
-      label: '生成',
-      value: totalCaseCount.value ? `${totalCaseCount.value} 条` : status || '等待',
-      state: totalCaseCount.value ? 'done' : hasGenerationStarted ? 'active' : 'waiting',
+      label: '范围与生成',
+      value: task.value ? statusLabel(status) : '未创建任务',
+      state: hasGenerated ? 'done' : task.value ? 'active' : 'waiting',
     },
     {
       label: '输出',
-      value: caseSectionCount.value ? `${caseSectionCount.value} sections` : '等待',
+      value: caseSectionCount.value ? `${caseSectionCount.value} 个类别` : '等待',
       state: caseSectionCount.value ? 'done' : 'waiting',
     },
   ]
@@ -458,24 +453,6 @@ async function retryTask() {
 async function refreshCases() {
   if (!selectedTaskId.value) return
   await casesStore.fetch(selectedTaskId.value)
-}
-
-async function submitSection(section) {
-  try {
-    await ElMessageBox.confirm(
-      `提交 section「${section.section}」共 ${section.cases?.length || 0} 条用例？`,
-      '确认提交',
-      { type: 'info' },
-    )
-  } catch {
-    return
-  }
-  try {
-    await casesStore.submit(selectedTaskId.value, section.id)
-    notifySuccess('已提交')
-  } catch {
-    /* 错误已弹窗 */
-  }
 }
 
 function ensurePolling() {
@@ -718,7 +695,7 @@ function findSelectedJobWithError() {
 
           <el-empty v-if="!tasks.length && !tasksLoading" description="暂无生成任务" />
 
-          <el-form v-if="task" label-position="top" class="review-form">
+          <el-form v-if="task && canReview" label-position="top" class="review-form">
             <el-form-item label="受影响产品">
               <el-select
                 v-model="reviewForm.products"
@@ -744,6 +721,27 @@ function findSelectedJobWithError() {
               </el-select>
             </el-form-item>
           </el-form>
+
+          <div v-else-if="task" class="scope-summary">
+            <div>
+              <span>受影响产品</span>
+              <div>
+                <el-tag v-for="item in task.affected_products || []" :key="item" size="small" type="info">
+                  {{ item }}
+                </el-tag>
+                <span v-if="!(task.affected_products || []).length">未限定</span>
+              </div>
+            </div>
+            <div>
+              <span>受影响模块</span>
+              <div>
+                <el-tag v-for="item in task.affected_modules || []" :key="item" size="small">
+                  {{ item }}
+                </el-tag>
+                <span v-if="!(task.affected_modules || []).length">未限定</span>
+              </div>
+            </div>
+          </div>
 
           <div class="generate-actions">
             <el-button v-if="canReview" @click="submitReview">确认范围</el-button>
@@ -829,10 +827,10 @@ function findSelectedJobWithError() {
             <h2>测试用例输出</h2>
           </div>
           <div class="result-tools">
-            <el-tag type="info">{{ caseSectionCount }} sections</el-tag>
-            <el-tag type="success">{{ totalCaseCount }} cases</el-tag>
+            <el-tag type="info">{{ caseSectionCount }} 个类别</el-tag>
+            <el-tag type="success">{{ totalCaseCount }} 条用例</el-tag>
             <el-button :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
-              查看完整结果
+              审核用例
             </el-button>
             <el-button :icon="Refresh" :disabled="!selectedTaskId" :loading="casesLoading" @click="refreshCases">
               刷新
@@ -873,21 +871,10 @@ function findSelectedJobWithError() {
             <template #title>
               <div class="section-title">
                 <span>{{ section.section }}</span>
-                <el-tag size="small" type="info">{{ section.cases?.length || 0 }} cases</el-tag>
+                <el-tag size="small" type="info">{{ section.cases?.length || 0 }} 条</el-tag>
                 <StatusTag :status="section.status" />
               </div>
             </template>
-
-            <div class="section-actions">
-              <el-button
-                size="small"
-                type="primary"
-                :disabled="section.status === 'submitted' || section.status === 'approved'"
-                @click="submitSection(section)"
-              >
-                提交 section
-              </el-button>
-            </div>
 
             <el-table :data="section.cases || []" stripe size="small">
               <el-table-column type="expand" width="48">
@@ -1170,12 +1157,6 @@ function findSelectedJobWithError() {
   padding: 16px;
   min-width: 0;
 }
-.document-panel {
-  order: 2;
-}
-.task-panel {
-  order: 1;
-}
 .result-panel {
   grid-area: result;
   height: clamp(640px, calc(100vh - 240px), 920px);
@@ -1316,6 +1297,25 @@ function findSelectedJobWithError() {
   color: #f56c6c;
   font-size: 12px;
   word-break: break-word;
+}
+.scope-summary {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.scope-summary > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+.scope-summary > div > div {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: #111827;
 }
 .mini-timeline {
   display: flex;
