@@ -33,6 +33,24 @@
 
 不在本文维护“做了哪些”。已发生的事实由 git log 与 `docs/regression/` 承载。一次性优化项完成后请直接从本文删除；标记为“可重复执行的维护机制”的条目永久保留，每轮执行结果记录到 `docs/regression/` 和 git log。
 
+## 当前要做
+
+### 诊断时间基线收敛（移除历史时差兼容）
+
+**需要角色**：后端工程师、前端工程师、测试工程师。
+
+**Trigger**：已满足。当前诊断时间已统一按带时区时间输出，但启动迁移仍包含固定减去 8 小时的旧数据修复逻辑；可信本地 Demo 不要求兼容旧数据、旧数据结构、旧 fixture 或旧测试脚本，应直接收敛到单一、可解释的 UTC 时间基线。
+
+**DoD**：
+
+- 直接修改建库基线迁移，使任务、后台作业、workflow、step、agent、model、retrieval、feedback 等诊断链路的时间字段从首次建表起即使用 `TIMESTAMPTZ`，不再依赖后续迁移把 `TIMESTAMP` 转为带时区类型。
+- 后端所有应用侧诊断时间统一从一个 UTC 时钟入口取得，或明确使用 `time.Now().UTC()`；数据库侧时间继续使用 `CURRENT_TIMESTAMP`，并保证连接会话时区为 UTC。不得混用“UTC 值写入无时区字段”和“数据库本地时区时间”。
+- 从 `backend/migrations/011_diagnostic_timestamps.sql` 移除固定 `INTERVAL '8 hours'`、6 至 10 小时时差窗口及同类启发式修复；代码和迁移不得再根据相对时间差猜测历史数据时区。
+- 不兼容旧 Demo 数据。使用当前建库基线重新创建本地数据库和测试 fixture，并通过 `scripts/demo_bootstrap.sh fresh` 或现有等价脚本生成演示数据；不为此新增页面或可视化 Demo 控制台。
+- API 继续返回含明确时区的 RFC3339 时间；前端继续统一通过 `frontend/src/utils/date.js` 格式化，不在页面组件中重新实现时区换算。
+- 补充可机器复核的迁移/集成测试：断言新建 schema 的目标字段均为 `TIMESTAMPTZ`、迁移中不存在固定时差修复，并验证新生成任务满足 `task.created_at <= job.created_at <= job.started_at <= job.finished_at <= task.updated_at`；时间相等应视为合法，不使用脆弱的固定耗时断言。
+- 完成 `cd backend && go test ./...`、`cd frontend && npm run build`，并在常规桌面宽度人工核对任务详情和 Ops 时间线；结果记录到 `docs/regression/`，随后从“当前要做”移除本项。
+
 ## 可重复执行的维护机制
 
 ### 依赖与架构基线刷新
