@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"caseagent/internal/clock"
 	tenantdb "caseagent/internal/db"
 	"caseagent/internal/db/models"
 
@@ -152,7 +153,7 @@ func (s *Service) CreateCaseFeedbackBatch(ctx context.Context, inputs []CreateIn
 		testCasesByID[testCase.ID] = testCase
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now()
 	rows := make([]models.TestCaseFeedback, 0, len(inputs))
 	for _, input := range inputs {
 		testCase, exists := testCasesByID[input.TestCaseID]

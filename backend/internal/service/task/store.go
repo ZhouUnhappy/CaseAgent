@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
+	"caseagent/internal/clock"
 	"caseagent/internal/db"
 	"caseagent/internal/db/models"
 
@@ -23,7 +23,7 @@ func (s *Service) getTask(ctx context.Context, taskID int) (*models.CaseGenerati
 func (s *Service) updateTaskStatus(ctx context.Context, taskID int, status string) error {
 	_, err := s.db.NewUpdate().Model(&models.CaseGenerationTask{}).
 		Set("status = ?", status).
-		Set("updated_at = ?", time.Now()).
+		Set("updated_at = ?", clock.Now()).
 		Where("id = ?", taskID).
 		Exec(ctx)
 	return err
@@ -34,7 +34,7 @@ func (s *Service) updateTaskAnalysis(ctx context.Context, taskID int, products [
 		Set("affected_products = ?", products).
 		Set("affected_modules = ?", modules).
 		Set("status = ?", status).
-		Set("updated_at = ?", time.Now()).
+		Set("updated_at = ?", clock.Now()).
 		Where("id = ?", taskID).
 		Exec(ctx)
 	return err
@@ -106,7 +106,7 @@ func (s *Service) listKnowledge(ctx context.Context) ([]models.KnowledgeBase, er
 	if err := s.db.NewSelect().
 		Model(&entries).
 		Where("status = ?", models.KnowledgeStatusCompleted).
-		Where("(expires_at IS NULL OR expires_at > ?)", time.Now()).
+		Where("(expires_at IS NULL OR expires_at > ?)", clock.Now()).
 		Where("duplicate_of_id IS NULL").
 		OrderExpr("type ASC, name ASC").
 		Scan(ctx); err != nil {
@@ -157,7 +157,7 @@ func (s *Service) persistGeneratedCases(ctx context.Context, taskID int, section
 	}
 
 	tenantID, _ := db.TenantFromContext(ctx)
-	now := time.Now()
+	now := clock.Now()
 	for _, section := range sections {
 		testCase := &models.TestCase{
 			TenantID:      tenantID,

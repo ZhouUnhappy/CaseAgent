@@ -1,6 +1,7 @@
 package db
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -90,14 +91,42 @@ func TestLoadSchemaSQL(t *testing.T) {
 		!strings.Contains(schema, "knowledge_base_duplicate_idx") {
 		t.Fatalf("expected knowledge governance columns and indexes in schema, got: %s", schema)
 	}
-	if !strings.Contains(schema, "ALTER COLUMN %I TYPE TIMESTAMPTZ") ||
-		!strings.Contains(schema, "('case_generation_tasks', 'created_at')") ||
-		!strings.Contains(schema, "('background_jobs', 'started_at')") ||
-		!strings.Contains(schema, "('test_case_feedback', 'created_at')") {
-		t.Fatalf("expected diagnostic timestamps to migrate to timestamptz, got: %s", schema)
+	for table, columns := range map[string][]string{
+		"case_generation_tasks": {"created_at", "updated_at"},
+		"background_jobs":       {"run_after", "locked_at", "started_at", "finished_at", "created_at", "updated_at"},
+		"workflow_runs":         {"started_at", "finished_at", "created_at", "updated_at"},
+		"workflow_steps":        {"started_at", "finished_at", "created_at", "updated_at"},
+		"agent_runs":            {"started_at", "finished_at", "created_at", "updated_at"},
+		"model_calls":           {"started_at", "finished_at", "created_at", "updated_at"},
+		"retrieval_runs":        {"started_at", "finished_at", "created_at", "updated_at"},
+		"test_case_feedback":    {"created_at", "updated_at"},
+	} {
+		requireTimestampWithTimeZoneColumns(t, schema, table, columns)
 	}
-	if !strings.Contains(schema, "started_at = started_at - INTERVAL '8 hours'") ||
-		!strings.Contains(schema, "started_at > created_at + INTERVAL '6 hours'") {
-		t.Fatalf("expected bounded legacy job timestamp repair, got: %s", schema)
+	for _, legacyFragment := range []string{
+		"INTERVAL '8 hours'",
+		"INTERVAL '6 hours'",
+		"INTERVAL '10 hours'",
+		"ALTER COLUMN %I TYPE TIMESTAMPTZ",
+		"timestamp without time zone",
+	} {
+		if strings.Contains(schema, legacyFragment) {
+			t.Fatalf("schema must not contain legacy diagnostic timestamp migration %q", legacyFragment)
+		}
+	}
+}
+
+func requireTimestampWithTimeZoneColumns(t *testing.T, schema, table string, columns []string) {
+	t.Helper()
+	tablePattern := regexp.MustCompile(`(?s)CREATE TABLE IF NOT EXISTS ` + regexp.QuoteMeta(table) + ` \((.*?)\n\);`)
+	match := tablePattern.FindStringSubmatch(schema)
+	if len(match) != 2 {
+		t.Fatalf("expected CREATE TABLE block for %s", table)
+	}
+	for _, column := range columns {
+		columnPattern := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(column) + `\s+TIMESTAMPTZ(?:\s|,)`)
+		if !columnPattern.MatchString(match[1]) {
+			t.Errorf("expected %s.%s to be declared as TIMESTAMPTZ", table, column)
+		}
 	}
 }

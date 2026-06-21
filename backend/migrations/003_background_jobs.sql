@@ -9,12 +9,12 @@ CREATE TABLE IF NOT EXISTS background_jobs (
     retry_count INTEGER NOT NULL DEFAULT 0,
     max_retries INTEGER NOT NULL DEFAULT 2,
     last_error TEXT,
-    run_after TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    locked_at TIMESTAMP,
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    run_after TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    locked_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT background_jobs_type_check
         CHECK (job_type IN ('analyze', 'generate')),
     CONSTRAINT background_jobs_status_check

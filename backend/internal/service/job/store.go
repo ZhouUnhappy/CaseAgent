@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"caseagent/internal/clock"
 	tenantdb "caseagent/internal/db"
 	"caseagent/internal/db/models"
 	workflowservice "caseagent/internal/service/workflow"
@@ -56,7 +57,7 @@ func (s *BunStore) RecoverStale(ctx context.Context, timeout time.Duration) (int
 		return 0, err
 	}
 
-	cutoff := time.Now().Add(-timeout)
+	cutoff := clock.Now().Add(-timeout)
 	recovered := 0
 	for _, tenantID := range tenantIDs {
 		if err := s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
@@ -126,8 +127,8 @@ func (s *BunStore) RunInTenantTx(ctx context.Context, tenantID int, fn func(cont
 
 func (s *BunStore) MarkSucceeded(ctx context.Context, tenantID int, jobID int) error {
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		now := time.Now()
-		_, err := tx.NewUpdate().
+		now := clock.Now()
+		result, err := tx.NewUpdate().
 			Model((*models.BackgroundJob)(nil)).
 			Set("status = ?", models.JobStatusSucceeded).
 			Set("locked_at = NULL").
@@ -136,13 +137,20 @@ func (s *BunStore) MarkSucceeded(ctx context.Context, tenantID int, jobID int) e
 			Where("id = ?", jobID).
 			Where("status = ?", models.JobStatusRunning).
 			Exec(ctx)
-		return err
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil || updated == 0 {
+			return err
+		}
+		return touchJobTask(ctx, tx, jobID, now)
 	})
 }
 
 func (s *BunStore) MarkRetry(ctx context.Context, tenantID int, job *models.BackgroundJob, lastErr error, runAfter time.Time) error {
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		now := time.Now()
+		now := clock.Now()
 		_, err := tx.NewUpdate().
 			Model((*models.BackgroundJob)(nil)).
 			Set("status = ?", models.JobStatusPending).
@@ -160,8 +168,8 @@ func (s *BunStore) MarkRetry(ctx context.Context, tenantID int, job *models.Back
 
 func (s *BunStore) MarkFailed(ctx context.Context, tenantID int, jobID int, lastErr error) error {
 	return s.RunInTenantTx(ctx, tenantID, func(ctx context.Context, tx bun.Tx) error {
-		now := time.Now()
-		_, err := tx.NewUpdate().
+		now := clock.Now()
+		result, err := tx.NewUpdate().
 			Model((*models.BackgroundJob)(nil)).
 			Set("status = ?", models.JobStatusFailed).
 			Set("last_error = ?", errorString(lastErr)).
@@ -171,8 +179,24 @@ func (s *BunStore) MarkFailed(ctx context.Context, tenantID int, jobID int, last
 			Where("id = ?", jobID).
 			Where("status = ?", models.JobStatusRunning).
 			Exec(ctx)
-		return err
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil || updated == 0 {
+			return err
+		}
+		return touchJobTask(ctx, tx, jobID, now)
 	})
+}
+
+func touchJobTask(ctx context.Context, tx bun.Tx, jobID int, now time.Time) error {
+	_, err := tx.NewUpdate().
+		Model((*models.CaseGenerationTask)(nil)).
+		Set("updated_at = ?", now).
+		Where("id = (SELECT task_id FROM background_jobs WHERE id = ? AND task_id IS NOT NULL)", jobID).
+		Exec(ctx)
+	return err
 }
 
 func (s *BunStore) StartWorkflow(ctx context.Context, job *models.BackgroundJob) (int, int, error) {

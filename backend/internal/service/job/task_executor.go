@@ -3,8 +3,8 @@ package job
 import (
 	"context"
 	"fmt"
-	"time"
 
+	"caseagent/internal/clock"
 	"caseagent/internal/db/models"
 	documentservice "caseagent/internal/service/document"
 	knowledgeservice "caseagent/internal/service/knowledge"
@@ -86,7 +86,7 @@ func (e *TaskExecutor) HandleFailure(ctx context.Context, tx bun.Tx, job *models
 		}
 		_, err = tx.NewUpdate().Model(&models.Document{}).
 			Set("status = ?", models.DocumentStatusFailed).
-			Set("updated_at = ?", time.Now()).
+			Set("updated_at = ?", clock.Now()).
 			Where("id = ?", docID).
 			Exec(ctx)
 		return err
@@ -97,7 +97,7 @@ func (e *TaskExecutor) HandleFailure(ctx context.Context, tx bun.Tx, job *models
 		}
 		_, err = tx.NewUpdate().Model(&models.KnowledgeBase{}).
 			Set("status = ?", models.KnowledgeStatusFailed).
-			Set("updated_at = ?", time.Now()).
+			Set("updated_at = ?", clock.Now()).
 			Where("id = ?", kbID).
 			Exec(ctx)
 		return err

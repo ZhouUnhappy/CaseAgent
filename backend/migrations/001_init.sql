@@ -78,8 +78,8 @@ CREATE TABLE IF NOT EXISTS case_generation_tasks (
     affected_products JSONB, -- ['product1', 'product2']
     affected_modules JSONB, -- ['module1', 'module2']
     status VARCHAR(50) DEFAULT 'analyzing', -- 'analyzing', 'awaiting_review', 'ready_to_generate', 'generating', 'completed', 'failed'
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS case_generation_tasks_tenant_id_idx
     ON case_generation_tasks (tenant_id);

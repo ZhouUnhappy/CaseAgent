@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"caseagent/internal/clock"
 	"caseagent/internal/db/models"
 
 	"github.com/gin-gonic/gin"
@@ -150,7 +151,7 @@ func (h *Handler) RetryJob(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
+	now := clock.Now()
 	if _, err := DBFromContext(c).NewUpdate().
 		Model((*models.BackgroundJob)(nil)).
 		Set("status = ?", models.JobStatusPending).
@@ -196,7 +197,7 @@ func (h *Handler) CancelJob(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
+	now := clock.Now()
 	if _, err := DBFromContext(c).NewUpdate().
 		Model((*models.BackgroundJob)(nil)).
 		Set("status = ?", models.JobStatusCanceled).
@@ -244,7 +245,7 @@ func (h *Handler) ReplayJob(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
+	now := clock.Now()
 	payload := clonePayload(job.Payload)
 	payload["replayed_from_job_id"] = job.ID
 	payload["intervention"] = "replay"
@@ -459,7 +460,7 @@ func recordJobIntervention(c *gin.Context, job models.BackgroundJob, action stri
 		ResourceID:    &resourceID,
 		Name:          "job " + action,
 		Payload:       payload,
-		CreatedAt:     time.Now(),
+		CreatedAt:     clock.Now(),
 	}
 	_, err := DBFromContext(c).NewInsert().Model(artifact).Exec(c.Request.Context())
 	return err

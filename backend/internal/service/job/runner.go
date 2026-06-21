@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"caseagent/internal/clock"
 	"caseagent/internal/db/models"
 	workflowservice "caseagent/internal/service/workflow"
 
@@ -215,7 +216,7 @@ func (r *Runner) process(ctx context.Context, job *models.BackgroundJob) {
 
 	if job.RetryCount < job.MaxRetries && shouldRetry(err) {
 		r.finishWorkflow(job, workflow, workflowservice.TransitionFail, err)
-		nextRun := time.Now().Add(r.options.RetryBackoff)
+		nextRun := clock.Now().Add(r.options.RetryBackoff)
 		if markErr := r.markRetry(job, err, nextRun); markErr != nil {
 			slog.Error("background job retry mark failed",
 				"job_id", job.ID,

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"caseagent/internal/clock"
 	tenantdb "caseagent/internal/db"
 	"caseagent/internal/db/models"
 
@@ -166,7 +167,7 @@ func (s *Service) StartJobRun(ctx context.Context, input StartJobRunInput) (*mod
 		return nil, nil, fmt.Errorf("start workflow: job %d has no resource id", input.Job.ID)
 	}
 
-	now := time.Now()
+	now := clock.Now()
 	metadata := map[string]any{"retry_count": input.Job.RetryCount, "max_retries": input.Job.MaxRetries}
 	if len(input.Job.Payload) > 0 {
 		metadata["payload"] = input.Job.Payload
@@ -250,7 +251,7 @@ func (s *Service) FinishRunAndStep(ctx context.Context, runID int, stepID int, i
 		}
 	}
 
-	now := time.Now()
+	now := clock.Now()
 	if stepID > 0 {
 		update := s.db.NewUpdate().
 			Model((*models.WorkflowStep)(nil)).
@@ -277,7 +278,7 @@ func (s *Service) RecordAgentRun(ctx context.Context, input AgentRunInput) (*mod
 	if !ok {
 		return nil, fmt.Errorf("record agent run: no tenant in context")
 	}
-	now := time.Now()
+	now := clock.Now()
 	startedAt := now
 	finishedAt := now
 	row := &models.AgentRun{
@@ -307,7 +308,7 @@ func (s *Service) StartAgentRun(ctx context.Context, input StartAgentRunInput) (
 	if !ok {
 		return nil, fmt.Errorf("start agent run: no tenant in context")
 	}
-	now := time.Now()
+	now := clock.Now()
 	startedAt := now
 	row := &models.AgentRun{
 		TenantID:      tenantID,
@@ -332,7 +333,7 @@ func (s *Service) FinishAgentRun(ctx context.Context, agentRunID int, input Fini
 	if agentRunID <= 0 {
 		return nil
 	}
-	now := time.Now()
+	now := clock.Now()
 	status := normalizeStatus(input.Status)
 	_, err := s.db.NewUpdate().
 		Model((*models.AgentRun)(nil)).
@@ -352,7 +353,7 @@ func (s *Service) RecordRetrievalRun(ctx context.Context, input RetrievalRunInpu
 	if !ok {
 		return nil, fmt.Errorf("record retrieval run: no tenant in context")
 	}
-	now := time.Now()
+	now := clock.Now()
 	startedAt := now
 	finishedAt := now
 	row := &models.RetrievalRun{
@@ -380,7 +381,7 @@ func (s *Service) RecordModelCall(ctx context.Context, input ModelCallInput) (*m
 	if !ok {
 		return nil, fmt.Errorf("record model call: no tenant in context")
 	}
-	now := time.Now()
+	now := clock.Now()
 	startedAt := now
 	finishedAt := now
 	row := &models.ModelCall{
@@ -420,7 +421,7 @@ func (s *Service) RecordArtifact(ctx context.Context, input ArtifactInput) (*mod
 		Name:           input.Name,
 		Content:        input.Content,
 		Payload:        defaultMap(input.Payload),
-		CreatedAt:      time.Now(),
+		CreatedAt:      clock.Now(),
 	}
 	if _, err := s.db.NewInsert().Model(row).Exec(ctx); err != nil {
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"caseagent/internal/clock"
 	"caseagent/internal/db/models"
 	feedbackservice "caseagent/internal/service/feedback"
 
@@ -118,7 +119,7 @@ func (h *Handler) GetTaskDiagnostics(c *gin.Context) {
 	diagnosticCases := buildDiagnosticTestCases(testCases)
 	diagnosticTrace := redactDiagnosticsTrace(view)
 	c.JSON(http.StatusOK, taskDiagnosticsPackage{
-		GeneratedAt: time.Now(),
+		GeneratedAt: clock.Now(),
 		Task:        task,
 		TestCases:   diagnosticCases,
 		Trace:       diagnosticTrace,

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
+	"caseagent/internal/clock"
 	"caseagent/internal/db"
 	"caseagent/internal/db/models"
 
@@ -53,7 +53,7 @@ func (s *Service) CreateTask(ctx context.Context, projectID int, documentIDs []i
 	}
 
 	tenantID, _ := db.TenantFromContext(ctx)
-	now := time.Now()
+	now := clock.Now()
 	task := &models.CaseGenerationTask{
 		TenantID:    tenantID,
 		ProjectID:   projectID,
@@ -84,7 +84,7 @@ func (s *Service) ReviewAffected(ctx context.Context, taskID int, products []str
 	task.AffectedProducts = products
 	task.AffectedModules = modules
 	task.Status = models.TaskStatusReadyToGenerate
-	task.UpdatedAt = time.Now()
+	task.UpdatedAt = clock.Now()
 
 	if _, err := s.db.NewUpdate().Model(task).Where("id = ?", taskID).Exec(ctx); err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (s *Service) StartGeneration(ctx context.Context, taskID int) (*models.Case
 	}
 
 	task.Status = models.TaskStatusGenerating
-	task.UpdatedAt = time.Now()
+	task.UpdatedAt = clock.Now()
 
 	updateResult, err := s.db.NewUpdate().
 		Model(task).
@@ -139,7 +139,7 @@ func (s *Service) RetryTask(ctx context.Context, taskID int) (*RetryDecision, er
 	} else {
 		task.Status = models.TaskStatusReadyToGenerate
 	}
-	task.UpdatedAt = time.Now()
+	task.UpdatedAt = clock.Now()
 
 	if _, err := s.db.NewUpdate().Model(task).
 		Set("status = ?", task.Status).

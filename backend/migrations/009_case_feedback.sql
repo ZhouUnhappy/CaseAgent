@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS test_case_feedback (
     prompt_version VARCHAR(64),
     model_call_id INTEGER REFERENCES model_calls(id) ON DELETE SET NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT test_case_feedback_case_index_check
         CHECK (case_index >= 0),
     CONSTRAINT test_case_feedback_type_check

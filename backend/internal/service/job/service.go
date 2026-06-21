@@ -3,8 +3,8 @@ package job
 import (
 	"context"
 	"fmt"
-	"time"
 
+	"caseagent/internal/clock"
 	tenantdb "caseagent/internal/db"
 	"caseagent/internal/db/models"
 
@@ -37,7 +37,7 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.Back
 		return nil, err
 	}
 
-	now := time.Now()
+	now := clock.Now()
 	job := &models.BackgroundJob{
 		TenantID:    tenantID,
 		TaskID:      optionalID(input.TaskID),

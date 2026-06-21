@@ -12,10 +12,10 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     status VARCHAR(32) NOT NULL DEFAULT 'pending',
     last_error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT workflow_runs_status_check
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled'))
 );
@@ -40,10 +40,10 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
     status VARCHAR(32) NOT NULL DEFAULT 'pending',
     last_error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT workflow_steps_status_check
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled'))
 );
@@ -63,10 +63,10 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     output_summary TEXT,
     last_error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT agent_runs_status_check
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled'))
 );
@@ -88,10 +88,10 @@ CREATE TABLE IF NOT EXISTS model_calls (
     response_chars INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT model_calls_status_check
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled')),
     CONSTRAINT model_calls_size_check
@@ -114,10 +114,10 @@ CREATE TABLE IF NOT EXISTS retrieval_runs (
     hit_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT retrieval_runs_status_check
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled')),
     CONSTRAINT retrieval_runs_count_check
