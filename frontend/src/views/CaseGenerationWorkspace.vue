@@ -11,6 +11,7 @@ import { useDocumentsStore } from '../stores/documents'
 import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
 import { statusLabel } from '../utils/status'
@@ -86,6 +87,12 @@ const taskStatusText = computed(() => {
 })
 const latestSelectedJob = computed(() => latestJob(selectedTaskJobs.value))
 const selectedJobError = computed(() => compactJobError(findSelectedJobWithError()))
+const showWorkspaceDiagnostics = computed(() => {
+  const taskStatus = task.value?.status || ''
+  const jobStatus = latestSelectedJob.value?.status || ''
+  return ['analyzing', 'generating', 'failed'].includes(taskStatus) ||
+    ['pending', 'retrying', 'running', 'failed', 'canceled'].includes(jobStatus)
+})
 const workspaceTimeline = computed(() => {
   if (!task.value) return []
   const rows = [
@@ -187,12 +194,12 @@ const primaryAction = computed(() => {
   }
   if (cases.value.length) {
     return {
-      label: '导出 JSON',
-      icon: Download,
+      label: '审核用例',
+      icon: View,
       type: 'primary',
       disabled: false,
       loading: false,
-      handler: exportCases,
+      handler: openTaskDetail,
     }
   }
   return {
@@ -493,10 +500,6 @@ function openTaskDetail() {
   router.push({ name: 'task-detail', params: { id: selectedTaskId.value } })
 }
 
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '-'
-}
-
 function priorityLabel(id) {
   return { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' }[id] || `P${id}`
 }
@@ -774,7 +777,7 @@ function findSelectedJobWithError() {
             class="inline-alert"
           />
 
-          <el-collapse v-if="task" class="workspace-diagnostics">
+          <el-collapse v-if="showWorkspaceDiagnostics" class="workspace-diagnostics">
             <el-collapse-item name="jobs">
               <template #title>
                 <span class="diagnostic-title">诊断信息</span>

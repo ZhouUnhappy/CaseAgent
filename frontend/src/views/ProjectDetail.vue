@@ -10,6 +10,7 @@ import { listJobs } from '../api/jobs'
 import { getProject } from '../api/projects'
 import { useDocumentsStore } from '../stores/documents'
 import { useTasksStore } from '../stores/tasks'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel, latestJob } from '../utils/jobs'
 
@@ -47,10 +48,6 @@ async function refresh() {
   ])
   loadDocumentJobs().catch(() => {})
   loadTaskJobs().catch(() => {})
-}
-
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '-'
 }
 
 function openUpload() {

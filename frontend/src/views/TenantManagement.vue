@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Check, EditPen, FolderOpened, Plus, Refresh, Switch } from '@element-plus/icons-vue'
 import { useTenantStore } from '../stores/tenant'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 
 const tenantStore = useTenantStore()
@@ -22,10 +23,6 @@ const visibleTenants = computed(() =>
 onMounted(() => {
   refreshTenants()
 })
-
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '-'
-}
 
 function refreshTenants() {
   tenantStore.fetch({ includeArchived: true }).catch(() => {})
@@ -119,7 +116,7 @@ function setDefault(row) {
       <div class="header-actions">
         <el-switch v-model="showArchived" active-text="显示归档" />
         <el-button :icon="Refresh" :loading="loading" @click="refreshTenants">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreate">新建</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreate">新建租户</el-button>
       </div>
     </header>
 
@@ -148,30 +145,38 @@ function setDefault(row) {
       </el-table-column>
       <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
-          <el-tooltip content="切换到该租户" placement="top">
+          <el-tooltip v-if="!row.archived_at && row.slug !== currentSlug" content="切换到该租户" placement="top">
             <el-button
               :icon="Switch"
+              :aria-label="`切换到租户 ${row.name}`"
               size="small"
               circle
-              :disabled="Boolean(row.archived_at) || row.slug === currentSlug"
               @click="selectTenant(row)"
             />
           </el-tooltip>
-          <el-tooltip content="设为默认" placement="top">
+          <el-tooltip v-if="!row.archived_at && row.slug !== defaultSlug" content="设为默认" placement="top">
             <el-button
               :icon="Check"
+              :aria-label="`将租户 ${row.name} 设为默认`"
               size="small"
               circle
-              :disabled="Boolean(row.archived_at) || row.slug === defaultSlug"
               @click="setDefault(row)"
             />
           </el-tooltip>
           <el-tooltip content="重命名" placement="top">
-            <el-button :icon="EditPen" size="small" circle :loading="savingSlug === row.slug" @click="openEdit(row)" />
+            <el-button
+              :icon="EditPen"
+              :aria-label="`重命名租户 ${row.name}`"
+              size="small"
+              circle
+              :loading="savingSlug === row.slug"
+              @click="openEdit(row)"
+            />
           </el-tooltip>
           <el-tooltip :content="row.archived_at ? '恢复' : '归档'" placement="top">
             <el-button
               :icon="FolderOpened"
+              :aria-label="`${row.archived_at ? '恢复' : '归档'}租户 ${row.name}`"
               size="small"
               circle
               :type="row.archived_at ? 'success' : 'warning'"

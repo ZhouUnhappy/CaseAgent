@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import StatusTag from '../components/StatusTag.vue'
 import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
 import { writeSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 import { knowledgeTypeLabel } from '../utils/labels'
 
@@ -13,10 +14,6 @@ const store = useKnowledgeSuggestionsStore()
 const { items, loading, saving, draftingId, statusFilter, showAutoExpired } = storeToRefs(store)
 
 onMounted(() => store.fetch().catch(() => {}))
-
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '-'
-}
 
 function snippetText(snippet) {
   if (!snippet) return ''

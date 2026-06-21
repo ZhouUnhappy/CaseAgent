@@ -6,6 +6,7 @@ import {
   batchUpdateTestCases,
   batchSubmitTestCases,
   createCaseFeedback,
+  createBatchCaseFeedback,
 } from '../api/testcases'
 
 export const useTestCasesStore = defineStore('testcases', {
@@ -64,6 +65,14 @@ export const useTestCasesStore = defineStore('testcases', {
       this.feedbackSaving = true
       try {
         return await createCaseFeedback(taskId, caseId, payload)
+      } finally {
+        this.feedbackSaving = false
+      }
+    },
+    async batchFeedback(taskId, payload) {
+      this.feedbackSaving = true
+      try {
+        return await createBatchCaseFeedback(taskId, payload)
       } finally {
         this.feedbackSaving = false
       }

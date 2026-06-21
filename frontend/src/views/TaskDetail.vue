@@ -25,6 +25,8 @@ import { useTasksStore } from '../stores/tasks'
 import { useTestCasesStore } from '../stores/testcases'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { useKnowledgeSuggestionsStore } from '../stores/knowledgeSuggestions'
+import { useTenantStore } from '../stores/tenant'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 import { compactJobError, jobStatusLabel, jobStatusType, jobTypeLabel } from '../utils/jobs'
 import { knowledgeTypeLabel } from '../utils/labels'
@@ -37,6 +39,7 @@ const tasksStore = useTasksStore()
 const casesStore = useTestCasesStore()
 const knowledgeStore = useKnowledgeStore()
 const suggestionStore = useKnowledgeSuggestionsStore()
+const tenantStore = useTenantStore()
 
 const { current: task } = storeToRefs(tasksStore)
 const {
@@ -69,6 +72,9 @@ const expandedSections = ref([])
 const expandedCaseRows = ref({})
 const overviewExpanded = ref(true)
 const advancedFiltersVisible = ref(false)
+const focusedCaseKey = ref('')
+const reviewViewReady = ref(false)
+const restoredFocusApplied = ref(false)
 const activeTaskView = ref('review')
 const provenanceTab = ref('sources')
 const caseEditorVisible = ref(false)
@@ -171,7 +177,18 @@ const passedCaseCount = computed(() =>
     0,
   ),
 )
-const issueCaseCount = computed(() => reviewedCaseCount.value - passedCaseCount.value)
+const resolvedCaseCount = computed(() =>
+  cases.value.reduce(
+    (sum, section) => sum + (section.cases || []).filter((row, index) => caseReviewState(section, row, index) === 'resolved').length,
+    0,
+  ),
+)
+const issueCaseCount = computed(() =>
+  cases.value.reduce(
+    (sum, section) => sum + (section.cases || []).filter((row, index) => caseReviewState(section, row, index) === 'issue').length,
+    0,
+  ),
+)
 const hasAdvancedCaseFilters = computed(() =>
   Boolean(
     caseFilters.priority_id ||
@@ -318,6 +335,8 @@ const traceCostSummary = computed(() => {
 })
 
 onMounted(async () => {
+  restoreReviewViewState()
+  reviewViewReady.value = true
   await loadTask()
   knowledgeStore.fetch().catch(() => {})
 })
@@ -325,12 +344,33 @@ onUnmounted(() => stopPolling())
 
 watch(taskId, () => {
   stopPolling()
+  reviewViewReady.value = false
+  restoredFocusApplied.value = false
   casesStore.clear()
   clearSelectedCases()
   selectedSectionIds.value = []
+  resetCaseFilters()
+  overviewExpanded.value = true
+  advancedFiltersVisible.value = false
+  focusedCaseKey.value = ''
   clearCaseExpansion()
+  restoreReviewViewState()
+  reviewViewReady.value = true
   loadTask()
 })
+
+watch(
+  [
+    overviewExpanded,
+    advancedFiltersVisible,
+    expandedSections,
+    expandedCaseRows,
+    focusedCaseKey,
+    () => ({ ...caseFilters }),
+  ],
+  () => persistReviewViewState(),
+  { deep: true },
+)
 
 watch(
   () => task.value?.status,
@@ -359,7 +399,7 @@ async function loadTask() {
     reviewForm.products = [...(t.affected_products || [])]
     reviewForm.modules = [...(t.affected_modules || [])]
     if (['completed', 'failed'].includes(t.status)) {
-      refreshCases().catch(() => {})
+      await refreshCases()
     } else {
       casesStore.clear()
     }
@@ -392,6 +432,8 @@ async function refreshCases() {
   selectedSectionIds.value = selectedSectionIds.value.filter((id) =>
     cases.value.some((section) => section.id === id && !['submitted', 'approved'].includes(section.status)),
   )
+  pruneReviewViewState()
+  await restoreFocusedCase()
 }
 
 function ensurePolling() {
@@ -449,10 +491,6 @@ async function retryTask() {
   } finally {
     retrying.value = false
   }
-}
-
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '-'
 }
 
 function findLastJobWithError() {
@@ -539,23 +577,31 @@ function latestCaseFeedback(section, row, index) {
 function caseReviewState(section, row, index) {
   const feedback = latestCaseFeedback(section, row, index)
   if (!feedback) return 'pending'
-  return feedback.feedback_type === 'useful' ? 'passed' : 'issue'
+  if (feedback.feedback_type === 'useful') return 'passed'
+  if (feedback.feedback_type === 'duplicate' && row.duplicate_hidden) return 'resolved'
+  return 'issue'
 }
 
 function caseReviewLabel(section, row, index) {
-  return { pending: '待审核', passed: '已通过', issue: '有问题' }[caseReviewState(section, row, index)]
+  return { pending: '待审核', passed: '已通过', resolved: '已解决', issue: '有问题' }[caseReviewState(section, row, index)]
 }
 
 function caseReviewTagType(section, row, index) {
-  return { pending: 'info', passed: 'success', issue: 'warning' }[caseReviewState(section, row, index)]
+  return { pending: 'info', passed: 'success', resolved: 'success', issue: 'warning' }[caseReviewState(section, row, index)]
 }
 
 function sectionPendingReviewCount(section) {
   return (section.cases || []).filter((row, index) => caseReviewState(section, row, index) === 'pending').length
 }
 
+function sectionUnresolvedReviewCount(section) {
+  return (section.cases || []).filter((row, index) => caseReviewState(section, row, index) === 'issue').length
+}
+
 function canSelectSection(section) {
-  return !['submitted', 'approved'].includes(section.status) && sectionPendingReviewCount(section) === 0
+  return !['submitted', 'approved'].includes(section.status) &&
+    sectionPendingReviewCount(section) === 0 &&
+    sectionUnresolvedReviewCount(section) === 0
 }
 
 function matchesCaseFilters(section, row, index) {
@@ -598,6 +644,94 @@ function caseHasSources(section, row, index) {
   )
 }
 
+function reviewViewStorageKey() {
+  return `caseagent.review-view.v1:${tenantStore.currentSlug || 'default'}:${taskId.value}`
+}
+
+function restoreReviewViewState() {
+  let saved
+  try {
+    saved = JSON.parse(localStorage.getItem(reviewViewStorageKey()) || 'null')
+  } catch {
+    localStorage.removeItem(reviewViewStorageKey())
+    return
+  }
+  if (!saved || saved.version !== 1) return
+
+  const allowedFilters = [
+    'keyword',
+    'section',
+    'priority_id',
+    'product',
+    'module',
+    'feedback_type',
+    'review_status',
+    'provenance',
+    'hide_duplicates',
+  ]
+  for (const key of allowedFilters) {
+    if (Object.prototype.hasOwnProperty.call(saved.caseFilters || {}, key)) {
+      caseFilters[key] = saved.caseFilters[key]
+    }
+  }
+  overviewExpanded.value = saved.overviewExpanded !== false
+  advancedFiltersVisible.value = Boolean(saved.advancedFiltersVisible)
+  expandedSections.value = Array.isArray(saved.expandedSections) ? saved.expandedSections.map(Number).filter(Number.isInteger) : []
+  expandedCaseRows.value = saved.expandedCaseRows && typeof saved.expandedCaseRows === 'object'
+    ? saved.expandedCaseRows
+    : {}
+  focusedCaseKey.value = typeof saved.focusedCaseKey === 'string' ? saved.focusedCaseKey : ''
+}
+
+function persistReviewViewState() {
+  if (!reviewViewReady.value) return
+  localStorage.setItem(reviewViewStorageKey(), JSON.stringify({
+    version: 1,
+    caseFilters: { ...caseFilters },
+    overviewExpanded: overviewExpanded.value,
+    advancedFiltersVisible: advancedFiltersVisible.value,
+    expandedSections: [...expandedSections.value],
+    expandedCaseRows: { ...expandedCaseRows.value },
+    focusedCaseKey: focusedCaseKey.value,
+  }))
+}
+
+function pruneReviewViewState() {
+  const validSections = new Map(cases.value.map((section) => [section.id, section]))
+  expandedSections.value = expandedSections.value.filter((id) => validSections.has(Number(id)))
+
+  const validExpandedRows = {}
+  for (const [rawSectionID, keys] of Object.entries(expandedCaseRows.value || {})) {
+    const sectionID = Number(rawSectionID)
+    const section = validSections.get(sectionID)
+    if (!section || !Array.isArray(keys)) continue
+    const validKeys = new Set((section.cases || []).map((row, index) => `${sectionID}:${index}`))
+    validExpandedRows[sectionID] = keys.filter((key) => validKeys.has(key))
+  }
+  expandedCaseRows.value = validExpandedRows
+
+  if (focusedCaseKey.value) {
+    const [rawSectionID, rawCaseIndex] = focusedCaseKey.value.split(':')
+    const section = validSections.get(Number(rawSectionID))
+    const caseIndex = Number(rawCaseIndex)
+    if (!section || !Number.isInteger(caseIndex) || caseIndex < 0 || caseIndex >= (section.cases || []).length) {
+      focusedCaseKey.value = ''
+    }
+  }
+}
+
+async function restoreFocusedCase() {
+  if (restoredFocusApplied.value) return
+  restoredFocusApplied.value = true
+  if (!focusedCaseKey.value) return
+  const [rawSectionID, rawCaseIndex] = focusedCaseKey.value.split(':')
+  const section = cases.value.find((item) => item.id === Number(rawSectionID))
+  const caseIndex = Number(rawCaseIndex)
+  const row = section?.cases?.[caseIndex]
+  if (!section || !row) return
+  await focusCase(section, { ...row, __case_index: caseIndex }, 'auto')
+}
+
 function resetCaseFilters() {
   Object.assign(caseFilters, {
     keyword: '',
@@ -610,6 +744,19 @@ function resetCaseFilters() {
     provenance: '',
     hide_duplicates: true,
   })
+}
+
+async function resetReviewView() {
+  reviewViewReady.value = false
+  localStorage.removeItem(reviewViewStorageKey())
+  resetCaseFilters()
+  overviewExpanded.value = true
+  advancedFiltersVisible.value = false
+  focusedCaseKey.value = ''
+  clearCaseExpansion()
+  await nextTick()
+  reviewViewReady.value = true
+  notifySuccess('审核视图已重置')
 }
 
 function sectionCaseRows(section) {
@@ -691,11 +838,12 @@ function clearCaseExpansion() {
   expandedCaseRows.value = {}
 }
 
-async function focusCase(section, row) {
+async function focusCase(section, row, behavior = 'smooth') {
+  focusedCaseKey.value = caseRowKey(section, row)
   ensureSectionExpanded(section)
   onCaseExpandChange(section, row, true)
   await nextTick()
-  document.getElementById(caseAnchorId(section, row))?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  document.getElementById(caseAnchorId(section, row))?.scrollIntoView({ behavior, block: 'center' })
 }
 
 function onCaseSelectionChange(section, selection) {
@@ -840,8 +988,13 @@ async function saveEditor() {
 
 async function submitSection(section) {
   const pendingCount = sectionPendingReviewCount(section)
+  const unresolvedCount = sectionUnresolvedReviewCount(section)
   if (pendingCount > 0) {
     await ElMessageBox.alert(`类别「${section.section}」还有 ${pendingCount} 条用例待审核，全部审核后才能提交。`)
+    return
+  }
+  if (unresolvedCount > 0) {
+    await ElMessageBox.alert(`类别「${section.section}」还有 ${unresolvedCount} 条问题用例未解决。请编辑后重新标记通过，或完成重复项处置。`)
     return
   }
   if (!showCaseValidationResult(validateSection(section))) return
@@ -871,8 +1024,13 @@ async function submitSelectedSections() {
   }
   const sections = cases.value.filter((section) => ids.includes(section.id))
   const pendingCount = sections.reduce((sum, section) => sum + sectionPendingReviewCount(section), 0)
+  const unresolvedCount = sections.reduce((sum, section) => sum + sectionUnresolvedReviewCount(section), 0)
   if (pendingCount > 0) {
     await ElMessageBox.alert(`已选类别还有 ${pendingCount} 条用例待审核，全部审核后才能提交。`)
+    return
+  }
+  if (unresolvedCount > 0) {
+    await ElMessageBox.alert(`已选类别还有 ${unresolvedCount} 条问题用例未解决，处理完成后才能提交。`)
     return
   }
   if (!showCaseValidationResult(sections.flatMap((section) => validateSection(section)))) return
@@ -921,13 +1079,11 @@ async function hideSelectedDuplicates() {
     return
   }
   try {
-    await Promise.all(selectedCases.value.map((item) =>
-      casesStore.feedback(taskId.value, item.test_case_id, {
-        case_index: item.case_index,
-        feedback_type: 'duplicate',
-        note: '批量标记为重复用例',
-      }),
-    ))
+    await casesStore.batchFeedback(taskId.value, {
+      cases: selectedCases.value.map(({ test_case_id, case_index }) => ({ test_case_id, case_index })),
+      feedback_type: 'duplicate',
+      note: '批量标记为重复用例',
+    })
     await casesStore.batchUpdate(taskId.value, {
       cases: selectedCases.value.map(({ test_case_id, case_index }) => ({ test_case_id, case_index })),
       patch: { duplicate_hidden: true },
@@ -937,6 +1093,30 @@ async function hideSelectedDuplicates() {
     loadTrace().catch(() => {})
   } catch {
     /* 错误已弹窗 */
+  }
+}
+
+async function passSelectedCases() {
+  if (!selectedCaseCount.value) {
+    ElMessageBox.alert('请先选择用例')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`将选中的 ${selectedCaseCount.value} 条用例标记为通过？`, '批量通过', { type: 'info' })
+  } catch {
+    return
+  }
+  try {
+    await casesStore.batchFeedback(taskId.value, {
+      cases: selectedCases.value.map(({ test_case_id, case_index }) => ({ test_case_id, case_index })),
+      feedback_type: 'useful',
+      note: '批量审核通过',
+    })
+    clearSelectedCases()
+    await loadTrace()
+    notifySuccess('选中用例已批量通过')
+  } catch {
+    /* api/client.js 已弹错 */
   }
 }
 
@@ -1275,8 +1455,11 @@ async function submitKnowledgeFeedback() {
             <el-tag v-if="passedCaseCount" type="success" size="small">
               通过 {{ passedCaseCount }}
             </el-tag>
+            <el-tag v-if="resolvedCaseCount" type="success" effect="plain" size="small">
+              已解决 {{ resolvedCaseCount }}
+            </el-tag>
             <el-tag v-if="issueCaseCount" type="warning" size="small">
-              有问题 {{ issueCaseCount }}
+              未解决 {{ issueCaseCount }}
             </el-tag>
             <el-tag v-if="filteredCaseCount !== totalCaseCount" type="warning" size="small">
               当前显示 {{ filteredCaseCount }} 条
@@ -1381,6 +1564,7 @@ async function submitKnowledgeFeedback() {
             <el-select v-model="caseFilters.review_status" clearable placeholder="审核状态" class="filter-control">
               <el-option label="待审核" value="pending" />
               <el-option label="已通过" value="passed" />
+              <el-option label="已解决" value="resolved" />
               <el-option label="有问题" value="issue" />
             </el-select>
             <el-button
@@ -1389,7 +1573,8 @@ async function submitKnowledgeFeedback() {
               plain
               @click="advancedFiltersVisible = !advancedFiltersVisible"
             >{{ advancedFiltersVisible ? '收起筛选' : '更多筛选' }}</el-button>
-            <el-button @click="resetCaseFilters">重置</el-button>
+            <el-button @click="resetCaseFilters">重置筛选</el-button>
+            <el-button @click="resetReviewView">重置视图</el-button>
           </div>
 
           <div v-show="advancedFiltersVisible" class="filter-bar case-filter-bar advanced-filter-bar">
@@ -1445,6 +1630,7 @@ async function submitKnowledgeFeedback() {
             >
               <el-option v-for="item in moduleOptions" :key="item" :label="item" :value="item" />
             </el-select>
+            <el-button type="success" :icon="Check" :loading="feedbackSaving" @click="passSelectedCases">批量通过</el-button>
             <el-button :icon="EditPen" :loading="batchSaving" @click="applyBatchPatch">批量修改</el-button>
             <el-button :icon="Warning" :loading="batchSaving" @click="hideSelectedDuplicates">标记重复</el-button>
           </div>
@@ -1465,7 +1651,11 @@ async function submitKnowledgeFeedback() {
                 <el-checkbox
                   :model-value="isSectionSelected(section)"
                   :disabled="!canSelectSection(section)"
-                  :title="sectionPendingReviewCount(section) ? `还有 ${sectionPendingReviewCount(section)} 条待审核` : '选择类别提交'"
+                  :title="sectionPendingReviewCount(section)
+                    ? `还有 ${sectionPendingReviewCount(section)} 条待审核`
+                    : sectionUnresolvedReviewCount(section)
+                      ? `还有 ${sectionUnresolvedReviewCount(section)} 条问题未解决`
+                      : '选择类别提交'"
                   @change="(selected) => toggleSectionSelection(section, selected)"
                 />
               </span>
@@ -1476,7 +1666,12 @@ async function submitKnowledgeFeedback() {
               <el-tag v-if="sectionPendingReviewCount(section)" size="small" type="warning">
                 待审核 {{ sectionPendingReviewCount(section) }} 条
               </el-tag>
-              <el-tag v-else size="small" type="success">已全部审核</el-tag>
+              <el-tag v-if="sectionUnresolvedReviewCount(section)" size="small" type="danger">
+                未解决 {{ sectionUnresolvedReviewCount(section) }} 条
+              </el-tag>
+              <el-tag v-if="!sectionPendingReviewCount(section) && !sectionUnresolvedReviewCount(section)" size="small" type="success">
+                已可提交
+              </el-tag>
               <StatusTag :status="section.status" />
             </div>
           </template>
@@ -2034,6 +2229,7 @@ async function submitKnowledgeFeedback() {
               </div>
               <el-button
                 :icon="Delete"
+                :aria-label="`删除第 ${index + 1} 个步骤`"
                 circle
                 text
                 type="danger"

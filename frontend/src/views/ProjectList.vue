@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useProjectsStore } from '../stores/projects'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 
 const store = useProjectsStore()
@@ -39,10 +40,6 @@ async function submitCreate() {
   }
 }
 
-function formatDate(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
 </script>
 
 <template>

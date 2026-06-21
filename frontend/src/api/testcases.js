@@ -24,6 +24,10 @@ export function createCaseFeedback(taskId, caseId, payload) {
   return client.post(`/tasks/${taskId}/cases/${caseId}/feedback`, payload).then((r) => r.data)
 }
 
+export function createBatchCaseFeedback(taskId, payload) {
+  return client.post(`/tasks/${taskId}/cases/batch/feedback`, payload).then((r) => r.data)
+}
+
 export function listTaskFeedback(taskId) {
   return client.get(`/tasks/${taskId}/feedback`).then((r) => r.data)
 }

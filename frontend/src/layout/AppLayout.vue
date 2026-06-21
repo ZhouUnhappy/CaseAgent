@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor, OfficeBuilding } from '@element-plus/icons-vue'
 import { useTenantStore } from '../stores/tenant'
 
@@ -34,29 +33,6 @@ function onTenantChange(slug) {
   tenantStore.setCurrent(slug)
 }
 
-const createDialogVisible = ref(false)
-const createForm = ref({ slug: '', name: '' })
-
-function openCreateDialog() {
-  createForm.value = { slug: '', name: '' }
-  createDialogVisible.value = true
-}
-
-async function submitCreate() {
-  const { slug, name } = createForm.value
-  if (!slug || !name) {
-    ElMessage.warning('slug 和 name 都是必填')
-    return
-  }
-  try {
-    const created = await tenantStore.create({ slug, name })
-    ElMessage.success(`租户 ${created.slug} 已创建`)
-    createDialogVisible.value = false
-    tenantStore.setCurrent(created.slug)
-  } catch {
-    // notifyApiError already shown
-  }
-}
 </script>
 
 <template>
@@ -104,7 +80,6 @@ async function submitCreate() {
               :value="t.slug"
             />
           </el-select>
-          <el-button size="small" @click="openCreateDialog">新建租户</el-button>
         </div>
       </el-header>
       <el-main class="layout-main">
@@ -112,29 +87,6 @@ async function submitCreate() {
       </el-main>
     </el-container>
   </el-container>
-
-  <el-dialog
-    v-model="createDialogVisible"
-    title="新建租户"
-    width="420px"
-  >
-    <el-form label-width="80px">
-      <el-form-item label="slug" required>
-        <el-input v-model="createForm.slug" placeholder="例如 i1-smoke" />
-      </el-form-item>
-      <el-form-item label="名称" required>
-        <el-input v-model="createForm.name" placeholder="人类可读名称" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="createDialogVisible = false">取消</el-button>
-      <el-button
-        type="primary"
-        :loading="tenantStore.creating"
-        @click="submitCreate"
-      >创建</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <style scoped>

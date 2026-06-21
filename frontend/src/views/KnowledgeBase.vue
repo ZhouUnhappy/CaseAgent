@@ -9,6 +9,7 @@ import StatusTag from '../components/StatusTag.vue'
 import { updateKnowledgeSuggestion } from '../api/knowledgeSuggestions'
 import { useKnowledgeStore } from '../stores/knowledge'
 import { readAndClearSuggestionDraft } from '../utils/knowledgeSuggestionDraft'
+import { formatDateTime as formatDate } from '../utils/date'
 import { notifySuccess } from '../utils/error'
 import { knowledgeTypeLabel } from '../utils/labels'
 
@@ -74,10 +75,6 @@ async function refreshKnowledge() {
 
 async function changeTypeFilter(value) {
   await store.setTypeFilter(value)
-}
-
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '-'
 }
 
 function openCreate() {
