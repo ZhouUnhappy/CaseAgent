@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import { Download, Plus, Refresh, Upload, VideoPlay, View } from '@element-plus/icons-vue'
+import MarkdownPreview from '../components/MarkdownPreview.vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
 import { useProjectsStore } from '../stores/projects'
@@ -45,6 +46,8 @@ const projectForm = reactive({ name: '', description: '' })
 
 const uploadDialog = ref(false)
 const uploadForm = reactive({ name: '', file: null })
+const previewVisible = ref(false)
+const previewDocument = ref(null)
 
 const reviewForm = reactive({ products: [], modules: [] })
 
@@ -265,6 +268,12 @@ async function submitCreateProject() {
 function openUpload() {
   Object.assign(uploadForm, { name: '', file: null })
   uploadDialog.value = true
+}
+
+function openDocumentPreview(doc) {
+  if (doc.status !== 'completed' || !doc.content) return
+  previewDocument.value = doc
+  previewVisible.value = true
 }
 
 function onFileChange(file) {
@@ -551,7 +560,15 @@ function findSelectedJobWithError() {
                 class="doc-check"
               />
               <div class="doc-main">
-                <span>{{ doc.name }}</span>
+                <button
+                  type="button"
+                  class="doc-preview"
+                  :disabled="doc.status !== 'completed' || !doc.content"
+                  :title="doc.status === 'completed' && doc.content ? `预览 ${doc.name}` : '文档处理完成后可预览'"
+                  @click="openDocumentPreview(doc)"
+                >
+                  {{ doc.name }}
+                </button>
                 <small>#{{ doc.id }} · {{ formatDate(doc.updated_at) }}</small>
               </div>
               <StatusTag class="doc-status" :status="doc.status" />
@@ -828,6 +845,21 @@ function findSelectedJobWithError() {
         </el-collapse>
       </section>
     </div>
+
+    <el-drawer
+      v-model="previewVisible"
+      :title="previewDocument?.name || '参考文档预览'"
+      size="88%"
+      destroy-on-close
+      @closed="previewDocument = null"
+    >
+      <div v-if="previewDocument" class="preview-meta">
+        <el-tag size="small" type="info">{{ previewDocument.type }}</el-tag>
+        <StatusTag :status="previewDocument.status" />
+        <span class="preview-time">更新于 {{ formatDate(previewDocument.updated_at) }}</span>
+      </div>
+      <MarkdownPreview :content="previewDocument?.content || ''" />
+    </el-drawer>
 
     <el-dialog
       v-model="createProjectDialog"
@@ -1143,19 +1175,43 @@ function findSelectedJobWithError() {
   flex-direction: column;
   gap: 3px;
 }
-.doc-main span {
+.doc-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #111827;
+  color: #2563eb;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.doc-preview:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.doc-preview:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 .doc-main small {
   color: #94a3b8;
   font-size: 12px;
   line-height: 16px;
+}
+.preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.preview-time {
+  color: #909399;
 }
 .task-row {
   display: flex;
