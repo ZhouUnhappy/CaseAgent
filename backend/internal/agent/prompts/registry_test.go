@@ -64,19 +64,16 @@ func TestDefaultPromptsKeepFakeProviderSentinels(t *testing.T) {
 		id     ID
 		needle string
 	}{
-		{FunctionalCases, "功能测试专家"},
+		{FunctionalCases, "功能与输入域测试专家"},
 		{OpsCases, "运维测试专家"},
 		{FailureCases, "故障测试专家"},
-		{BoundaryCases, "边界测试专家"},
 		{DeepCases, "测试用例生成专家"},
-		{DeepRefineCases, "测试用例总协调 Agent"},
 	}
 
 	for _, tc := range cases {
 		rendered, err := DefaultRegistry().Render(tc.id, CasePromptData{
 			Requirements: "requirements",
 			Knowledge:    "knowledge",
-			DraftJSON:    "[]",
 		})
 		if err != nil {
 			t.Fatalf("Render(%s) returned error: %v", tc.id, err)
@@ -89,15 +86,19 @@ func TestDefaultPromptsKeepFakeProviderSentinels(t *testing.T) {
 
 func TestDefaultCasePromptsDistinguishEnumsFromBoundaries(t *testing.T) {
 	registry := DefaultRegistry()
-	data := CasePromptData{Requirements: "sizes: S/M/L/XL", Knowledge: "knowledge", DraftJSON: "[]"}
+	data := CasePromptData{Requirements: "sizes: S/M/L/XL", Knowledge: "knowledge"}
 
-	for _, id := range []ID{FunctionalCases, BoundaryCases, DeepCases, DeepRefineCases} {
+	for _, id := range []ID{FunctionalCases, DeepCases} {
 		rendered, err := registry.Render(id, data)
 		if err != nil {
 			t.Fatalf("Render(%s) returned error: %v", id, err)
 		}
-		if rendered.Version != "v2" {
-			t.Fatalf("Render(%s) version = %q, want v2", id, rendered.Version)
+		wantVersion := "v2"
+		if id == FunctionalCases {
+			wantVersion = "v3"
+		}
+		if rendered.Version != wantVersion {
+			t.Fatalf("Render(%s) version = %q, want %s", id, rendered.Version, wantVersion)
 		}
 		if !strings.Contains(rendered.Content, "S/M/L/XL") {
 			t.Fatalf("Render(%s) missing enum classification guidance", id)

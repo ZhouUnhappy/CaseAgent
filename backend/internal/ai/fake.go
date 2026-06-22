@@ -96,7 +96,7 @@ func promptContains(messages []*schema.Message, needle string) bool {
 
 func fakeJSONForPrompt(messages []*schema.Message) string {
 	switch {
-	case promptContains(messages, "总协调 Agent"), promptContains(messages, "测试用例生成专家"):
+	case promptContains(messages, "测试用例生成专家"):
 		return `[
   {
     "section": "功能测试",
@@ -116,8 +116,6 @@ func fakeJSONForPrompt(messages []*schema.Message) string {
 		return fakeSectionJSON("运维测试", "[Fake] ops path")
 	case promptContains(messages, "故障测试专家"):
 		return fakeSectionJSON("故障测试", "[Fake] failure path")
-	case promptContains(messages, "边界测试专家"):
-		return fakeSectionJSON("边界测试", "[Fake] boundary path")
 	default:
 		return fakeSectionJSON("功能测试", "[Fake] functional path")
 	}

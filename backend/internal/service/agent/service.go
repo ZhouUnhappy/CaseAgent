@@ -4,21 +4,17 @@
 // Responsibility split:
 //
 //   - Service (this package) is the *application-level coordinator*. It owns
-//     the ADK/AgentGraph nodes for functional / ops / failure / boundary,
-//     applies retry-once on transient failures, isolates individual node
-//     failures so they don't block sibling agents, dedupes the merged
-//     sections, and finally hands the consolidated draft to DeepAgent for
-//     refinement. Service does not call the LLM directly.
+//     the ADK/AgentGraph nodes for functional / ops / failure, applies
+//     retry-once on transient failures, isolates individual node failures so
+//     they don't block sibling agents, and deterministically merges and
+//     dedupes their structured sections. Functional owns boundary-value
+//     coverage as part of functional test design.
 //
-//   - DeepAgent (backend/internal/agent/deep) is the *agent-level coordinator*
-//     that talks to the chat model. It serves two roles: (a) fallback —
-//     when every sub-agent fails or produces no parseable output, DeepAgent
-//     generates a full set of sections from scratch; (b) refinement —
-//     consolidating the dedup'd sub-agent draft into a single coherent
-//     output before persistence.
+//   - DeepAgent (backend/internal/agent/deep) is the fallback generator used
+//     only when every graph node fails or produces no parseable output.
 //
-// Sub-agents are exposed through eino ADK Agent adapters and consumed by both
-// the application AgentGraph and DeepAgent's fallback coordination path.
+// Generators are exposed through eino ADK Agent adapters and consumed by the
+// application AgentGraph.
 package agent
 
 import (
@@ -30,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"caseagent/internal/agent/boundary"
 	"caseagent/internal/agent/deep"
 	"caseagent/internal/agent/failure"
 	"caseagent/internal/agent/functional"
@@ -48,10 +43,6 @@ import (
 
 type Service struct {
 	deepAgent       *deep.Agent
-	functionalAgent *functional.Agent
-	opsAgent        *ops.Agent
-	failureAgent    *failure.Agent
-	boundaryAgent   *boundary.Agent
 	subAgents       []adk.Agent
 	chatCallTimeout time.Duration
 	traceRecorder   workflowservice.AgentTraceRecorder
@@ -177,21 +168,14 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 		return nil, fmt.Errorf("failed to create failure agent: %w", err)
 	}
 
-	boundaryAgent, err := boundary.New(ctx, &boundary.Config{ChatModel: chatModel, Prompts: promptRegistry})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create boundary agent: %w", err)
-	}
-
 	subAgents := []adk.Agent{
-		newCaseGenerationADKAgent("functional", "Generate functional test cases", functionalAgent.GenerateFunctionalCases),
+		newCaseGenerationADKAgent("functional", "Generate functional and boundary-value test cases", functionalAgent.GenerateFunctionalCases),
 		newCaseGenerationADKAgent("ops", "Generate operations test cases", opsAgent.GenerateOpsCases),
 		newCaseGenerationADKAgent("failure", "Generate failure-mode test cases", failureAgent.GenerateFailureCases),
-		newCaseGenerationADKAgent("boundary", "Generate boundary test cases", boundaryAgent.GenerateBoundaryCases),
 	}
 
 	deepAgent, err := deep.New(ctx, &deep.Config{
 		ChatModel: chatModel,
-		SubAgents: subAgents,
 		Prompts:   promptRegistry,
 	})
 	if err != nil {
@@ -200,10 +184,6 @@ func New(ctx context.Context, cfg *Config) (*Service, error) {
 
 	return &Service{
 		deepAgent:       deepAgent,
-		functionalAgent: functionalAgent,
-		opsAgent:        opsAgent,
-		failureAgent:    failureAgent,
-		boundaryAgent:   boundaryAgent,
 		subAgents:       subAgents,
 		chatCallTimeout: callTimeout,
 		traceRecorder:   traceRecorder,
@@ -260,16 +240,14 @@ func chatFallbackToChatConfig(cfg config.ChatFallbackConfig) config.ChatModelCon
 }
 
 // GenerateCases runs each sub-agent (with retry-once on transient failure),
-// dedupes the merged sections, and asks DeepAgent to refine the consolidated
-// draft. A single sub-agent failing — even after its retry — is logged and
-// skipped; sibling sub-agents continue running and their outputs still flow
-// through dedupe → refinement → persistence.
+// then deterministically merges and dedupes their structured sections. A
+// single sub-agent failing is logged and skipped; DeepAgent is reserved for
+// the case where no graph node produces usable output.
 func (s *Service) GenerateCases(ctx context.Context, requirements string, knowledge string) (string, error) {
 	graph := newAgentGraph([]agentGraphNode{
 		{Name: "functional", Agent: s.subAgents[0]},
 		{Name: "ops", Agent: s.subAgents[1]},
 		{Name: "failure", Agent: s.subAgents[2]},
-		{Name: "boundary", Agent: s.subAgents[3]},
 	}, s.chatCallTimeout, s.traceRecorder)
 
 	graphResult := graph.Run(ctx, requirements, knowledge)
@@ -291,29 +269,7 @@ func (s *Service) GenerateCases(ctx context.Context, requirements string, knowle
 		return s.generateFallback(ctx, requirements, knowledge, "marshal_deduped_sections_failed")
 	}
 
-	refined, err := runTimedAgentCall(ctx, "deep_refine", "initial", s.chatCallTimeout, s.traceRecorder, func(ctx context.Context) (string, error) {
-		return s.deepAgent.RefineCases(ctx, requirements, knowledge, string(payload))
-	}, withAgentCallMetadata(map[string]any{
-		"graph_node_type": "coordinator",
-		"trigger_reason":  "sub_agent_sections_ready",
-		"section_count":   len(normalized),
-		"input_chars":     len(requirements) + len(knowledge) + len(payload),
-		"draft_chars":     len(payload),
-	}))
-	if err != nil || strings.TrimSpace(refined) == "" {
-		if err != nil {
-			slog.Warn("DeepAgent.RefineCases failed; returning unrefined dedup'd payload", "error", err)
-		} else {
-			slog.Warn("DeepAgent.RefineCases returned empty content; returning unrefined dedup'd payload")
-		}
-		return string(payload), nil
-	}
-	if _, parseErr := parseGeneratedSections(refined); parseErr != nil {
-		slog.Warn("DeepAgent.RefineCases produced unparseable output; returning unrefined dedup'd payload",
-			"parse_err", parseErr)
-		return string(payload), nil
-	}
-	return refined, nil
+	return string(payload), nil
 }
 
 func (s *Service) generateFallback(ctx context.Context, requirements string, knowledge string, reason string) (string, error) {
@@ -327,7 +283,19 @@ func (s *Service) generateFallback(ctx context.Context, requirements string, kno
 	if err != nil {
 		return "", generationError(GenerationStageDeepAgentFallback, err)
 	}
-	return result, nil
+	sections, err := parseGeneratedSections(result)
+	if err != nil {
+		return "", generationError(GenerationStageDeepAgentFallback, err)
+	}
+	sections = dedupeGeneratedSections(sections)
+	if len(sections) == 0 {
+		return "", generationError(GenerationStageDeepAgentFallback, fmt.Errorf("fallback produced no usable test cases"))
+	}
+	payload, err := json.Marshal(sections)
+	if err != nil {
+		return "", generationError(GenerationStageDeepAgentFallback, fmt.Errorf("marshal fallback sections: %w", err))
+	}
+	return string(payload), nil
 }
 
 // runSubAgentWithRetry invokes fn once and, on error, retries exactly one
@@ -566,7 +534,8 @@ func extractJSONPayload(raw string) string {
 }
 
 func dedupeGeneratedSections(sections []generatedSection) []generatedSection {
-	normalized := make([]generatedSection, 0, len(sections))
+	grouped := make(map[string][]map[string]any)
+	sectionOrder := make([]string, 0, len(sections))
 	seenCases := make(map[string]struct{})
 
 	for _, section := range sections {
@@ -574,8 +543,11 @@ func dedupeGeneratedSections(sections []generatedSection) []generatedSection {
 		if name == "" {
 			name = "未分类"
 		}
+		if _, exists := grouped[name]; !exists {
+			sectionOrder = append(sectionOrder, name)
+			grouped[name] = nil
+		}
 
-		filtered := make([]map[string]any, 0, len(section.Cases))
 		for _, item := range section.Cases {
 			signature := caseSignature(item)
 			if signature == "" {
@@ -585,19 +557,45 @@ func dedupeGeneratedSections(sections []generatedSection) []generatedSection {
 				continue
 			}
 			seenCases[signature] = struct{}{}
-			filtered = append(filtered, item)
+			grouped[name] = append(grouped[name], item)
 		}
-		if len(filtered) == 0 {
-			continue
-		}
-
-		normalized = append(normalized, generatedSection{
-			Section: name,
-			Cases:   filtered,
-		})
 	}
 
+	orderedNames := stableSectionOrder(sectionOrder)
+	normalized := make([]generatedSection, 0, len(orderedNames))
+	for _, name := range orderedNames {
+		if len(grouped[name]) == 0 {
+			continue
+		}
+		normalized = append(normalized, generatedSection{Section: name, Cases: grouped[name]})
+	}
 	return normalized
+}
+
+func stableSectionOrder(encountered []string) []string {
+	preferred := []string{"功能测试", "边界测试", "故障测试", "运维测试", "未分类"}
+	available := make(map[string]struct{}, len(encountered))
+	for _, name := range encountered {
+		available[name] = struct{}{}
+	}
+
+	ordered := make([]string, 0, len(encountered))
+	emitted := make(map[string]struct{}, len(encountered))
+	for _, name := range preferred {
+		if _, ok := available[name]; !ok {
+			continue
+		}
+		ordered = append(ordered, name)
+		emitted[name] = struct{}{}
+	}
+	for _, name := range encountered {
+		if _, ok := emitted[name]; ok {
+			continue
+		}
+		ordered = append(ordered, name)
+		emitted[name] = struct{}{}
+	}
+	return ordered
 }
 
 func caseSignature(item map[string]any) string {

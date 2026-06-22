@@ -71,6 +71,39 @@ func TestDedupeGeneratedSections(t *testing.T) {
 	}
 }
 
+func TestDedupeGeneratedSectionsMergesAndOrdersSections(t *testing.T) {
+	makeCase := func(title string) map[string]any {
+		return map[string]any{
+			"title":           title,
+			"custom_preconds": "ready",
+			"custom_steps_separated": []map[string]any{
+				{"content": "run", "expected": "done"},
+			},
+		}
+	}
+	input := []generatedSection{
+		{Section: "运维测试", Cases: []map[string]any{makeCase("ops")}},
+		{Section: "功能测试", Cases: []map[string]any{makeCase("functional one")}},
+		{Section: "边界测试", Cases: []map[string]any{makeCase("boundary")}},
+		{Section: "功能测试", Cases: []map[string]any{makeCase("functional two")}},
+		{Section: "故障测试", Cases: []map[string]any{makeCase("failure")}},
+	}
+
+	got := dedupeGeneratedSections(input)
+	wantOrder := []string{"功能测试", "边界测试", "故障测试", "运维测试"}
+	if len(got) != len(wantOrder) {
+		t.Fatalf("sections = %#v, want %d", got, len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if got[i].Section != want {
+			t.Fatalf("section[%d] = %q, want %q", i, got[i].Section, want)
+		}
+	}
+	if len(got[0].Cases) != 2 {
+		t.Fatalf("functional cases = %d, want merged two cases", len(got[0].Cases))
+	}
+}
+
 func TestMessageCharsCountsPromptAndReasoningContent(t *testing.T) {
 	got := messageChars([]*schema.Message{
 		schema.UserMessage("abc"),
@@ -292,8 +325,12 @@ func TestGenerateCasesWithFakeProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCases() returned error: %v", err)
 	}
-	if !strings.Contains(output, `"section": "功能测试"`) {
-		t.Fatalf("unexpected output: %s", output)
+	sections, err := parseGeneratedSections(output)
+	if err != nil {
+		t.Fatalf("parseGeneratedSections() returned error: %v", err)
+	}
+	if len(sections) == 0 || sections[0].Section != "功能测试" {
+		t.Fatalf("unexpected sections: %#v", sections)
 	}
 }
 
@@ -363,21 +400,23 @@ func TestGenerateCasesUsesDeepFallbackWhenAllGraphNodesFail(t *testing.T) {
 	}
 }
 
-func TestGenerateCasesReturnsUnrefinedPayloadWhenRefineFails(t *testing.T) {
+func TestGenerateCasesMergesGraphOutputWithoutGlobalRefine(t *testing.T) {
+	calls := 0
 	chatModel := &routingChatModel{generate: func(input []*schema.Message) (*schema.Message, error) {
+		calls++
 		prompt := joinedPrompt(input)
-		if strings.Contains(prompt, "总协调 Agent") {
-			return nil, errors.New("refine failed")
-		}
 		switch {
+		case strings.Contains(prompt, "功能与输入域测试专家"):
+			return schema.AssistantMessage(`[
+  {"section":"功能测试","cases":[{"title":"functional draft","priority_id":3,"custom_preconds":"ready","custom_steps_separated":[{"content":"run","expected":"ok"}]}]},
+  {"section":"边界测试","cases":[{"title":"boundary draft","priority_id":3,"custom_preconds":"ready","custom_steps_separated":[{"content":"use limit","expected":"validated"}]}]}
+]`, nil), nil
 		case strings.Contains(prompt, "运维测试专家"):
 			return schema.AssistantMessage(testSectionJSON("运维测试", "ops draft"), nil), nil
 		case strings.Contains(prompt, "故障测试专家"):
 			return schema.AssistantMessage(testSectionJSON("故障测试", "failure draft"), nil), nil
-		case strings.Contains(prompt, "边界测试专家"):
-			return schema.AssistantMessage(testSectionJSON("边界测试", "boundary draft"), nil), nil
 		default:
-			return schema.AssistantMessage(testSectionJSON("功能测试", "functional draft"), nil), nil
+			return nil, fmt.Errorf("unexpected prompt: %s", prompt)
 		}
 	}}
 	service, err := New(context.Background(), &Config{ChatModel: chatModel, ChatCallTimeout: time.Second})
@@ -389,8 +428,13 @@ func TestGenerateCasesReturnsUnrefinedPayloadWhenRefineFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCases() returned error: %v", err)
 	}
-	if !strings.Contains(output, "functional draft") || !strings.Contains(output, "boundary draft") {
-		t.Fatalf("output = %s, want unrefined sub-agent drafts", output)
+	if calls != 3 {
+		t.Fatalf("model calls = %d, want exactly three graph nodes", calls)
+	}
+	for _, title := range []string{"functional draft", "boundary draft", "failure draft", "ops draft"} {
+		if !strings.Contains(output, title) {
+			t.Fatalf("output = %s, missing %q", output, title)
+		}
 	}
 }
 

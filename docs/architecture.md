@@ -68,16 +68,17 @@
 
 ## 二、生成闭环（需求 → 检索增强 → Agent → 用例落库）
 
-**做什么**：选定需求 → 分析受影响产品/模块 → 用户审核 → 触发 4 个子 Agent 并行生成 → 去重/结构化 → 落库。
+**做什么**：选定需求 → 分析受影响产品/模块 → 用户审核 → 触发功能 / 运维 / 故障 3 个 Agent 生成 → 后端归并、去重与稳定排序 → 落库。
 
 **关键入口**：
 
 - Agent Service（编排）：`backend/internal/service/agent/service.go`
-  - ADK/AgentGraph：`backend/internal/service/agent/graph.go` 把 functional / ops / failure / boundary 子 Agent 暴露成统一 `adk.Agent` 节点，Graph 负责节点输入、输出、错误、耗时与失败隔离；Service 根据 graph 输出决定 fallback / refine，并把 trigger reason 写入 workflow trace metadata。
-  - DeepAgent fallback coordination：`backend/internal/agent/deep/deep.go` 能消费同一组 ADK sub-agents，先尝试汇总子 Agent 草稿并 refine；无可用草稿时再走 DeepAgent 自身直连生成。
+  - ADK/AgentGraph：`backend/internal/service/agent/graph.go` 把 functional / ops / failure 生成 Agent 暴露成统一 `adk.Agent` 节点，Graph 负责节点输入、输出、错误、耗时与失败隔离。边界值分析属于 functional 的功能测试设计职责，不单独占用生成节点。
+  - 确定性归并：Service 解析各节点的结构化输出，在代码侧合并同名 section、全局去重并按固定 section 顺序输出，不再把全部用例交给模型重写。
+  - DeepAgent fallback：`backend/internal/agent/deep/deep.go` 仅在所有生成节点都失败或无可解析输出时直连模型生成一次完整结果，不持有或重复启动子 Agent。
   - 每次 LLM 调用使用 `model.chat.request_timeout_seconds` 做单次超时，并输出 agent start/end/failure 日志，避免真实 provider 慢调用让 task 长期停在 `generating`
-- DeepAgent（协调）：`backend/internal/agent/deep/`
-- 子 Agent：`backend/internal/agent/{functional,ops,failure,boundary}/`
+- DeepAgent（全量兜底）：`backend/internal/agent/deep/`
+- 生成 Agent：`backend/internal/agent/{functional,ops,failure}/`
 - Prompt Registry：`backend/internal/agent/prompts/registry.go`
   - prompt 模板按 `ID + version` 注册，Agent 只渲染 registry 默认版本，不在业务代码中内联长模板。
   - `model_calls.metadata.prompt_id` / `prompt_version` 记录本次 LLM 调用实际使用的 prompt。
