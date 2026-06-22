@@ -1,4 +1,4 @@
-CREATE EXTENSION vector;
+CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE caseagent_schema (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),

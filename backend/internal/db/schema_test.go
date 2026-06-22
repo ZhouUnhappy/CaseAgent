@@ -40,6 +40,9 @@ func TestLoadSchemaSQL(t *testing.T) {
 	if strings.Count(schema, "vector(1536)") != 2 {
 		t.Fatalf("schema must render both vector columns with the configured dimensions")
 	}
+	if !strings.Contains(schema, "CREATE EXTENSION IF NOT EXISTS vector") {
+		t.Fatal("schema must reuse a pre-provisioned pgvector extension")
+	}
 	for _, fragment := range []string{
 		"archived_at TIMESTAMP",
 		"source_context JSONB",
