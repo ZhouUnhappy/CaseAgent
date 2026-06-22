@@ -110,7 +110,7 @@
 ### 数据库存储约束
 
 - `backend/internal/db/models/test_case.go`：`Cases` 字段已从 `string`（双重 JSON）改为 `[]map[string]any` + `type:jsonb`，新增 `SourceContext map[string]any` + `type:jsonb`。
-- `backend/migrations/001_init.sql`：新增 `source_context JSONB` 列，并提供 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS source_context JSONB` 做幂等回填，兼容已存在的本地 schema。
+- `backend/schema/schema.sql`：当前结构基线直接声明 `source_context JSONB`，不再为旧数据库补列或提供结构兼容。
 - `persistGeneratedCases`（`service.go` line 260 起）直接以结构化值落库，不再 `json.Marshal(...)` 成 string，彻底消除「双重 JSON 字符串」bug。
 
 ### 去重

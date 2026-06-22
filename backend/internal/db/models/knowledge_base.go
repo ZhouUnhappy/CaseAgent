@@ -29,8 +29,8 @@ type KnowledgeBase struct {
 	ExpiresAt         *time.Time      `bun:"expires_at,nullzero" json:"expires_at,omitempty"`
 	DuplicateOfID     *int            `bun:"duplicate_of_id,nullzero" json:"duplicate_of_id,omitempty"`
 	DuplicateMarkedAt *time.Time      `bun:"duplicate_marked_at,nullzero" json:"duplicate_marked_at,omitempty"`
-	IndexProfile      string          `bun:"index_profile,notnull,default:'legacy'" json:"index_profile"`
-	IndexVersion      string          `bun:"index_version,notnull,default:'legacy'" json:"index_version"`
+	IndexProfile      string          `bun:"index_profile,notnull" json:"index_profile"`
+	IndexVersion      string          `bun:"index_version,notnull" json:"index_version"`
 	Status            string          `bun:"status,nullzero,default:'pending'" json:"status"` // pending, processing, completed, failed
 	CreatedAt         time.Time       `bun:"created_at,nullzero,default:current_timestamp" json:"created_at"`
 	UpdatedAt         time.Time       `bun:"updated_at,nullzero,default:current_timestamp" json:"updated_at"`

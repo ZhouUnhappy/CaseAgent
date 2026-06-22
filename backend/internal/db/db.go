@@ -65,11 +65,12 @@ func Init(ctx context.Context) error {
 		return err
 	}
 
-	if err := applySchema(ctx, DB); err != nil {
+	dimensions := config.Get().Model.Embedding.Dimensions
+	if err := ensureSchemaBaseline(ctx, DB, dimensions); err != nil {
 		return err
 	}
 
-	if err := ensureVectorDimensions(ctx, DB, config.Get().Model.Embedding.Dimensions); err != nil {
+	if err := validateVectorDimensions(ctx, DB, dimensions); err != nil {
 		return err
 	}
 	if err := validateRuntimeConfig(ctx, DB, config.Get()); err != nil {

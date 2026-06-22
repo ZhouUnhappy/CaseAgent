@@ -19,7 +19,7 @@ tenants
 
 ## RLS Policy 模板
 
-每张业务表挂同一条 policy（schema 文件在建表迁移中定义）：
+每张业务表挂同一条 policy（由 `backend/schema/schema.sql` 定义）：
 
 ```sql
 ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;

@@ -139,11 +139,6 @@ func (s *Service) SearchDocuments(ctx context.Context, query string, topK int, d
 		return []DocumentResult{}, nil
 	}
 
-	contents, err := s.loadDocumentContents(ctx, parentIDs)
-	if err != nil {
-		return nil, err
-	}
-
 	results := make([]DocumentResult, 0, len(parentIDs))
 	for idx, parentID := range parentIDs {
 		document := documents[parentID]
@@ -155,7 +150,7 @@ func (s *Service) SearchDocuments(ctx context.Context, query string, topK int, d
 			HitQueries:    []string{query},
 			BestScore:     bestScore[parentID],
 			Rank:          idx + 1,
-			Content:       preferredDocumentContent(document.Content, contents[parentID]),
+			Content:       strings.TrimSpace(document.Content),
 		})
 	}
 
@@ -293,57 +288,11 @@ func (s *Service) loadDocumentsByID(ctx context.Context, documentIDs []int) (map
 	return docMap, nil
 }
 
-func (s *Service) loadDocumentContents(ctx context.Context, documentIDs []int) (map[int]string, error) {
-	var chunks []models.DocumentChunk
-	if err := s.db.NewSelect().
-		Model(&chunks).
-		Where("document_id IN (?)", bun.In(documentIDs)).
-		OrderExpr("document_id ASC, id ASC").
-		Scan(ctx); err != nil {
-		return nil, fmt.Errorf("failed to load document chunks: %w", err)
-	}
-
-	builder := make(map[int]*strings.Builder, len(documentIDs))
-	for _, id := range documentIDs {
-		builder[id] = &strings.Builder{}
-	}
-
-	for _, chunk := range chunks {
-		buf, ok := builder[chunk.DocumentID]
-		if !ok {
-			continue
-		}
-		content := strings.TrimSpace(chunk.Content)
-		if content == "" {
-			continue
-		}
-		if buf.Len() > 0 {
-			buf.WriteString("\n\n")
-		}
-		buf.WriteString(content)
-	}
-
-	contents := make(map[int]string, len(builder))
-	for id, buf := range builder {
-		contents[id] = buf.String()
-	}
-
-	return contents, nil
-}
-
 func retrievalPoolSize(topK int) int {
 	if topK <= 0 {
 		return defaultTopK * 3
 	}
 	return topK * 3
-}
-
-func preferredDocumentContent(stored string, fallback string) string {
-	stored = strings.TrimSpace(stored)
-	if stored != "" {
-		return stored
-	}
-	return fallback
 }
 
 func filterSearchableDocumentIDs(documentIDs []int, documents map[int]models.Document) []int {

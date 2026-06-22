@@ -108,11 +108,7 @@
   - 知识库治理：`knowledge_base.source` / `expires_at` / `duplicate_of_id` 记录来源、过期时间和人工重复标记；列表 API 支持 `type` / `source` / `expired` / `duplicate` 筛选；检索和生成只使用 completed、未过期、非重复条目；`GET /api/v1/knowledge/:id/impacted-tasks` 使用普通 SQL 从 `test_cases.source_context` 查询受影响任务。
   - Demo 控制台：`POST /api/v1/demo/{reset,bootstrap,fresh}` 在当前 tenant 内清理或创建演示数据；bootstrap 只读取 `testdata/i1` 公开 fixture，同步处理 document / knowledge 后创建 analyze job，并返回 project/task path 与 URL。前端 `frontend/src/views/DemoConsole.vue` 提供一键 Reset + Bootstrap 页面。
   - 前端：`frontend/src/views/TaskDetail.vue` 展示 job timeline 与 Workflow Trace 面板，用于 demo 排查生成链路。
-- 数据库表：
-  - `backend/migrations/001_init.sql`（`test_cases.source_context JSONB`）
-  - `backend/migrations/003_background_jobs.sql`（`background_jobs` + RLS）
-  - `backend/migrations/005_v2_workflow_trace.sql`（workflow / agent / model / retrieval / artifact trace + RLS）
-  - `backend/migrations/010_knowledge_governance.sql`（知识来源、过期时间、重复标记及筛选索引）
+- 数据库结构：`backend/schema/schema.sql` 是唯一当前基线，包含业务表、后台任务、workflow trace、知识治理、索引和 RLS。空库首次启动时写入 schema 指纹；不兼容旧数据库结构。
 
 **单元测试**：`backend/internal/service/task/service_test.go`
 - `TestParseGeneratedSectionsSectionedJSON` / `TestParseGeneratedSectionsFlatJSON`
@@ -173,7 +169,7 @@
 
 **关键入口**：
 
-- 表定义：`backend/migrations/002_suggestion_groups.sql`（表 `knowledge_update_suggestion_groups` / `knowledge_update_suggestion_occurrences`，含 `source_case_id` / `resolved_knowledge_id` / `dismissed_reason`）
+- 表定义：`backend/schema/schema.sql`（表 `knowledge_update_suggestion_groups` / `knowledge_update_suggestion_occurrences`，含 `source_case_id` / `resolved_knowledge_id` / `dismissed_reason`）
 - 模型：`backend/internal/db/models/knowledge_update_suggestion{,_group}.go`
 - 候选提取、失败信号记录与聚合：`backend/internal/service/suggestion/{extractor,service}.go`
 - 知识草稿生成：`backend/internal/agent/knowledge/`、`backend/internal/service/suggestion/draft.go`
@@ -217,7 +213,7 @@ cd frontend && npm run build
 
 - 规格说明：`docs/spec.md`
 - 配置示例：`backend/configs/config-example.yaml`
-- 数据库迁移：`backend/migrations/*.sql`
+- 数据库结构基线：`backend/schema/schema.sql`
 - 路由定义：`backend/internal/api/router/router.go`
 - 本地联调脚本：`dev.sh`
 - 回归脚本说明：`scripts/README.md`

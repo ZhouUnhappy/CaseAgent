@@ -60,7 +60,7 @@ go mod tidy
 go run cmd/server/main.go
 ```
 
-启动时会自动按文件名顺序应用 `backend/migrations/*.sql` 中的当前 schema，测试库无需先手工建表。
+空数据库首次启动时会应用 `backend/schema/schema.sql` 中的当前结构基线，并记录 schema 指纹。后续启动只接受指纹完全匹配的数据库；结构不匹配时应清空数据库后重新初始化，不提供旧结构迁移或兼容。
 后台 analyze / generate 由持久化 job runner 执行；并发、重试和 running job 超时恢复可在 `job_runner` 配置段调整。
 
 > **多租户**：所有业务 API 都要求 `X-Tenant-ID` header（tenant slug）。`POST /api/v1/tenants` 创建租户后，请求带上 `-H "X-Tenant-ID: <slug>"` 即可。生产环境建议用 NOBYPASSRLS role 连接 DB（superuser 会绕过 RLS）—— 配置细节见 [`docs/multitenancy.md`](docs/multitenancy.md)。

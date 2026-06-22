@@ -8,7 +8,7 @@
 
 ## 前置环境
 
-- 后端服务监听于 `CASEAGENT_BASE_URL`（默认 `http://localhost:40003/api/v1`），已应用 `backend/migrations/001_init.sql`（含 `source_context JSONB` 列）。
+- 后端服务监听于 `CASEAGENT_BASE_URL`（默认 `http://localhost:40003/api/v1`），已通过 `backend/schema/schema.sql` 初始化当前结构基线（含 `source_context JSONB` 列）。
 - PostgreSQL 启用 `pgvector` 扩展；`model.chat` 与 `model.embedding` 在 `backend/configs/config.yaml` 中可用。
 - 本地命令：`curl`、`jq`、`psql`（数据库验证用）；`CASEAGENT_PSQL_DSN` 指向同一库。
 - 已通过 `scripts/i1_public_corpus_eval.sh` 或私有语料把至少 1 个 `documents.status = 'completed'` 与若干 `knowledge_base.status = 'completed'` 写入库。

@@ -14,7 +14,7 @@ type DocumentChunk struct {
 	Embedding    dbvector.Vector `bun:"embedding" json:"embedding"`
 	ParentDocID  int             `bun:"parent_doc_id" json:"parent_doc_id"` // 用于 parent retriever
 	Metadata     map[string]any  `bun:"metadata,type:jsonb" json:"metadata"`
-	IndexProfile string          `bun:"index_profile,notnull,default:'legacy'" json:"index_profile"`
-	IndexVersion string          `bun:"index_version,notnull,default:'legacy'" json:"index_version"`
+	IndexProfile string          `bun:"index_profile,notnull" json:"index_profile"`
+	IndexVersion string          `bun:"index_version,notnull" json:"index_version"`
 	CreatedAt    time.Time       `bun:"created_at,nullzero,default:current_timestamp" json:"created_at"`
 }
