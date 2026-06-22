@@ -170,7 +170,7 @@ function latestTaskJob(row) {
     <el-card shadow="never" class="card">
       <template #header>
         <div class="card-header">
-          <span>需求文档</span>
+          <span>参考文档</span>
           <div class="header-actions">
             <el-button @click="documents.fetch(projectId)" :loading="docLoading">刷新</el-button>
             <el-button type="primary" @click="openUpload">上传文档</el-button>
@@ -308,7 +308,7 @@ function latestTaskJob(row) {
 
     <el-drawer
       v-model="previewVisible"
-      :title="previewDocument?.name || '需求文档预览'"
+      :title="previewDocument?.name || '参考文档预览'"
       size="88%"
       destroy-on-close
       @closed="previewDocument = null"
@@ -323,7 +323,7 @@ function latestTaskJob(row) {
 
     <el-dialog
       v-model="uploadDialog"
-      title="上传需求文档"
+      title="上传参考文档"
       width="520px"
       :close-on-click-modal="false"
     >

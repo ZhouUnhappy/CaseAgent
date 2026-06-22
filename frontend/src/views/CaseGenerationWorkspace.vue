@@ -60,6 +60,51 @@ const taskDocumentIds = computed(() => task.value?.document_ids || [])
 const taskDocuments = computed(() =>
   taskDocumentIds.value.map((id) => documents.value.find((doc) => doc.id === id) || { id, name: `文档 #${id}` }),
 )
+const taskKnowledgeReferences = computed(() => {
+  const references = new Map()
+
+  const addReference = (candidate = {}) => {
+    const candidateId = Number(candidate.id)
+    const id = Number.isInteger(candidateId) && candidateId > 0 ? candidateId : null
+    const candidateName = typeof candidate.name === 'string' ? candidate.name.trim() : ''
+    const matched = id
+      ? knowledge.value.find((item) => item.id === id)
+      : knowledge.value.find((item) => item.name === candidateName)
+    const resolvedId = id || matched?.id || null
+    const name = candidateName || matched?.name || (resolvedId ? `知识 #${resolvedId}` : '')
+    if (!name) return
+
+    const key = resolvedId ? `id:${resolvedId}` : `name:${name}`
+    references.set(key, {
+      id: resolvedId,
+      name,
+      sourceUrl: matched?.metadata?.source_url || '',
+    })
+  }
+
+  for (const section of cases.value) {
+    const sourceContext = section.source_context || {}
+    const shippedIds = Array.isArray(sourceContext.knowledge_shipped_ids)
+      ? sourceContext.knowledge_shipped_ids
+      : []
+    const shippedNames = Array.isArray(sourceContext.knowledge_shipped_names)
+      ? sourceContext.knowledge_shipped_names
+      : []
+
+    if (shippedIds.length || shippedNames.length) {
+      const count = Math.max(shippedIds.length, shippedNames.length)
+      for (let index = 0; index < count; index += 1) {
+        addReference({ id: shippedIds[index], name: shippedNames[index] })
+      }
+      continue
+    }
+
+    const hits = Array.isArray(sourceContext.knowledge_hits) ? sourceContext.knowledge_hits : []
+    hits.forEach(addReference)
+  }
+
+  return [...references.values()]
+})
 const documentSelectionMatchesTask = computed(() => {
   if (!task.value) return true
   const selected = [...selectedDocumentIds.value].sort((a, b) => a - b)
@@ -144,7 +189,7 @@ const primaryAction = computed(() => {
   }
   if (!completedDocuments.value.length) {
     return {
-      label: '上传需求文档',
+      label: '上传参考文档',
       icon: Upload,
       type: 'primary',
       disabled: false,
@@ -376,7 +421,7 @@ async function submitUpload() {
 async function createTaskFromDocuments() {
   if (!selectedProjectId.value) return
   if (selectedDocumentIds.value.length === 0) {
-    ElMessageBox.alert('请选择至少一份已完成处理的需求文档')
+    ElMessageBox.alert('请选择至少一份已完成处理的参考文档')
     return
   }
   try {
@@ -612,7 +657,7 @@ function findSelectedJobWithError() {
           <header class="panel-head">
             <div>
               <span class="step-index">1</span>
-              <h2>需求文档</h2>
+              <h2>参考文档</h2>
             </div>
             <el-button type="primary" :icon="Upload" @click="openUpload" :disabled="!selectedProjectId">
               上传
@@ -647,7 +692,7 @@ function findSelectedJobWithError() {
             </div>
           </el-checkbox-group>
 
-          <el-empty v-if="!documents.length && !documentsLoading" description="暂无需求文档" />
+          <el-empty v-if="!documents.length && !documentsLoading" description="暂无参考文档" />
 
           <div class="panel-footer">
             <span>{{ completedDocuments.length }} 份文档可用于生成</span>
@@ -846,13 +891,30 @@ function findSelectedJobWithError() {
 
         <div v-if="task" class="result-source">
           <div class="result-source-head">
-            <strong>结果输入</strong>
+            <strong>任务输入与依据</strong>
             <span>任务 #{{ task.id }} · {{ formatDate(task.updated_at) }}</span>
           </div>
-          <div class="result-source-docs">
-            <el-tag v-for="doc in taskDocuments" :key="doc.id" size="small" type="info">
-              {{ doc.name }}
-            </el-tag>
+          <div class="result-source-group">
+            <span class="result-source-label">参考文档</span>
+            <div class="result-source-tags">
+              <el-tag v-for="doc in taskDocuments" :key="doc.id" size="small" type="info">
+                {{ doc.name }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="result-source-group">
+            <span class="result-source-label">后端设计 / 知识依据</span>
+            <div class="result-source-tags">
+              <template v-for="item in taskKnowledgeReferences" :key="item.id || item.name">
+                <el-link v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" :underline="false">
+                  <el-tag size="small" type="warning">{{ item.name }}</el-tag>
+                </el-link>
+                <el-tag v-else size="small" type="warning">{{ item.name }}</el-tag>
+              </template>
+              <span v-if="!taskKnowledgeReferences.length" class="result-source-empty">
+                本任务未记录知识依据
+              </span>
+            </div>
           </div>
           <el-alert
             v-if="!documentSelectionMatchesTask"
@@ -948,7 +1010,7 @@ function findSelectedJobWithError() {
 
     <el-dialog
       v-model="uploadDialog"
-      title="上传需求文档"
+      title="上传参考文档"
       width="520px"
       :close-on-click-modal="false"
     >
@@ -1051,7 +1113,8 @@ function findSelectedJobWithError() {
   border-bottom: 1px solid #e5e7eb;
 }
 .result-source-head,
-.result-source-docs {
+.result-source-group,
+.result-source-tags {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1065,6 +1128,21 @@ function findSelectedJobWithError() {
 .result-source-head strong {
   color: #111827;
   font-size: 13px;
+}
+.result-source-label {
+  width: 128px;
+  flex: 0 0 128px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+.result-source-tags {
+  flex: 1;
+  min-width: 0;
+}
+.result-source-empty {
+  color: #94a3b8;
+  font-size: 12px;
 }
 .project-strip {
   display: flex;

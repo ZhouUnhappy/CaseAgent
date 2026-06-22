@@ -2052,7 +2052,7 @@ async function submitKnowledgeFeedback() {
 
         <div class="provenance-grid">
           <div class="provenance-block">
-            <h3>需求文档片段</h3>
+            <h3>参考文档片段</h3>
             <div v-for="doc in provenanceArray('document_hits')" :key="`${doc.document_id}-${doc.rank}`" class="trace-row">
               <div class="trace-row-main">
                 <span class="trace-title">{{ doc.name || `document #${doc.document_id}` }}</span>

@@ -7,8 +7,8 @@ export function jobTypeLabel(jobType) {
   return {
     analyze: '影响范围分析',
     generate: '用例生成',
-    document_process: '需求文档处理',
-    document_reprocess: '需求文档重处理',
+    document_process: '参考文档处理',
+    document_reprocess: '参考文档重处理',
     knowledge_process: '知识处理',
     knowledge_reprocess: '知识重处理',
   }[jobType] || jobType || '-'

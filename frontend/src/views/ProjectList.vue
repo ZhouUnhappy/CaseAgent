@@ -47,7 +47,7 @@ async function submitCreate() {
     <header class="bar">
       <div>
         <h2>项目</h2>
-        <p class="hint">在项目下管理需求文档、生成任务与测试用例。</p>
+        <p class="hint">在项目下管理参考文档、生成任务与测试用例。</p>
       </div>
       <div class="actions">
         <el-button @click="store.fetch()" :loading="loading">刷新</el-button>
