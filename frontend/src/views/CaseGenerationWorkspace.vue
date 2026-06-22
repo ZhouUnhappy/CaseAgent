@@ -56,51 +56,6 @@ const taskDocumentIds = computed(() => task.value?.document_ids || [])
 const taskDocuments = computed(() =>
   taskDocumentIds.value.map((id) => documents.value.find((doc) => doc.id === id) || { id, name: `文档 #${id}` }),
 )
-const taskKnowledgeReferences = computed(() => {
-  const references = new Map()
-
-  const addReference = (candidate = {}) => {
-    const candidateId = Number(candidate.id)
-    const id = Number.isInteger(candidateId) && candidateId > 0 ? candidateId : null
-    const candidateName = typeof candidate.name === 'string' ? candidate.name.trim() : ''
-    const matched = id
-      ? knowledge.value.find((item) => item.id === id)
-      : knowledge.value.find((item) => item.name === candidateName)
-    const resolvedId = id || matched?.id || null
-    const name = candidateName || matched?.name || (resolvedId ? `知识 #${resolvedId}` : '')
-    if (!name) return
-
-    const key = resolvedId ? `id:${resolvedId}` : `name:${name}`
-    references.set(key, {
-      id: resolvedId,
-      name,
-      sourceUrl: matched?.metadata?.source_url || '',
-    })
-  }
-
-  for (const section of cases.value) {
-    const sourceContext = section.source_context || {}
-    const shippedIds = Array.isArray(sourceContext.knowledge_shipped_ids)
-      ? sourceContext.knowledge_shipped_ids
-      : []
-    const shippedNames = Array.isArray(sourceContext.knowledge_shipped_names)
-      ? sourceContext.knowledge_shipped_names
-      : []
-
-    if (shippedIds.length || shippedNames.length) {
-      const count = Math.max(shippedIds.length, shippedNames.length)
-      for (let index = 0; index < count; index += 1) {
-        addReference({ id: shippedIds[index], name: shippedNames[index] })
-      }
-      continue
-    }
-
-    const hits = Array.isArray(sourceContext.knowledge_hits) ? sourceContext.knowledge_hits : []
-    hits.forEach(addReference)
-  }
-
-  return [...references.values()]
-})
 const documentSelectionMatchesTask = computed(() => {
   if (!task.value) return true
   const selected = [...selectedDocumentIds.value].sort((a, b) => a - b)
@@ -799,7 +754,7 @@ function findSelectedJobWithError() {
 
         <div v-if="task" class="result-source">
           <div class="result-source-head">
-            <strong>任务输入与依据</strong>
+            <strong>任务输入</strong>
             <span>任务 #{{ task.id }} · {{ formatDate(task.updated_at) }}</span>
           </div>
           <div class="result-source-group">
@@ -808,20 +763,6 @@ function findSelectedJobWithError() {
               <el-tag v-for="doc in taskDocuments" :key="doc.id" size="small" type="info">
                 {{ doc.name }}
               </el-tag>
-            </div>
-          </div>
-          <div class="result-source-group">
-            <span class="result-source-label">知识库依据</span>
-            <div class="result-source-tags">
-              <template v-for="item in taskKnowledgeReferences" :key="item.id || item.name">
-                <el-link v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" :underline="false">
-                  <el-tag size="small" type="warning">{{ item.name }}</el-tag>
-                </el-link>
-                <el-tag v-else size="small" type="warning">{{ item.name }}</el-tag>
-              </template>
-              <span v-if="!taskKnowledgeReferences.length" class="result-source-empty">
-                本任务未记录知识依据
-              </span>
             </div>
           </div>
           <el-alert
@@ -1026,14 +967,11 @@ function findSelectedJobWithError() {
   flex: 1;
   min-width: 0;
 }
-.result-source-empty {
-  color: #94a3b8;
-  font-size: 12px;
-}
 .context-strip {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   align-items: center;
+  column-gap: 20px;
   padding: 12px 16px;
 }
 .project-select {
@@ -1052,6 +990,7 @@ function findSelectedJobWithError() {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
   border-left: 1px solid #eef2f7;
+  padding-left: 20px;
 }
 .flow-step {
   display: flex;
@@ -1439,6 +1378,7 @@ function findSelectedJobWithError() {
     display: flex;
     border-top: 1px solid #eef2f7;
     border-left: 0;
+    padding-left: 0;
   }
   .flow-step {
     border-right: 0;
