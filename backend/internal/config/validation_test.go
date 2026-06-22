@@ -26,8 +26,18 @@ func TestValidateRejectsMissingChatAuth(t *testing.T) {
 	cfg.Model.Chat.APIKey = ""
 
 	err := Validate(cfg)
-	if err == nil || !strings.Contains(err.Error(), "model.chat requires api_key") {
+	if err == nil || !strings.Contains(err.Error(), "model.chat.api_key is required for ark") {
 		t.Fatalf("Validate() error = %v, want chat auth error", err)
+	}
+}
+
+func TestValidateRejectsMissingEmbeddingAuth(t *testing.T) {
+	cfg := minimalValidConfig()
+	cfg.Model.Embedding.APIKey = ""
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "model.embedding.api_key is required for ark") {
+		t.Fatalf("Validate() error = %v, want embedding auth error", err)
 	}
 }
 

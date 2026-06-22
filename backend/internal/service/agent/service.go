@@ -251,13 +251,11 @@ func configuredGuardrails(ctx context.Context, chatCfg config.ChatModelConfig, o
 
 func chatFallbackToChatConfig(cfg config.ChatFallbackConfig) config.ChatModelConfig {
 	return config.ChatModelConfig{
-		Provider:  cfg.Provider,
-		Model:     cfg.Model,
-		APIKey:    cfg.APIKey,
-		AccessKey: cfg.AccessKey,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		Region:    cfg.Region,
+		Provider: cfg.Provider,
+		Model:    cfg.Model,
+		APIKey:   cfg.APIKey,
+		BaseURL:  cfg.BaseURL,
+		Region:   cfg.Region,
 	}
 }
 

@@ -21,12 +21,10 @@ func NewEmbedder(ctx context.Context, cfg config.EmbeddingModelConfig) (embeddin
 	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
 	case "ark":
 		embedder, err = arkembedding.NewEmbedder(ctx, &arkembedding.EmbeddingConfig{
-			APIKey:    cfg.APIKey,
-			AccessKey: cfg.AccessKey,
-			SecretKey: cfg.SecretKey,
-			BaseURL:   cfg.BaseURL,
-			Region:    cfg.Region,
-			Model:     cfg.Model,
+			APIKey:  cfg.APIKey,
+			BaseURL: cfg.BaseURL,
+			Region:  cfg.Region,
+			Model:   cfg.Model,
 		})
 	case "openai":
 		openAIConfig := &openaiembedding.EmbeddingConfig{

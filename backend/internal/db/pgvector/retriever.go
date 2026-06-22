@@ -26,8 +26,6 @@ type RetrieverConfig struct {
 	DB         bun.IDB
 	Dimensions int
 	APIKey     string
-	AccessKey  string
-	SecretKey  string
 	BaseURL    string
 	Region     string
 	Model      string
@@ -87,8 +85,6 @@ func NewRetriever(ctx context.Context, cfg *RetrieverConfig) (*Retriever, error)
 		Model:      cfg.Model,
 		Dimensions: cfg.Dimensions,
 		APIKey:     cfg.APIKey,
-		AccessKey:  cfg.AccessKey,
-		SecretKey:  cfg.SecretKey,
 		BaseURL:    cfg.BaseURL,
 		Region:     cfg.Region,
 	})

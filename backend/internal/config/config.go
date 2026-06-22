@@ -40,8 +40,6 @@ type ChatModelConfig struct {
 	Provider                       string             `mapstructure:"provider"`
 	Model                          string             `mapstructure:"model"`
 	APIKey                         string             `mapstructure:"api_key"`
-	AccessKey                      string             `mapstructure:"access_key"`
-	SecretKey                      string             `mapstructure:"secret_key"`
 	BaseURL                        string             `mapstructure:"base_url"`
 	Region                         string             `mapstructure:"region"`
 	RequestTimeoutSeconds          int                `mapstructure:"request_timeout_seconds"`
@@ -56,8 +54,6 @@ type ChatFallbackConfig struct {
 	Provider               string `mapstructure:"provider"`
 	Model                  string `mapstructure:"model"`
 	APIKey                 string `mapstructure:"api_key"`
-	AccessKey              string `mapstructure:"access_key"`
-	SecretKey              string `mapstructure:"secret_key"`
 	BaseURL                string `mapstructure:"base_url"`
 	Region                 string `mapstructure:"region"`
 	ProviderTimeoutSeconds int    `mapstructure:"provider_timeout_seconds"`
@@ -68,8 +64,6 @@ type EmbeddingModelConfig struct {
 	Model      string `mapstructure:"model"`
 	Dimensions int    `mapstructure:"dimensions"`
 	APIKey     string `mapstructure:"api_key"`
-	AccessKey  string `mapstructure:"access_key"`
-	SecretKey  string `mapstructure:"secret_key"`
 	BaseURL    string `mapstructure:"base_url"`
 	Region     string `mapstructure:"region"`
 }

@@ -21,8 +21,6 @@ model:
     provider: ark
     model: ep-your-chat-endpoint
     api_key: your_ark_api_key
-    access_key: ""
-    secret_key: ""
     base_url: https://ark.cn-beijing.volces.com/api/v3
     region: cn-beijing
     # Per LLM request timeout used by generation agents.
@@ -38,8 +36,6 @@ model:
       provider: ""
       model: ""
       api_key: ""
-      access_key: ""
-      secret_key: ""
       base_url: ""
       region: ""
       provider_timeout_seconds: 0
@@ -47,8 +43,6 @@ model:
     # provider: deepseek
     # model: deepseek-v4-pro
     # api_key: your_deepseek_api_key
-    # access_key: ""
-    # secret_key: ""
     # base_url: https://api.deepseek.com
     # region: ""
   embedding:
@@ -57,8 +51,6 @@ model:
     model: ep-your-embedding-endpoint
     dimensions: 2000
     api_key: your_ark_api_key
-    access_key: ""
-    secret_key: ""
     base_url: https://ark.cn-beijing.volces.com/api/v3
     region: cn-beijing
 

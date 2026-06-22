@@ -86,7 +86,7 @@ func validateChat(cfg ChatModelConfig) error {
 	if _, ok := supportedChatProviders[provider]; !ok {
 		return fmt.Errorf("config validation: unsupported model.chat.provider %q", cfg.Provider)
 	}
-	if err := validateChatProvider("model.chat", provider, cfg.Model, cfg.APIKey, cfg.AccessKey, cfg.SecretKey, cfg.BaseURL); err != nil {
+	if err := validateChatProvider("model.chat", provider, cfg.Model, cfg.APIKey, cfg.BaseURL); err != nil {
 		return err
 	}
 	if err := validateChatFallback(cfg.Fallback); err != nil {
@@ -95,7 +95,7 @@ func validateChat(cfg ChatModelConfig) error {
 	return nil
 }
 
-func validateChatProvider(path string, provider string, model string, apiKey string, accessKey string, secretKey string, baseURL string) error {
+func validateChatProvider(path string, provider string, model string, apiKey string, baseURL string) error {
 	if provider == "fake" {
 		if _, ok := supportedFakeScenarios[strings.TrimSpace(model)]; !ok {
 			return fmt.Errorf("config validation: unsupported fake chat scenario %q", model)
@@ -110,8 +110,8 @@ func validateChatProvider(path string, provider string, model string, apiKey str
 		if strings.TrimSpace(baseURL) == "" {
 			return fmt.Errorf("config validation: %s.base_url is required for ark", path)
 		}
-		if !hasAPIKeyOrAccessPair(apiKey, accessKey, secretKey) {
-			return fmt.Errorf("config validation: %s requires api_key or access_key/secret_key", path)
+		if strings.TrimSpace(apiKey) == "" {
+			return fmt.Errorf("config validation: %s.api_key is required for ark", path)
 		}
 	case "deepseek":
 		if strings.TrimSpace(apiKey) == "" {
@@ -158,7 +158,7 @@ func validateChatFallback(cfg ChatFallbackConfig) error {
 	if cfg.ProviderTimeoutSeconds < 0 {
 		return fmt.Errorf("config validation: model.chat.fallback.provider_timeout_seconds must be >= 0")
 	}
-	return validateChatProvider("model.chat.fallback", provider, cfg.Model, cfg.APIKey, cfg.AccessKey, cfg.SecretKey, cfg.BaseURL)
+	return validateChatProvider("model.chat.fallback", provider, cfg.Model, cfg.APIKey, cfg.BaseURL)
 }
 
 func validateEmbedding(cfg EmbeddingModelConfig) error {
@@ -180,8 +180,8 @@ func validateEmbedding(cfg EmbeddingModelConfig) error {
 		if strings.TrimSpace(cfg.BaseURL) == "" {
 			return fmt.Errorf("config validation: model.embedding.base_url is required for ark")
 		}
-		if !hasAPIKeyOrAccessPair(cfg.APIKey, cfg.AccessKey, cfg.SecretKey) {
-			return fmt.Errorf("config validation: model.embedding requires api_key or access_key/secret_key")
+		if strings.TrimSpace(cfg.APIKey) == "" {
+			return fmt.Errorf("config validation: model.embedding.api_key is required for ark")
 		}
 	case "openai":
 		if strings.TrimSpace(cfg.BaseURL) == "" {
@@ -235,11 +235,4 @@ func validateJobRunner(cfg JobRunnerConfig) error {
 		}
 	}
 	return nil
-}
-
-func hasAPIKeyOrAccessPair(apiKey string, accessKey string, secretKey string) bool {
-	if strings.TrimSpace(apiKey) != "" {
-		return true
-	}
-	return strings.TrimSpace(accessKey) != "" && strings.TrimSpace(secretKey) != ""
 }

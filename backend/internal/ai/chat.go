@@ -20,12 +20,10 @@ func NewChatModel(ctx context.Context, cfg config.ChatModelConfig) (model.BaseCh
 	switch normalizeProvider(cfg.Provider) {
 	case "ark":
 		return arkmodel.NewChatModel(ctx, &arkmodel.ChatModelConfig{
-			APIKey:    cfg.APIKey,
-			AccessKey: cfg.AccessKey,
-			SecretKey: cfg.SecretKey,
-			BaseURL:   cfg.BaseURL,
-			Region:    cfg.Region,
-			Model:     cfg.Model,
+			APIKey:  cfg.APIKey,
+			BaseURL: cfg.BaseURL,
+			Region:  cfg.Region,
+			Model:   cfg.Model,
 		})
 	case "deepseek":
 		return openaiacl.NewClient(ctx, openAICompatibleChatConfig(cfg, deepSeekDefaultBaseURL))

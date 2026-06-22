@@ -263,8 +263,6 @@ func (s *Service) newRetriever(ctx context.Context) (*pgvector.Retriever, error)
 		DB:         s.db,
 		Dimensions: cfg.Model.Embedding.Dimensions,
 		APIKey:     cfg.Model.Embedding.APIKey,
-		AccessKey:  cfg.Model.Embedding.AccessKey,
-		SecretKey:  cfg.Model.Embedding.SecretKey,
 		BaseURL:    cfg.Model.Embedding.BaseURL,
 		Region:     cfg.Model.Embedding.Region,
 		Model:      cfg.Model.Embedding.Model,
