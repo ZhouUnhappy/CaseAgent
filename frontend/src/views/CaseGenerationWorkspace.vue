@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox } from 'element-plus'
-import { Check, Download, Plus, Refresh, Upload, VideoPlay, View } from '@element-plus/icons-vue'
+import { Download, Plus, Refresh, Upload, VideoPlay, View } from '@element-plus/icons-vue'
 import StatusTag from '../components/StatusTag.vue'
 import { listJobs } from '../api/jobs'
 import { useProjectsStore } from '../stores/projects'
@@ -47,10 +47,6 @@ const uploadDialog = ref(false)
 const uploadForm = reactive({ name: '', file: null })
 
 const reviewForm = reactive({ products: [], modules: [] })
-
-const selectedProject = computed(() =>
-  projects.value.find((project) => project.id === selectedProjectId.value) || null,
-)
 
 const task = computed(() => {
   if (loadedTask.value?.id === selectedTaskId.value) return loadedTask.value
@@ -175,94 +171,13 @@ const workspaceTimeline = computed(() => {
   }
   return rows
 })
-const selectedDocumentCount = computed(() => selectedDocumentIds.value.length)
-const primaryAction = computed(() => {
-  if (!selectedProjectId.value) {
-    return {
-      label: '新建项目',
-      icon: Plus,
-      type: 'primary',
-      disabled: false,
-      loading: projectCreating.value,
-      handler: openCreateProject,
-    }
-  }
-  if (!completedDocuments.value.length) {
-    return {
-      label: '上传参考文档',
-      icon: Upload,
-      type: 'primary',
-      disabled: false,
-      loading: uploading.value,
-      handler: openUpload,
-    }
-  }
-  if (!task.value) {
-    return {
-      label: '创建生成任务',
-      icon: Plus,
-      type: 'primary',
-      disabled: selectedDocumentIds.value.length === 0,
-      loading: taskCreating.value,
-      handler: createTaskFromDocuments,
-    }
-  }
-  if (task.value?.status === 'awaiting_review') {
-    return {
-      label: '确认影响范围',
-      icon: Check,
-      type: 'primary',
-      disabled: false,
-      loading: false,
-      handler: submitReview,
-    }
-  }
-  if (canGenerate.value) {
-    return {
-      label: '开始生成',
-      icon: VideoPlay,
-      type: 'success',
-      disabled: false,
-      loading: generating.value,
-      handler: startGenerate,
-    }
-  }
-  if (canRetry.value) {
-    return {
-      label: '重试任务',
-      icon: Refresh,
-      type: 'warning',
-      disabled: false,
-      loading: retrying.value,
-      handler: retryTask,
-    }
-  }
-  if (cases.value.length) {
-    return {
-      label: '审核用例',
-      icon: View,
-      type: 'primary',
-      disabled: false,
-      loading: false,
-      handler: openTaskDetail,
-    }
-  }
-  return {
-    label: isPolling.value ? '后台处理中' : '等待下一步',
-    icon: Refresh,
-    type: 'primary',
-    disabled: true,
-    loading: Boolean(isPolling.value),
-    handler: () => {},
-  }
-})
 const flowSteps = computed(() => {
   const status = task.value?.status || ''
   const hasDocuments = completedDocuments.value.length > 0
   const hasGenerated = ['completed'].includes(status)
   return [
     {
-      label: '文档',
+      label: '参考文档',
       value: `${completedDocuments.value.length} 可用`,
       state: hasDocuments ? 'done' : selectedProjectId.value ? 'active' : 'waiting',
     },
@@ -352,11 +267,21 @@ watch(
 
 async function refreshProjectData() {
   if (!selectedProjectId.value) return
-  await Promise.all([
+  const requests = [
     documentsStore.fetch(selectedProjectId.value).catch(() => {}),
     tasksStore.fetch(selectedProjectId.value).catch(() => {}),
+  ]
+  if (selectedTaskId.value) {
+    requests.push(
+      tasksStore.load(selectedTaskId.value).catch(() => {}),
+      casesStore.fetch(selectedTaskId.value).catch(() => {}),
+    )
+  }
+  await Promise.all(requests)
+  await Promise.all([
+    loadTaskJobs().catch(() => {}),
+    loadSelectedTaskJobs(selectedTaskId.value).catch(() => {}),
   ])
-  loadTaskJobs().catch(() => {})
 }
 
 function openCreateProject() {
@@ -580,32 +505,23 @@ function findSelectedJobWithError() {
 <template>
   <section class="generate-workspace">
     <div class="workspace-head">
-      <div class="head-copy">
-        <h1>生成测试用例</h1>
-        <div class="head-metrics">
-          <span>{{ selectedDocumentCount }} 份已选文档</span>
-          <span>任务：{{ taskStatusText }}</span>
-          <span>{{ totalCaseCount }} 条用例</span>
-        </div>
-      </div>
+      <h1>生成测试用例</h1>
       <div class="head-actions">
-        <el-button :icon="Refresh" @click="refreshProjectData" :disabled="!selectedProjectId">
+        <el-button
+          :icon="Refresh"
+          :loading="documentsLoading || tasksLoading || casesLoading"
+          :disabled="!selectedProjectId"
+          @click="refreshProjectData"
+        >
           刷新
         </el-button>
-        <el-button
-          :type="primaryAction.type"
-          :icon="primaryAction.icon"
-          :disabled="primaryAction.disabled"
-          :loading="primaryAction.loading"
-          @click="primaryAction.handler"
-        >
-          {{ primaryAction.label }}
+        <el-button v-if="projects.length" type="primary" :icon="Plus" @click="openCreateProject">
+          新建项目
         </el-button>
-        <el-button v-if="projects.length" :icon="Plus" @click="openCreateProject">新建项目</el-button>
       </div>
     </div>
 
-    <div class="project-strip">
+    <div class="context-strip">
       <div class="project-select">
         <span>当前项目</span>
         <el-select
@@ -623,23 +539,18 @@ function findSelectedJobWithError() {
           />
         </el-select>
       </div>
-      <div class="project-summary" v-if="selectedProject">
-        <strong>{{ selectedProject.name }}</strong>
-        <span>{{ selectedProject.description || '未填写描述' }}</span>
-      </div>
-    </div>
-
-    <div class="flow-strip">
-      <div
-        v-for="step in flowSteps"
-        :key="step.label"
-        class="flow-step"
-        :class="step.state"
-      >
-        <span class="flow-dot" />
-        <div>
-          <strong>{{ step.label }}</strong>
-          <span>{{ step.value }}</span>
+      <div class="flow-strip">
+        <div
+          v-for="step in flowSteps"
+          :key="step.label"
+          class="flow-step"
+          :class="step.state"
+        >
+          <span class="flow-dot" />
+          <div>
+            <strong>{{ step.label }}</strong>
+            <span>{{ step.value }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -870,20 +781,17 @@ function findSelectedJobWithError() {
 
       <section class="panel result-panel">
         <header class="panel-head">
-          <div>
+          <div class="result-heading">
             <span class="step-index">3</span>
             <h2>测试用例输出</h2>
-          </div>
-          <div class="result-tools">
             <el-tag type="info">{{ caseSectionCount }} 个类别</el-tag>
             <el-tag type="success">{{ totalCaseCount }} 条用例</el-tag>
-            <el-button :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
+          </div>
+          <div class="result-tools">
+            <el-button type="primary" :icon="View" :disabled="!selectedTaskId" @click="openTaskDetail">
               审核用例
             </el-button>
-            <el-button :icon="Refresh" :disabled="!selectedTaskId" :loading="casesLoading" @click="refreshCases">
-              刷新
-            </el-button>
-            <el-button type="primary" :icon="Download" :disabled="!cases.length" @click="exportCases">
+            <el-button :icon="Download" :disabled="!cases.length" @click="exportCases">
               导出 JSON
             </el-button>
           </div>
@@ -903,7 +811,7 @@ function findSelectedJobWithError() {
             </div>
           </div>
           <div class="result-source-group">
-            <span class="result-source-label">后端设计 / 知识依据</span>
+            <span class="result-source-label">知识库依据</span>
             <div class="result-source-tags">
               <template v-for="item in taskKnowledgeReferences" :key="item.id || item.name">
                 <el-link v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" :underline="false">
@@ -1047,8 +955,7 @@ function findSelectedJobWithError() {
   margin: 0 auto;
 }
 .workspace-head,
-.project-strip,
-.flow-strip,
+.context-strip,
 .panel {
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -1062,32 +969,11 @@ function findSelectedJobWithError() {
   gap: 16px;
   padding: 20px 24px;
 }
-.head-copy {
-  min-width: 0;
-}
 .workspace-head h1 {
   margin: 0;
   font-size: 24px;
   font-weight: 650;
   color: #111827;
-}
-.head-metrics {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-.head-metrics span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 600;
 }
 .head-actions,
 .result-tools,
@@ -1144,11 +1030,10 @@ function findSelectedJobWithError() {
   color: #94a3b8;
   font-size: 12px;
 }
-.project-strip {
-  display: flex;
+.context-strip {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   padding: 12px 16px;
 }
 .project-select {
@@ -1159,23 +1044,14 @@ function findSelectedJobWithError() {
   font-weight: 500;
 }
 .project-control {
-  width: 280px;
-}
-.project-summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  flex: 1;
   min-width: 0;
-  color: #64748b;
-}
-.project-summary strong {
-  color: #111827;
 }
 .flow-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  padding: 12px 16px;
+  border-left: 1px solid #eef2f7;
 }
 .flow-step {
   display: flex;
@@ -1240,9 +1116,7 @@ function findSelectedJobWithError() {
 }
 .result-panel {
   grid-area: result;
-  height: clamp(640px, calc(100vh - 240px), 920px);
   min-height: 640px;
-  overflow: auto;
 }
 .panel-head {
   display: flex;
@@ -1261,6 +1135,17 @@ function findSelectedJobWithError() {
   font-size: 17px;
   font-weight: 650;
   color: #111827;
+}
+.result-heading {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.result-heading h2 {
+  white-space: nowrap;
+}
+.result-tools {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 .step-index {
   display: inline-flex;
@@ -1529,9 +1414,7 @@ function findSelectedJobWithError() {
     grid-template-columns: 1fr;
   }
   .result-panel {
-    height: auto;
     min-height: 520px;
-    overflow: visible;
   }
   .document-panel {
     order: 1;
@@ -1542,15 +1425,20 @@ function findSelectedJobWithError() {
 }
 @media (max-width: 760px) {
   .workspace-head,
-  .project-strip,
+  .context-strip,
   .flow-strip,
-  .project-summary,
   .project-select {
     align-items: stretch;
     flex-direction: column;
   }
+  .context-strip {
+    display: flex;
+    gap: 12px;
+  }
   .flow-strip {
     display: flex;
+    border-top: 1px solid #eef2f7;
+    border-left: 0;
   }
   .flow-step {
     border-right: 0;
