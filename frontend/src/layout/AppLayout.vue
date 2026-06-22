@@ -5,7 +5,6 @@ import { Collection, DocumentChecked, FolderOpened, MagicStick, Monitor, OfficeB
 import { useTenantStore } from '../stores/tenant'
 
 const route = useRoute()
-const pageTitle = computed(() => route.meta?.title || 'CaseAgent')
 const tenantStore = useTenantStore()
 const routeViewKey = computed(() => `${tenantStore.currentSlug}:${tenantStore.version}:${route.fullPath}`)
 const activeMenu = computed(() => {
@@ -62,7 +61,6 @@ function onTenantChange(slug) {
     </el-aside>
     <el-container>
       <el-header class="layout-header">
-        <div class="header-title">{{ pageTitle }}</div>
         <div class="header-tenant">
           <span class="tenant-label">当前租户</span>
           <el-select
@@ -156,14 +154,9 @@ function onTenantChange(slug) {
   border-bottom: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 0 24px;
   gap: 16px;
-}
-.header-title {
-  font-size: 18px;
-  font-weight: 650;
-  color: #111827;
 }
 .header-tenant {
   display: flex;
