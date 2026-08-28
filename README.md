@@ -15,6 +15,27 @@
 3. 多 Agent 协同：功能、运维、故障 3 个生成 Agent 分工覆盖；功能 Agent 同时负责输入域边界，后端统一归并去重，DeepAgent 仅在全部节点无可用结果时兜底
 4. 测试用例生成：根据需求+知识库生成 JSON 格式用例
 5. 用例审核：用户审核修改后提交
+6. 运维工作台：查看运行概览、质量反馈与环境检查
+
+## 界面
+
+桌面宽度下的核心页面（本地 Demo 数据）：
+
+**生成用例工作台**
+
+![生成用例工作台](docs/screenshots/generate-workspace.png)
+
+**用例审核**
+
+![用例审核](docs/screenshots/task-review.png)
+
+**知识库**
+
+![知识库](docs/screenshots/knowledge-base.png)
+
+**运维工作台**
+
+![运维工作台](docs/screenshots/ops-workbench.png)
 
 ## 输入约定
 
